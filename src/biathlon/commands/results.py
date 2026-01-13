@@ -693,6 +693,8 @@ def handle_results(args: argparse.Namespace) -> int:
                 "r2": "range2",
                 "s1": "shoot1",
                 "s2": "shoot2",
+                "prone": "leg_prone",
+                "standing": "leg_standing",
                 "miss": "leg_miss",
             }
             sort_key = sort_map.get(sort_col)
@@ -728,6 +730,8 @@ def handle_results(args: argparse.Namespace) -> int:
                     "range2": "R2",
                     "shoot1": "S1",
                     "shoot2": "S2",
+                    "leg_prone": "Prone",
+                    "leg_standing": "Stand",
                     "leg_miss": "Miss",
                 }.get(detail_sort_key, "")
 
@@ -743,6 +747,7 @@ def handle_results(args: argparse.Namespace) -> int:
                 "Leg", "Biathlete", "LegResult", "LegBehind", "LegCourse",
                 "Lap1", "Lap2", "Lap3",
                 "R1", "R2", "S1", "S2",
+                "Prone", "Stand",
                 "Miss",
             ]
         else:
@@ -782,6 +787,8 @@ def handle_results(args: argparse.Namespace) -> int:
                             "range2": row[f"leg{leg}_range2"],
                             "shoot1": row[f"leg{leg}_shooting1"],
                             "shoot2": row[f"leg{leg}_shooting2"],
+                            "leg_prone": row[f"leg{leg}_prone"],
+                            "leg_standing": row[f"leg{leg}_standing"],
                             "leg_miss": row[f"leg{leg}_miss"],
                             "dns": row.get("dns", False),
                         }
@@ -794,7 +801,7 @@ def handle_results(args: argparse.Namespace) -> int:
                         return (1, 0) if dns_flag else (0, int(val))
                     except (TypeError, ValueError):
                         return (0, 10**9)
-                if detail_sort_key in {"leg_miss"}:
+                if detail_sort_key in {"leg_miss", "leg_prone", "leg_standing"}:
                     shooting = parse_relay_shooting(val) if val not in ("", None, "-") else None
                     if shooting:
                         return (1, 0, 0) if dns_flag else (0, shooting[0], shooting[1])
@@ -834,6 +841,8 @@ def handle_results(args: argparse.Namespace) -> int:
                         entry["range2"],
                         entry["shoot1"],
                         entry["shoot2"],
+                        entry["leg_prone"],
+                        entry["leg_standing"],
                         entry["leg_miss"],
                     ]
                 )
