@@ -259,6 +259,10 @@ def _collect_races(
         return ([], season_id)
 
     disc_set, cat_filter, allow_relay = _discipline_filter(discipline_value)
+    if getattr(args, "include_relay", False):
+        allow_relay = True
+        disc_set = set(disc_set)
+        disc_set.add(RELAY_DISCIPLINE)
 
     payloads: list[tuple[str, dict]] = []
     for race in sorted(races, key=get_race_start_key):
@@ -308,6 +312,52 @@ def _race_results(payload: dict) -> list[dict]:
     return extract_results(payload)
 
 
+def _relay_leg_results(payload: dict) -> list[dict]:
+    """Return non-team relay leg results from a payload."""
+    return [r for r in (payload.get("Results") or []) if not r.get("IsTeam")]
+
+
+def _fetch_leg_lap_times(
+    race_id: str,
+    lap_prefix: str,
+    lap_suffix: str,
+    laps: int,
+    laps_per_leg: int,
+) -> dict[tuple[str, int], dict[str, str]]:
+    """Fetch analytic lap times keyed by (Bib/IBUId/Name, Leg) -> {lapN: time_str}."""
+    times: dict[tuple[str, int], dict[str, str]] = {}
+    for idx in range(1, laps + 1):
+        type_id = f"{lap_prefix}{idx}{lap_suffix}"
+        try:
+            analytic = get_analytic_results(race_id, type_id)
+        except BiathlonError:
+            continue
+        for res in analytic.get("Results", []):
+            if res.get("IsTeam"):
+                continue
+            bib = str(res.get("Bib") or "")
+            ibu_id = str(res.get("IBUId") or "")
+            name = str(res.get("Name") or "")
+            leg = res.get("Leg")
+            if leg is None:
+                leg_idx = (idx - 1) // laps_per_leg + 1
+                local_idx = (idx - 1) % laps_per_leg + 1
+            else:
+                leg_idx = int(leg)
+                local_idx = idx - (leg_idx - 1) * laps_per_leg
+                if local_idx < 1 or local_idx > laps_per_leg:
+                    local_idx = (idx - 1) % laps_per_leg + 1
+            time_str = get_first_time(res, ["TotalTime", "Result"])
+            if time_str:
+                if bib:
+                    times.setdefault((bib, leg_idx), {})[f"lap{local_idx}"] = time_str
+                if ibu_id:
+                    times.setdefault((ibu_id, leg_idx), {})[f"lap{local_idx}"] = time_str
+                if name:
+                    times.setdefault((name, leg_idx), {})[f"lap{local_idx}"] = time_str
+    return times
+
+
 def handle_cumulate_results(args: argparse.Namespace) -> int:
     """Cumulate total result times."""
     try:
@@ -322,15 +372,32 @@ def handle_cumulate_results(args: argparse.Namespace) -> int:
     entries: dict[str, dict] = {}
     total_races = 0
     for race_id, payload in payloads:
-        results = _race_results(payload)
+        include_relay = bool(getattr(args, "include_relay", False))
+        is_relay = _is_relay(payload)
+        if is_relay and include_relay:
+            results = _relay_leg_results(payload)
+        else:
+            results = _race_results(payload)
         if not results:
             continue
-        base_secs = base_time_seconds(results) if not _is_relay(payload) else None
+        base_secs = base_time_seconds(results) if not is_relay else None
         cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
-        if not _is_relay(payload):
+        if not is_relay:
             results = _apply_top_filter(results, args.top, cat_id, season_id)
         if not results:
             continue
+        leg_cumulative: dict[tuple[str, int], float] = {}
+        if is_relay and include_relay:
+            for res in results:
+                bib = str(res.get("Bib") or "")
+                leg = res.get("Leg")
+                if not bib or not isinstance(leg, int):
+                    continue
+                cum_val = get_first_time(res, ["LegResult", "LegTime", "LegTimeTotal", "TotalTime", "Result"])
+                cum_secs = parse_time_seconds(cum_val) if cum_val else None
+                if cum_secs is None:
+                    continue
+                leg_cumulative[(bib, leg)] = cum_secs
         race_has_data = False
         for res in results:
             ident = res.get("IBUId") or res.get("Name") or res.get("ShortName") or ""
@@ -338,8 +405,17 @@ def handle_cumulate_results(args: argparse.Namespace) -> int:
                 continue
             name = res.get("Name") or res.get("ShortName") or ""
             nat = res.get("Nat") or ""
-            if _is_relay(payload):
-                secs = parse_time_seconds(get_first_time(res, ["TotalTime", "Result"]))
+            if is_relay:
+                cum_val = get_first_time(res, ["LegResult", "LegTime", "LegTimeTotal", "TotalTime", "Result"])
+                cum_secs = parse_time_seconds(cum_val) if cum_val else None
+                if include_relay and cum_secs is not None:
+                    bib = str(res.get("Bib") or "")
+                    leg = res.get("Leg")
+                    if bib and isinstance(leg, int) and leg > 1:
+                        prev = leg_cumulative.get((bib, leg - 1))
+                        if prev is not None:
+                            cum_secs = cum_secs - prev
+                secs = cum_secs
             else:
                 secs = result_seconds(res, base_secs)
                 if secs is None:
@@ -534,16 +610,21 @@ def handle_cumulate_course(args: argparse.Namespace) -> int:
     entries: dict[str, dict] = {}
     total_races = 0
     for race_id, payload in payloads:
-        results = _race_results(payload)
+        include_relay = bool(getattr(args, "include_relay", False))
+        is_relay = _is_relay(payload)
+        if is_relay and include_relay:
+            results = _relay_leg_results(payload)
+        else:
+            results = _race_results(payload)
         if not results:
             continue
         cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
-        if not _is_relay(payload):
+        if not is_relay:
             results = _apply_top_filter(results, args.top, cat_id, season_id)
         if not results:
             continue
-        total_races += 1
-        course_times = _fetch_analytic_map(race_id, "CRST") if not _is_relay(payload) else {}
+        race_has_data = False
+        course_times = _fetch_analytic_map(race_id, "CRST") if not is_relay else {}
         for res in results:
             ident = res.get("IBUId") or res.get("Name") or res.get("ShortName") or ""
             if not ident:
@@ -551,7 +632,15 @@ def handle_cumulate_course(args: argparse.Namespace) -> int:
             name = res.get("Name") or res.get("ShortName") or ""
             nat = res.get("Nat") or ""
             course_val = _lookup_analytic_time(course_times, res) or get_first_time(
-                res, ["TotalCourseTime", "CourseTime", "RunTime"]
+                res,
+                [
+                    "LegCourse",
+                    "LegRunTime",
+                    "LegSkiTime",
+                    "TotalCourseTime",
+                    "CourseTime",
+                    "RunTime",
+                ],
             )
             secs = parse_time_seconds(course_val) if course_val else None
             if secs is None:
@@ -559,6 +648,9 @@ def handle_cumulate_course(args: argparse.Namespace) -> int:
             entry = _aggregate_entries(entries, str(ident), name, nat)
             entry["races"] += 1
             entry["total_secs"] += secs
+            race_has_data = True
+        if race_has_data:
+            total_races += 1
     rows = []
     for entry in entries.values():
         if entry["races"] != total_races:
@@ -597,33 +689,69 @@ def _cumulate_range_or_shooting(args: argparse.Namespace, kind: str) -> int:
     total_races = 0
     type_id = "RNGT" if kind == "range" else "STTM"
     time_label = "Range" if kind == "range" else "Shooting"
+    relay_stage_keys = ("R1", "R2") if kind == "range" else ("S1", "S2")
     for race_id, payload in payloads:
-        results = _race_results(payload)
+        include_relay = bool(getattr(args, "include_relay", False))
+        is_relay = _is_relay(payload)
+        relay_laps = {}
+        if is_relay and include_relay:
+            if kind == "range":
+                relay_laps = _fetch_leg_lap_times(race_id, "RNG", "", 8, 2)
+            else:
+                relay_laps = _fetch_leg_lap_times(race_id, "S", "TM", 8, 2)
+        if is_relay and include_relay:
+            results = _relay_leg_results(payload)
+        else:
+            results = _race_results(payload)
         if not results:
             continue
         cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
-        if not _is_relay(payload):
+        if not is_relay:
             results = _apply_top_filter(results, args.top, cat_id, season_id)
         if not results:
             continue
-        total_races += 1
-        times = _fetch_analytic_map(race_id, type_id) if not _is_relay(payload) else {}
+        race_has_data = False
+        times = _fetch_analytic_map(race_id, type_id) if not is_relay else {}
         for res in results:
             ident = res.get("IBUId") or res.get("Name") or res.get("ShortName") or ""
             if not ident:
                 continue
             name = res.get("Name") or res.get("ShortName") or ""
             nat = res.get("Nat") or ""
-            time_val = _lookup_analytic_time(times, res) or get_first_time(
-                res, ["TotalRangeTime", "RangeTime"] if kind == "range" else ["TotalShootingTime", "ShootingTime"]
-            )
-            secs = parse_time_seconds(time_val) if time_val else None
+            if is_relay:
+                leg = res.get("Leg")
+                lap_times = {}
+                if isinstance(leg, int):
+                    for key in (res.get("Bib"), res.get("IBUId"), res.get("Name"), res.get("ShortName")):
+                        if key is None:
+                            continue
+                        lap_times = relay_laps.get((str(key), leg), {})
+                        if lap_times:
+                            break
+                stage_secs: list[float] = []
+                for idx, key in enumerate(relay_stage_keys, start=1):
+                    raw = lap_times.get(f"lap{idx}") or get_first_time(res, [key])
+                    if raw:
+                        val = parse_time_seconds(raw)
+                        if val is not None:
+                            stage_secs.append(val)
+                secs = sum(stage_secs) if stage_secs else None
+            else:
+                if kind == "range":
+                    time_val = _lookup_analytic_time(times, res) or get_first_time(
+                        res, ["TotalRangeTime", "RangeTime"]
+                    )
+                else:
+                    time_val = _lookup_analytic_time(times, res) or get_first_time(
+                        res, ["TotalShootingTime", "ShootingTime"]
+                    )
+                secs = parse_time_seconds(time_val) if time_val else None
             if secs is None:
                 continue
             entry = _aggregate_entries(entries, str(ident), name, nat)
             entry["races"] += 1
             entry["total_secs"] += secs
-            if not _is_relay(payload):
+            if not is_relay or include_relay:
                 miss_prone, miss_stand, shot_prone, shot_stand, shots_total = _stage_counts(
                     res.get("Shootings") or res.get("ShootingTotal")
                 )
@@ -634,6 +762,9 @@ def _cumulate_range_or_shooting(args: argparse.Namespace, kind: str) -> int:
                     entry["miss_standing"] += miss_stand
                     entry["shot_prone"] += shot_prone
                     entry["shot_standing"] += shot_stand
+            race_has_data = True
+        if race_has_data:
+            total_races += 1
 
     rows = []
     for entry in entries.values():

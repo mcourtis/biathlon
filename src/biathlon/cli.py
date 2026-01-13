@@ -234,6 +234,11 @@ def add_cumulate_args(subparser: argparse.ArgumentParser, allow_discipline_event
         help="Season id (default: current season)",
     )
     subparser.add_argument(
+        "--include-relay",
+        action="store_true",
+        help="Include relay races in cumulate calculations",
+    )
+    subparser.add_argument(
         "--top",
        
         type=int,
