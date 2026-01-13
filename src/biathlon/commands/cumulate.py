@@ -359,6 +359,31 @@ def _fetch_leg_lap_times(
     return times
 
 
+def _fetch_leg_total_times(race_id: str, type_id: str) -> dict[tuple[str, int], float]:
+    """Fetch analytic total times keyed by (Bib/IBUId/Name, Leg) -> seconds."""
+    times: dict[tuple[str, int], float] = {}
+    try:
+        analytic = get_analytic_results(race_id, type_id)
+    except BiathlonError:
+        return times
+    for res in analytic.get("Results", []):
+        if res.get("IsTeam"):
+            continue
+        leg = res.get("Leg")
+        if not isinstance(leg, int):
+            continue
+        time_str = get_first_time(res, ["TotalTime", "Result"])
+        if not time_str:
+            continue
+        seconds = parse_time_seconds(time_str)
+        if seconds is None:
+            continue
+        for key in (res.get("Bib"), res.get("IBUId"), res.get("Name")):
+            if key:
+                times[(str(key), leg)] = seconds
+    return times
+
+
 def handle_cumulate_results(args: argparse.Namespace) -> int:
     """Cumulate total result times."""
     try:
@@ -400,6 +425,19 @@ def handle_cumulate_results(args: argparse.Namespace) -> int:
                     continue
                 leg_cumulative[(bib, leg)] = cum_secs
         race_has_data = False
+        leg_cumulative: dict[tuple[str, int], float] = {}
+        if is_relay:
+            for res in results:
+                bib = str(res.get("Bib") or "")
+                leg = res.get("Leg")
+                if not bib or not isinstance(leg, int):
+                    continue
+                cum_val = get_first_time(res, ["LegResult", "LegTime", "LegTimeTotal", "TotalTime", "Result"])
+                cum_secs = parse_time_seconds(cum_val) if cum_val else None
+                if cum_secs is None:
+                    continue
+                leg_cumulative[(bib, leg)] = cum_secs
+
         for res in results:
             ident = res.get("IBUId") or res.get("Name") or res.get("ShortName") or ""
             if not ident:
@@ -938,17 +976,39 @@ def handle_cumulate_penalty(args: argparse.Namespace) -> int:
     entries: dict[str, dict] = {}
     total_races = 0
     for race_id, payload in payloads:
-        results = _race_results(payload)
+        include_relay = bool(getattr(args, "include_relay", False))
+        is_relay = _is_relay(payload)
+        if is_relay and not include_relay:
+            continue
+        if is_relay and include_relay:
+            results = _relay_leg_results(payload)
+        else:
+            results = _race_results(payload)
         if not results:
             continue
-        base_secs = base_time_seconds(results)
+        base_secs = base_time_seconds(results) if not is_relay else None
         cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
-        if not _is_relay(payload):
+        if not is_relay:
             results = _apply_top_filter(results, args.top, cat_id, season_id)
         if not results:
             continue
-        course_times = _fetch_analytic_map(race_id, "CRST") if not _is_relay(payload) else {}
-        range_times = _fetch_analytic_map(race_id, "RNGT") if not _is_relay(payload) else {}
+        course_times = _fetch_analytic_map(race_id, "CRST") if not is_relay else {}
+        range_times = _fetch_analytic_map(race_id, "RNGT") if not is_relay else {}
+        range_laps = _fetch_leg_lap_times(race_id, "RNG", "", 8, 2) if is_relay else {}
+        course_leg_times = _fetch_leg_total_times(race_id, "CRST") if is_relay else {}
+        leg_cumulative: dict[tuple[str, int], float] = {}
+        if is_relay:
+            for res in results:
+                leg = res.get("Leg")
+                if not isinstance(leg, int):
+                    continue
+                cum_val = get_first_time(res, ["LegResult", "LegTime", "LegTimeTotal", "TotalTime", "Result"])
+                cum_secs = parse_time_seconds(cum_val) if cum_val else None
+                if cum_secs is None:
+                    continue
+                for key in (res.get("Bib"), res.get("IBUId"), res.get("Name"), res.get("ShortName")):
+                    if key:
+                        leg_cumulative[(str(key), leg)] = cum_secs
         race_has_data = False
         for res in results:
             ident = res.get("IBUId") or res.get("Name") or res.get("ShortName") or ""
@@ -957,16 +1017,89 @@ def handle_cumulate_penalty(args: argparse.Namespace) -> int:
             name = res.get("Name") or res.get("ShortName") or ""
             nat = res.get("Nat") or ""
             discipline = str((payload.get("Competition") or {}).get("DisciplineId") or "").upper()
-            if discipline == "IN":
-                misses = _parse_shootings(res.get("ShootingTotal"))
-                secs = float(sum(misses) * 60) if misses else None
-            elif discipline == "PU":
-                result_val = result_seconds(res, base_secs)
-                delay = parse_time_seconds(res.get("StartInfo")) if res.get("StartInfo") else None
-                if result_val is None or delay is None:
-                    secs = None
+            if is_relay:
+                leg_time = None
+                leg_raw = res.get("Leg")
+                leg = None
+                if isinstance(leg_raw, int):
+                    leg = leg_raw
                 else:
-                    base_val = result_val - delay
+                    try:
+                        leg = int(str(leg_raw)) if leg_raw is not None else None
+                    except ValueError:
+                        leg = None
+                if isinstance(leg, int):
+                    for key in (res.get("Bib"), res.get("IBUId"), res.get("Name"), res.get("ShortName")):
+                        if key is None:
+                            continue
+                        curr = leg_cumulative.get((str(key), leg))
+                        if curr is None:
+                            continue
+                        if leg > 1:
+                            prev = leg_cumulative.get((str(key), leg - 1))
+                            if prev is not None:
+                                leg_time = curr - prev
+                                break
+                        else:
+                            leg_time = curr
+                            break
+                if leg_time is None:
+                    leg_time = parse_time_seconds(get_first_time(res, ["LegTime", "LegResult", "TotalTime", "Result"]))
+                course_val = None
+                if isinstance(leg, int):
+                    for key in (res.get("Bib"), res.get("IBUId"), res.get("Name"), res.get("ShortName")):
+                        if key is None:
+                            continue
+                        course_val = course_leg_times.get((str(key), leg))
+                        if course_val is not None:
+                            break
+                if course_val is None:
+                    course_val = parse_time_seconds(get_first_time(res, ["LegCourse", "LegRunTime", "LegSkiTime"]))
+                range_val = None
+                if isinstance(leg, int):
+                    for key in (res.get("Bib"), res.get("IBUId"), res.get("Name"), res.get("ShortName")):
+                        if key is None:
+                            continue
+                        laps = range_laps.get((str(key), leg))
+                        if laps:
+                            r1 = parse_time_seconds(laps.get("lap1"))
+                            r2 = parse_time_seconds(laps.get("lap2"))
+                            if r1 is not None and r2 is not None:
+                                range_val = r1 + r2
+                                break
+                if range_val is None:
+                    r1 = parse_time_seconds(get_first_time(res, ["R1", "Range1"]))
+                    r2 = parse_time_seconds(get_first_time(res, ["R2", "Range2"]))
+                    if r1 is not None and r2 is not None:
+                        range_val = r1 + r2
+                secs = None
+                if leg_time is not None and course_val is not None and range_val is not None:
+                    secs = leg_time - course_val - range_val
+            else:
+                if discipline == "IN":
+                    misses = _parse_shootings(res.get("ShootingTotal"))
+                    secs = float(sum(misses) * 60) if misses else None
+                elif discipline == "PU":
+                    result_val = result_seconds(res, base_secs)
+                    delay = parse_time_seconds(res.get("StartInfo")) if res.get("StartInfo") else None
+                    if result_val is None or delay is None:
+                        secs = None
+                    else:
+                        base_val = result_val - delay
+                        course_val = parse_time_seconds(
+                            _lookup_analytic_time(course_times, res)
+                            or get_first_time(res, ["TotalCourseTime", "CourseTime", "RunTime"])
+                        )
+                        range_val = parse_time_seconds(
+                            _lookup_analytic_time(range_times, res)
+                            or get_first_time(res, ["TotalRangeTime", "RangeTime"])
+                        )
+                        if course_val is None or range_val is None:
+                            secs = None
+                        else:
+                            secs = base_val - course_val - range_val
+                else:
+                    result_val = result_seconds(res, base_secs)
                     course_val = parse_time_seconds(
                         _lookup_analytic_time(course_times, res)
                         or get_first_time(res, ["TotalCourseTime", "CourseTime", "RunTime"])
@@ -975,24 +1108,10 @@ def handle_cumulate_penalty(args: argparse.Namespace) -> int:
                         _lookup_analytic_time(range_times, res)
                         or get_first_time(res, ["TotalRangeTime", "RangeTime"])
                     )
-                    if course_val is None or range_val is None:
+                    if result_val is None or course_val is None or range_val is None:
                         secs = None
                     else:
-                        secs = base_val - course_val - range_val
-            else:
-                result_val = result_seconds(res, base_secs)
-                course_val = parse_time_seconds(
-                    _lookup_analytic_time(course_times, res)
-                    or get_first_time(res, ["TotalCourseTime", "CourseTime", "RunTime"])
-                )
-                range_val = parse_time_seconds(
-                    _lookup_analytic_time(range_times, res)
-                    or get_first_time(res, ["TotalRangeTime", "RangeTime"])
-                )
-                if result_val is None or course_val is None or range_val is None:
-                    secs = None
-                else:
-                    secs = result_val - course_val - range_val
+                        secs = result_val - course_val - range_val
             if secs is None or secs < 0:
                 continue
             entry = _aggregate_entries(entries, str(ident), name, nat)
