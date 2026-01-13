@@ -664,24 +664,37 @@ def handle_cumulate_course(args: argparse.Namespace) -> int:
             continue
         race_has_data = False
         course_times = _fetch_analytic_map(race_id, "CRST") if not is_relay else {}
+        relay_course_times = _fetch_leg_total_times(race_id, "CRST") if is_relay else {}
         for res in results:
             ident = res.get("IBUId") or res.get("Name") or res.get("ShortName") or ""
             if not ident:
                 continue
             name = res.get("Name") or res.get("ShortName") or ""
             nat = res.get("Nat") or ""
-            course_val = _lookup_analytic_time(course_times, res) or get_first_time(
-                res,
-                [
-                    "LegCourse",
-                    "LegRunTime",
-                    "LegSkiTime",
-                    "TotalCourseTime",
-                    "CourseTime",
-                    "RunTime",
-                ],
-            )
-            secs = parse_time_seconds(course_val) if course_val else None
+            if is_relay:
+                leg = res.get("Leg")
+                course_secs = None
+                if isinstance(leg, int):
+                    for key in (res.get("Bib"), res.get("IBUId"), res.get("Name"), res.get("ShortName")):
+                        if key is None:
+                            continue
+                        course_secs = relay_course_times.get((str(key), leg))
+                        if course_secs is not None:
+                            break
+                if course_secs is None:
+                    course_val = get_first_time(res, ["LegCourse", "LegRunTime", "LegSkiTime"])
+                    course_secs = parse_time_seconds(course_val) if course_val else None
+                secs = course_secs
+            else:
+                course_val = _lookup_analytic_time(course_times, res) or get_first_time(
+                    res,
+                    [
+                        "TotalCourseTime",
+                        "CourseTime",
+                        "RunTime",
+                    ],
+                )
+                secs = parse_time_seconds(course_val) if course_val else None
             if secs is None:
                 continue
             entry = _aggregate_entries(entries, str(ident), name, nat)
