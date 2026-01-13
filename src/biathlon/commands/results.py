@@ -696,6 +696,7 @@ def handle_results(args: argparse.Namespace) -> int:
                 "prone": "leg_prone",
                 "standing": "leg_standing",
                 "miss": "leg_miss",
+                "legpenalty": "leg_penalty",
             }
             sort_key = sort_map.get(sort_col)
             detail_sort_key = detail_sort_map.get(sort_col, "")
@@ -733,6 +734,7 @@ def handle_results(args: argparse.Namespace) -> int:
                     "leg_prone": "Prone",
                     "leg_standing": "Stand",
                     "leg_miss": "Miss",
+                    "leg_penalty": "LegPenalty",
                 }.get(detail_sort_key, "")
 
         limit_n = getattr(args, "limit", 25)
@@ -748,7 +750,7 @@ def handle_results(args: argparse.Namespace) -> int:
                 "Lap1", "Lap2", "Lap3",
                 "R1", "R2", "S1", "S2",
                 "Prone", "Stand",
-                "Miss",
+                "Miss", "LegPenalty",
             ]
         else:
             headers = [
@@ -790,6 +792,7 @@ def handle_results(args: argparse.Namespace) -> int:
                             "leg_prone": row[f"leg{leg}_prone"],
                             "leg_standing": row[f"leg{leg}_standing"],
                             "leg_miss": row[f"leg{leg}_miss"],
+                            "leg_time": row[f"leg{leg}_time"],
                             "dns": row.get("dns", False),
                         }
                     )
@@ -806,7 +809,7 @@ def handle_results(args: argparse.Namespace) -> int:
                     if shooting:
                         return (1, 0, 0) if dns_flag else (0, shooting[0], shooting[1])
                     return (0, 9999, 9999)
-                if detail_sort_key in {"leg_result", "leg_behind", "leg_time", "leg_course", "lap1", "lap2", "lap3", "range1", "range2", "shoot1", "shoot2"}:
+                if detail_sort_key in {"leg_result", "leg_behind", "leg_time", "leg_course", "lap1", "lap2", "lap3", "range1", "range2", "shoot1", "shoot2", "leg_penalty"}:
                     sec = parse_time_seconds(str(val)) if val not in ("", None, "-") else None
                     if sec is None:
                         return (1, float("inf"))
@@ -816,6 +819,17 @@ def handle_results(args: argparse.Namespace) -> int:
 
             if detail_sort_key:
                 detail_rows = sorted(detail_rows, key=detail_sort)
+
+            for entry in detail_rows:
+                leg_time_secs = parse_time_seconds(entry.get("leg_time"))
+                leg_course_secs = parse_time_seconds(entry.get("leg_course"))
+                range1_secs = parse_time_seconds(entry.get("range1"))
+                range2_secs = parse_time_seconds(entry.get("range2"))
+                if None in (leg_time_secs, leg_course_secs, range1_secs, range2_secs):
+                    entry["leg_penalty"] = "-"
+                else:
+                    penalty_secs = leg_time_secs - leg_course_secs - range1_secs - range2_secs
+                    entry["leg_penalty"] = format_seconds(penalty_secs) if penalty_secs >= 0 else "-"
 
             for idx, entry in enumerate(detail_rows, start=1):
                 render_rows.append(
@@ -844,6 +858,7 @@ def handle_results(args: argparse.Namespace) -> int:
                         entry["leg_prone"],
                         entry["leg_standing"],
                         entry["leg_miss"],
+                        entry["leg_penalty"],
                     ]
                 )
                 if show_sort_rank:
