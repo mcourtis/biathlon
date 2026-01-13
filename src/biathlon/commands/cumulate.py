@@ -29,6 +29,7 @@ from ..utils import (
     get_first_time,
     get_race_start_key,
     is_dns,
+    parse_relay_shootings,
     parse_relay_shooting,
     parse_time_seconds,
     result_seconds,
@@ -823,16 +824,23 @@ def handle_cumulate_miss(args: argparse.Namespace) -> int:
         return 1
     entries: dict[str, dict] = {}
     total_races = 0
-    for _, payload in payloads:
-        results = _race_results(payload)
+    for race_id, payload in payloads:
+        include_relay = bool(getattr(args, "include_relay", False))
+        is_relay = _is_relay(payload)
+        if is_relay and not include_relay:
+            continue
+        if is_relay and include_relay:
+            results = _relay_leg_results(payload)
+        else:
+            results = _race_results(payload)
         if not results:
             continue
         cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
-        if not _is_relay(payload):
+        if not is_relay:
             results = _apply_top_filter(results, args.top, cat_id, season_id)
         if not results:
             continue
-        total_races += 1
+        race_has_data = False
         for res in results:
             ident = res.get("IBUId") or res.get("Name") or res.get("ShortName") or ""
             if not ident:
@@ -840,13 +848,24 @@ def handle_cumulate_miss(args: argparse.Namespace) -> int:
             name = res.get("Name") or res.get("ShortName") or ""
             nat = res.get("Nat") or ""
             entry = _aggregate_entries(entries, str(ident), name, nat)
-            if _is_relay(payload):
-                shooting = parse_relay_shooting(res.get("ShootingTotal"))
-                if not shooting:
+            if is_relay:
+                shootings = res.get("Shootings") or res.get("ShootingTotal")
+                stages = parse_relay_shootings(shootings) if shootings else None
+                if not stages:
                     continue
+                prone, standing = stages
+                prone_pen, prone_spare = prone
+                stand_pen, stand_spare = standing
+                prone_misses = prone_pen + prone_spare
+                stand_misses = stand_pen + stand_spare
                 entry["races"] += 1
-                entry["relay_pen"] += shooting[0]
-                entry["relay_spare"] += shooting[1]
+                entry["miss_prone"] += prone_misses
+                entry["miss_standing"] += stand_misses
+                entry["misses"] += prone_misses + stand_misses
+                entry["shot_prone"] += 5 + prone_spare
+                entry["shot_standing"] += 5 + stand_spare
+                entry["shots"] += 10 + prone_spare + stand_spare
+                race_has_data = True
             else:
                 miss_prone, miss_stand, shot_prone, shot_stand, shots_total = _stage_counts(
                     res.get("Shootings") or res.get("ShootingTotal")
@@ -860,6 +879,9 @@ def handle_cumulate_miss(args: argparse.Namespace) -> int:
                 entry["shot_prone"] += shot_prone
                 entry["shot_standing"] += shot_stand
                 entry["shots"] += shots_total
+                race_has_data = True
+        if race_has_data:
+            total_races += 1
 
     rows = []
     for entry in entries.values():
@@ -868,35 +890,19 @@ def handle_cumulate_miss(args: argparse.Namespace) -> int:
             continue
         if entry["races"] != total_races:
             continue
-        if entry["shots"] == 0 and (entry["relay_pen"] or entry["relay_spare"]):
-            total_miss = f"{entry['relay_pen']}+{entry['relay_spare']}"
-            row = [
-                0,
-                entry["name"],
-                entry["nat"],
-                entry["races"],
-                total_miss,
-                "-",
-                "-",
-                "-",
-                "-",
-                "-",
-            ]
-            rank_val = entry["relay_pen"] * 1000 + entry["relay_spare"]
-        else:
-            row = [
-                0,
-                entry["name"],
-                entry["nat"],
-                entry["races"],
-                entry["misses"],
-                entry["miss_prone"],
-                entry["miss_standing"],
-                acc,
-                prone_pct,
-                standing_pct,
-            ]
-            rank_val = entry["misses"]
+        row = [
+            0,
+            entry["name"],
+            entry["nat"],
+            entry["races"],
+            entry["misses"],
+            entry["miss_prone"],
+            entry["miss_standing"],
+            acc,
+            prone_pct,
+            standing_pct,
+        ]
+        rank_val = entry["misses"]
         rows.append({"rank_val": rank_val, "row": row})
     rows.sort(key=lambda r: (r["rank_val"], r["row"][1]))
     for idx, row in enumerate(rows, start=1):
