@@ -218,12 +218,15 @@ def add_cumulate_args(subparser: argparse.ArgumentParser, allow_discipline_event
             metavar="DISCIPLINE",
             help="Race discipline (default: all)",
         )
-        subparser.add_argument(
-            "--event",
-           
-            default="",
-            help="Event id (overrides --discipline and --season)",
-        )
+        event_help = "Event id (overrides --discipline and --season)"
+    else:
+        event_help = "Event id (only supported for cumulate results)"
+    subparser.add_argument(
+        "--event",
+       
+        default="",
+        help=event_help,
+    )
     subparser.add_argument(
         "--season",
        

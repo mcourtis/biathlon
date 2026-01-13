@@ -331,7 +331,7 @@ def handle_cumulate_results(args: argparse.Namespace) -> int:
             results = _apply_top_filter(results, args.top, cat_id, season_id)
         if not results:
             continue
-        total_races += 1
+        race_has_data = False
         for res in results:
             ident = res.get("IBUId") or res.get("Name") or res.get("ShortName") or ""
             if not ident:
@@ -342,11 +342,20 @@ def handle_cumulate_results(args: argparse.Namespace) -> int:
                 secs = parse_time_seconds(get_first_time(res, ["TotalTime", "Result"]))
             else:
                 secs = result_seconds(res, base_secs)
+                if secs is None:
+                    secs = parse_time_seconds(get_first_time(res, ["TotalTime", "Result"]))
             if secs is None:
                 continue
             entry = _aggregate_entries(entries, str(ident), name, nat)
             entry["races"] += 1
             entry["total_secs"] += secs
+            race_has_data = True
+        if race_has_data:
+            total_races += 1
+
+    if not entries:
+        print("no result times found for the requested scope", file=sys.stderr)
+        return 1
 
     rows = []
     for entry in entries.values():
