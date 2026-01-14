@@ -34,6 +34,7 @@ from .commands import (
     handle_cumulate_penalty,
     handle_cumulate_remontada,
     handle_events,
+    handle_post_race,
     handle_record_lap,
     handle_results,
     handle_scores,
@@ -99,7 +100,7 @@ _biathlon_completion() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="seasons events results cumulate record standings ceremony biathlete shooting startlist"
+    commands="seasons events results cumulate record standings ceremony biathlete shooting startlist post-race"
 
     case "${COMP_WORDS[1]}" in
         cumulate)
@@ -144,6 +145,7 @@ _biathlon() {
         'biathlete:Biathlete information'
         'shooting:Shooting accuracy'
         'startlist:Startlist analysis'
+        'post-race:Post-race analysis'
     )
 
     _arguments -C \\
@@ -476,13 +478,6 @@ def build_parser() -> argparse.ArgumentParser:
     add_output_flag(shooting_parser)
     shooting_parser.set_defaults(func=handle_shooting)
 
-    # --- startlist ---
-    startlist_parser = subparsers.add_parser("startlist", help="Analyze race startlists", formatter_class=CompactOptionalFormatter, add_help=False)
-    startlist_parser.add_argument("--race", default="", help="Race id (default: latest WC startlist)")
-    startlist_parser.add_argument("--major", action="store_true", help="Use WC+WCH+OWG milestones")
-    add_output_flag(startlist_parser)
-    startlist_parser.set_defaults(func=handle_startlist)
-
     # --- biathlete ---
     biathlete_parser = subparsers.add_parser("biathlete", help="Show biathlete information", formatter_class=CompactOptionalFormatter, add_help=False)
     biathlete_parser.add_argument("--id", default="", help="Athlete IBU id (comma-separated)")
@@ -539,6 +534,30 @@ def build_parser() -> argparse.ArgumentParser:
     record_lap.add_argument("--men", action="store_true", help="Show men")
     add_output_flag(record_lap)
     record_lap.set_defaults(func=handle_record_lap)
+
+    # --- startlist ---
+    startlist_parser = subparsers.add_parser(
+        "startlist",
+        help="Analyze race startlists (beta)",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
+    startlist_parser.add_argument("--race", default="", help="Race id (default: latest WC startlist)")
+    startlist_parser.add_argument("--major", action="store_true", help="Use WC+WCH+OWG milestones")
+    add_output_flag(startlist_parser)
+    startlist_parser.set_defaults(func=handle_startlist)
+
+    # --- post-race ---
+    post_race_parser = subparsers.add_parser(
+        "post-race",
+        help="Post-race analysis (beta)",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
+    post_race_parser.add_argument("--race", default="", help="Race id (default: latest completed race)")
+    post_race_parser.add_argument("--major", action="store_true", help="Use WC+WCH+OWG milestones")
+    add_output_flag(post_race_parser)
+    post_race_parser.set_defaults(func=handle_post_race)
 
     return parser
 

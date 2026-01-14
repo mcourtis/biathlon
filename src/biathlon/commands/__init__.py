@@ -21,6 +21,7 @@ from .athlete import handle_athlete_results, handle_athlete_results_scan, handle
 from .shooting import handle_shooting
 from .relay import handle_relay
 from .startlist import handle_startlist
+from .post_race import handle_post_race
 
 __all__ = [
     "handle_seasons",
@@ -45,4 +46,5 @@ __all__ = [
     "handle_shooting",
     "handle_relay",
     "handle_startlist",
+    "handle_post_race",
 ]

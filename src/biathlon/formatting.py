@@ -168,12 +168,39 @@ def render_table(
         for idx in range(len(headers))
     ]
 
+    def apply_row_style(text: str, style: str) -> str:
+        if style == "dim":
+            return Color.dim(text)
+        if style == "highlight":
+            return Color.highlight(text)
+        if style == "gold":
+            return Color.gold(text)
+        if style == "silver":
+            return Color.silver(text)
+        if style == "bronze":
+            return Color.bronze(text)
+        if style == "flowers":
+            return Color.flowers(text)
+        if style == "other":
+            return Color.other(text)
+        return text
+
     def fmt_row(row: list[str], row_idx: int) -> str:
+        style = ""
+        if row_styles and row_idx < len(row_styles):
+            style = row_styles[row_idx]
         parts = []
         for col_idx, cell in enumerate(row):
             cell_str = str(cell).ljust(widths[col_idx])
-            if cell_formatters and col_idx < len(cell_formatters) and cell_formatters[col_idx]:
+            has_formatter = (
+                cell_formatters
+                and col_idx < len(cell_formatters)
+                and cell_formatters[col_idx]
+            )
+            if has_formatter:
                 cell_str = cell_formatters[col_idx](cell_str, row_idx)
+            elif style:
+                cell_str = apply_row_style(cell_str, style)
             parts.append(cell_str)
         return "  ".join(parts)
 
@@ -191,24 +218,7 @@ def render_table(
 
     print("  ".join(fmt_header(i, h) for i, h in enumerate(headers)))
     for idx, row in enumerate(rows):
-        line = fmt_row(row, idx)
-        if row_styles and idx < len(row_styles):
-            style = row_styles[idx]
-            if style == "dim":
-                line = Color.dim(line)
-            elif style == "highlight":
-                line = Color.highlight(line)
-            elif style == "gold":
-                line = Color.gold(line)
-            elif style == "silver":
-                line = Color.silver(line)
-            elif style == "bronze":
-                line = Color.bronze(line)
-            elif style == "flowers":
-                line = Color.flowers(line)
-            elif style == "other":
-                line = Color.other(line)
-        print(line)
+        print(fmt_row(row, idx))
 
 
 def format_seconds(seconds: float | None) -> str:

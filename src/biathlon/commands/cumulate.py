@@ -199,6 +199,46 @@ def _apply_limit(rows: list[dict], limit: int) -> list[dict]:
     return rows
 
 
+def _build_accuracy_cell_formatters(headers: list[str], render_rows: list[list[str]]) -> list | None:
+    """Return cell formatters for accuracy columns when present."""
+    acc_labels = ["Accuracy %", "Prone %", "Standing %"]
+    indices = []
+    for label in acc_labels:
+        if label in headers:
+            indices.append(headers.index(label))
+    if not indices:
+        return None
+
+    def parse_pct(value: str) -> float | None:
+        text = value.strip()
+        if not text or text == "-":
+            return None
+        if text.endswith("%"):
+            text = text[:-1]
+        try:
+            return float(text) / 100.0
+        except ValueError:
+            return None
+
+    accuracy_values = []
+    for row in render_rows:
+        accuracy_values.append([parse_pct(str(row[idx])) for idx in indices])
+
+    def make_acc_formatter(acc_idx: int):
+        def formatter(cell_str: str, row_idx: int) -> str:
+            if row_idx < len(accuracy_values):
+                pct = accuracy_values[row_idx][acc_idx]
+                if pct is not None:
+                    return Color.accuracy(cell_str, pct)
+            return cell_str
+        return formatter
+
+    cell_formatters = [None] * len(headers)
+    for acc_idx, header_idx in enumerate(indices):
+        cell_formatters[header_idx] = make_acc_formatter(acc_idx)
+    return cell_formatters
+
+
 def _is_lapped(result: dict) -> bool:
     """Return True if result indicates lapped/looped status."""
     irm = str(result.get("IRM") or "").upper()
@@ -634,46 +674,11 @@ def handle_cumulate_pursuit(args: argparse.Namespace) -> int:
     render_rows = [r["row"] for r in rows]
     row_styles = [rank_style(r[0]) for r in render_rows] if is_pretty_output(args) else None
 
-    cell_formatters = None
-    if is_pretty_output(args):
-        def parse_pct(value: str) -> float | None:
-            text = value.strip()
-            if not text or text == "-":
-                return None
-            if text.endswith("%"):
-                text = text[:-1]
-            try:
-                return float(text) / 100.0
-            except ValueError:
-                return None
-
-        accuracy_values = []
-        for row in render_rows:
-            acc = parse_pct(str(row[5]))
-            prone = parse_pct(str(row[6]))
-            standing = parse_pct(str(row[7]))
-            accuracy_values.append((acc, prone, standing))
-
-        def make_acc_formatter(acc_idx: int):
-            def formatter(cell_str: str, row_idx: int) -> str:
-                if row_idx < len(accuracy_values):
-                    pct = accuracy_values[row_idx][acc_idx]
-                    if pct is not None:
-                        return Color.accuracy(cell_str, pct)
-                return cell_str
-            return formatter
-
-        cell_formatters = [None] * len(headers)
-        cell_formatters[headers.index("Accuracy %")] = make_acc_formatter(0)
-        cell_formatters[headers.index("Prone %")] = make_acc_formatter(1)
-        cell_formatters[headers.index("Standing %")] = make_acc_formatter(2)
-
     render_table(
         headers,
         render_rows,
         pretty=is_pretty_output(args),
         row_styles=row_styles,
-        cell_formatters=cell_formatters,
     )
     return 0
 
@@ -767,46 +772,11 @@ def handle_cumulate_course(args: argparse.Namespace) -> int:
     render_rows = [r["row"] for r in rows]
     row_styles = [rank_style(r[0]) for r in render_rows] if is_pretty_output(args) else None
 
-    cell_formatters = None
-    if is_pretty_output(args):
-        def parse_pct(value: str) -> float | None:
-            text = value.strip()
-            if not text or text == "-":
-                return None
-            if text.endswith("%"):
-                text = text[:-1]
-            try:
-                return float(text) / 100.0
-            except ValueError:
-                return None
-
-        accuracy_values = []
-        for row in render_rows:
-            acc = parse_pct(str(row[7]))
-            prone = parse_pct(str(row[8]))
-            standing = parse_pct(str(row[9]))
-            accuracy_values.append((acc, prone, standing))
-
-        def make_acc_formatter(acc_idx: int):
-            def formatter(cell_str: str, row_idx: int) -> str:
-                if row_idx < len(accuracy_values):
-                    pct = accuracy_values[row_idx][acc_idx]
-                    if pct is not None:
-                        return Color.accuracy(cell_str, pct)
-                return cell_str
-            return formatter
-
-        cell_formatters = [None] * len(headers)
-        cell_formatters[headers.index("Accuracy %")] = make_acc_formatter(0)
-        cell_formatters[headers.index("Prone %")] = make_acc_formatter(1)
-        cell_formatters[headers.index("Standing %")] = make_acc_formatter(2)
-
     render_table(
         headers,
         render_rows,
         pretty=is_pretty_output(args),
         row_styles=row_styles,
-        cell_formatters=cell_formatters,
     )
     return 0
 
@@ -934,8 +904,17 @@ def _cumulate_range_or_shooting(args: argparse.Namespace, kind: str) -> int:
         "Prone %",
         "Standing %",
     ]
-    row_styles = [rank_style(r["row"][0]) for r in rows] if is_pretty_output(args) else None
-    render_table(headers, [r["row"] for r in rows], pretty=is_pretty_output(args), row_styles=row_styles)
+    render_rows = [r["row"] for r in rows]
+    pretty = is_pretty_output(args)
+    row_styles = [rank_style(r[0]) for r in render_rows] if pretty else None
+    cell_formatters = _build_accuracy_cell_formatters(headers, render_rows) if pretty else None
+    render_table(
+        headers,
+        render_rows,
+        pretty=pretty,
+        row_styles=row_styles,
+        cell_formatters=cell_formatters,
+    )
     return 0
 
 
@@ -1055,8 +1034,17 @@ def handle_cumulate_miss(args: argparse.Namespace) -> int:
         "Prone %",
         "Standing %",
     ]
-    row_styles = [rank_style(r["row"][0]) for r in rows] if is_pretty_output(args) else None
-    render_table(headers, [r["row"] for r in rows], pretty=is_pretty_output(args), row_styles=row_styles)
+    render_rows = [r["row"] for r in rows]
+    pretty = is_pretty_output(args)
+    row_styles = [rank_style(r[0]) for r in render_rows] if pretty else None
+    cell_formatters = _build_accuracy_cell_formatters(headers, render_rows) if pretty else None
+    render_table(
+        headers,
+        render_rows,
+        pretty=pretty,
+        row_styles=row_styles,
+        cell_formatters=cell_formatters,
+    )
     return 0
 
 
