@@ -1,4 +1,4 @@
-"""New results command handler (candidate replacement for results + relay)."""
+"""Results command handler (replacement for results + relay)."""
 
 from __future__ import annotations
 
@@ -614,7 +614,7 @@ def _build_relay_rows(payload: dict, race_id: str, first_n: int, discipline: str
 
 
 def handle_results(args: argparse.Namespace) -> int:
-    """List results for a race (new unified output)."""
+    """List results for a race (unified output)."""
     if getattr(args, "race", "") and getattr(args, "discipline", ""):
         print("error: --race and --discipline cannot be used together", file=sys.stderr)
         return 1

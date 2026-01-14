@@ -1,4 +1,4 @@
-"""Cumulate-new command handlers for aggregated statistics."""
+"""Cumulate command handlers for aggregated statistics."""
 
 from __future__ import annotations
 

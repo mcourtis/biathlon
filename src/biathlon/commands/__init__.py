@@ -17,9 +17,10 @@ from .cumulate import (
 from .scores import handle_scores
 from .records import handle_record_lap
 from .ceremony import handle_ceremony
-from .athlete import handle_athlete_results, handle_athlete_info, handle_athlete_id
+from .athlete import handle_athlete_results, handle_athlete_results_scan, handle_athlete_info, handle_athlete_id
 from .shooting import handle_shooting
 from .relay import handle_relay
+from .startlist import handle_startlist
 
 __all__ = [
     "handle_seasons",
@@ -38,8 +39,10 @@ __all__ = [
     "handle_record_lap",
     "handle_ceremony",
     "handle_athlete_results",
+    "handle_athlete_results_scan",
     "handle_athlete_info",
     "handle_athlete_id",
     "handle_shooting",
     "handle_relay",
+    "handle_startlist",
 ]

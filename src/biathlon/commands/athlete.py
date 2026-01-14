@@ -9,6 +9,7 @@ from ..api import (
     BiathlonError,
     get_athlete_bio,
     get_athletes,
+    get_all_results,
     get_current_season_id,
     get_events,
     get_race_results,
@@ -27,13 +28,25 @@ from ..utils import (
 )
 
 
-def handle_athlete_results(args: argparse.Namespace) -> int:
-    """Show season race ranks for an athlete."""
+def handle_athlete_results_scan(args: argparse.Namespace) -> int:
+    """Show season race ranks for an athlete (scan Results endpoints)."""
     if not args.id and not args.search:
         print("error: provide --id or --search", file=sys.stderr)
         return 1
 
     season_id = args.season or get_current_season_id()
+    cat_filter: str | None = None
+    if args.id and not args.search:
+        try:
+            bio = get_athlete_bio(args.id)
+        except BiathlonError:
+            bio = {}
+        gender_id = str(bio.get("GenderId") or "").upper()
+        if gender_id == "W":
+            cat_filter = "SW"
+        elif gender_id == "M":
+            cat_filter = "SM"
+
     event_map: dict[str, dict] = {}
     level_arg = getattr(args, "level", 0)
     levels = [level_arg] if level_arg in {1, 2, 3, 4, 5} else [1, 2, 3, 4, 5]
@@ -66,13 +79,21 @@ def handle_athlete_results(args: argparse.Namespace) -> int:
             race_id = race.get("RaceId") or race.get("Id")
             if not race_id:
                 continue
-            if not has_analytics(race_id):
+            race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
+            if cat_filter and race_cat and race_cat not in {cat_filter, "MX"}:
                 continue
             try:
                 payload = get_race_results(race_id)
             except BiathlonError:
                 continue
+            is_result = payload.get("IsResult")
+            if isinstance(is_result, str):
+                is_result = is_result.strip().lower() != "false"
+            if is_result is False:
+                continue
             results = extract_results(payload)
+            if args.ski and not has_analytics(race_id):
+                continue
             comp = payload.get("Competition") or {}
             sport_evt = payload.get("SportEvt") or {}
             race_label = comp.get("ShortDescription") or comp.get("Description") or get_race_label(race)
@@ -153,6 +174,132 @@ def handle_athlete_results(args: argparse.Namespace) -> int:
 
     print()
     print(f"# Athlete results — season {season_id}")
+    render_table(headers, rows, pretty=is_pretty_output(args))
+    print()
+    return 0
+
+
+def _normalize_season_filter(raw: str) -> str:
+    text = raw.strip()
+    if text.lower() == "all":
+        return ""
+    if text.isdigit() and len(text) == 4:
+        return f"{text[:2]}/{text[2:]}"
+    return text
+
+
+def _season_matches(result: dict, season_filter: str) -> bool:
+    if not season_filter:
+        return True
+    season = str(result.get("Season") or "").strip()
+    season_id = str(result.get("SeasonId") or "").strip()
+    return season_filter == season or season_filter == season_id
+
+
+def _normalize_level_filter(raw: str) -> str:
+    text = raw.strip()
+    if text.lower() == "all":
+        return ""
+    return text.upper()
+
+
+def _level_matches(result: dict, level_filter: str) -> bool:
+    if not level_filter:
+        return True
+    level = str(result.get("Level") or "").strip().upper()
+    return level == level_filter
+
+
+def handle_athlete_results(args: argparse.Namespace) -> int:
+    """Show season race ranks for an athlete via AllResults endpoint."""
+    if not args.id:
+        print("error: provide --id", file=sys.stderr)
+        return 1
+
+    try:
+        payload = get_all_results(args.id)
+    except BiathlonError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    results = list(payload.get("Results") or [])
+    season_filter = _normalize_season_filter(args.season or get_current_season_id())
+    level_filter = _normalize_level_filter(getattr(args, "level", "WC"))
+    if season_filter:
+        results = [res for res in results if _season_matches(res, season_filter)]
+    if level_filter:
+        results = [res for res in results if _level_matches(res, level_filter)]
+
+    if not results:
+        print(f"no results found for athlete id {args.id}", file=sys.stderr)
+        return 1
+
+    athlete_label = args.id
+    try:
+        bio = get_athlete_bio(args.id)
+    except BiathlonError:
+        bio = {}
+    name = bio.get("FullName") or ""
+    nat = bio.get("NAT") or ""
+    if name:
+        athlete_label = f"{name} ({nat})" if nat else name
+
+    headers = ["Date", "Event", "Place", "Race", "Discipline", "RaceId", athlete_label]
+    rows = []
+    for res in results:
+        race_id = res.get("RaceId") or ""
+        race_date = ""
+        event_desc = ""
+        race_desc = ""
+        rank = res.get("Rank") or res.get("SO") or ""
+        if isinstance(rank, str) and rank.endswith("."):
+            rank = rank[:-1]
+        if race_id:
+            try:
+                race_payload = get_race_results(race_id)
+            except BiathlonError:
+                race_payload = {}
+            comp = race_payload.get("Competition") or {}
+            start_raw = comp.get("StartTime") or comp.get("StartDate")
+            if isinstance(start_raw, str):
+                race_date = start_raw.split("T", 1)[0]
+            race_desc = comp.get("ShortDescription") or ""
+            sport_evt = race_payload.get("SportEvt") or {}
+            event_desc = sport_evt.get("Description") or ""
+            if args.course:
+                time_map: dict[str, float] = {}
+                try:
+                    analytic = get_analytic_results(race_id, "CRST")
+                except BiathlonError:
+                    analytic = {}
+                for entry in analytic.get("Results", []) or []:
+                    if entry.get("IsTeam"):
+                        continue
+                    ident = entry.get("IBUId") or entry.get("Bib") or entry.get("Name")
+                    if not ident:
+                        continue
+                    total = entry.get("TotalTime") or entry.get("Result")
+                    secs = parse_time_seconds(str(total)) if total else None
+                    if secs is not None:
+                        time_map[str(ident)] = secs
+                athlete_time = time_map.get(args.id) if args.id else None
+                if athlete_time is not None:
+                    sorted_times = sorted(time_map.items(), key=lambda kv: kv[1])
+                    for idx, (ident, _) in enumerate(sorted_times, start=1):
+                        if ident == args.id:
+                            rank = idx
+                            break
+        place = res.get("Place") or ""
+        comp = res.get("Comp") or ""
+        rows.append([race_date, event_desc, place, race_desc, comp, race_id, rank])
+
+    print()
+    if args.season and args.season.strip().lower() == "all":
+        label = "all"
+    else:
+        season_label = season_filter or (results[0].get("Season") or results[0].get("SeasonId") or "")
+        label = season_label or "all"
+    print(f"# Athlete results — season {label}")
     render_table(headers, rows, pretty=is_pretty_output(args))
     print()
     return 0

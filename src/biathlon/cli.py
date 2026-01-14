@@ -39,6 +39,7 @@ from .commands import (
     handle_scores,
     handle_seasons,
     handle_shooting,
+    handle_startlist,
 )
 
 
@@ -98,7 +99,7 @@ _biathlon_completion() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="seasons events results cumulate record standings ceremony biathlete shooting"
+    commands="seasons events results cumulate record standings ceremony biathlete shooting startlist"
 
     case "${COMP_WORDS[1]}" in
         cumulate)
@@ -142,6 +143,7 @@ _biathlon() {
         'ceremony:Medal ranking'
         'biathlete:Biathlete information'
         'shooting:Shooting accuracy'
+        'startlist:Startlist analysis'
     )
 
     _arguments -C \\
@@ -161,7 +163,7 @@ _biathlon() {
                     _values 'subcommand' lap
                     ;;
                 biathlete)
-                    _values 'subcommand' info results
+                    _values 'subcommand' info results id
                     ;;
             esac
             ;;
@@ -474,6 +476,13 @@ def build_parser() -> argparse.ArgumentParser:
     add_output_flag(shooting_parser)
     shooting_parser.set_defaults(func=handle_shooting)
 
+    # --- startlist ---
+    startlist_parser = subparsers.add_parser("startlist", help="Analyze race startlists", formatter_class=CompactOptionalFormatter, add_help=False)
+    startlist_parser.add_argument("--race", default="", help="Race id (default: latest WC startlist)")
+    startlist_parser.add_argument("--major", action="store_true", help="Use WC+WCH+OWG milestones")
+    add_output_flag(startlist_parser)
+    startlist_parser.set_defaults(func=handle_startlist)
+
     # --- biathlete ---
     biathlete_parser = subparsers.add_parser("biathlete", help="Show biathlete information", formatter_class=CompactOptionalFormatter, add_help=False)
     biathlete_parser.add_argument("--id", default="", help="Athlete IBU id (comma-separated)")
@@ -483,12 +492,11 @@ def build_parser() -> argparse.ArgumentParser:
     biathlete_parser.set_defaults(func=handle_athlete_info, athlete_command=None)
     athlete_sub = biathlete_parser.add_subparsers(dest="athlete_command", title="subcommands", metavar="")
 
-    athlete_results = athlete_sub.add_parser("results", help="Season race ranks", formatter_class=CompactOptionalFormatter, add_help=False)
+    athlete_results = athlete_sub.add_parser("results", help="Season race ranks (AllResults)", formatter_class=CompactOptionalFormatter, add_help=False)
     athlete_results.add_argument("--id", default="", help="Athlete IBU id")
-    athlete_results.add_argument("--search", default="", help="Search by name")
-    athlete_results.add_argument("--season", default="", help="Season id")
-    athlete_results.add_argument("--level", type=int, default=1, help="Event level (1-5, 0 for all)")
-    athlete_results.add_argument("--ski", action="store_true", help="Use ski time rank")
+    athlete_results.add_argument("--season", default="", help="Season id or label (e.g., 2526 or 25/26)")
+    athlete_results.add_argument("--level", default="WC", help="Level filter (default: WC, use 'all' for all levels)")
+    athlete_results.add_argument("--course", action="store_true", help="Use course time rank")
     add_output_flag(athlete_results)
     athlete_results.set_defaults(func=handle_athlete_results)
 

@@ -104,3 +104,8 @@ def get_athletes(family_name: str, given_name: str = "", request_id: int = 0) ->
         athletes = payload.get("Athletes") or payload.get("athletes") or []
         return list(athletes)
     return list(payload)
+
+
+def get_all_results(ibu_id: str) -> dict[str, Any]:
+    """Return results list for an athlete by IBU id."""
+    return dict(fetch_json(f"AllResults?IBUId={ibu_id}"))
