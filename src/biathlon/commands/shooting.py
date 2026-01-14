@@ -376,12 +376,8 @@ def handle_shooting(args: argparse.Namespace) -> int:
             if label in headers:
                 cell_formatters[headers.index(label)] = None
 
-    # Create cell formatters for accuracy columns (indices 9, 10, 11)
-    # Scale from 100% (green) to min% (red), with midpoint having no color
+    # Create cell formatters for accuracy columns using fixed thresholds.
     if pretty and accuracy_values:
-        all_acc = [v for acc_tuple in accuracy_values for v in acc_tuple]
-        min_acc = min(all_acc) if all_acc else 0.5
-        mid_acc = (1.0 + min_acc) / 2  # midpoint between 100% and min%
         accuracy_values_display = accuracy_values
 
         # Apply display limit after computing the scale.
@@ -394,14 +390,7 @@ def handle_shooting(args: argparse.Namespace) -> int:
             def formatter(cell_str: str, row_idx: int) -> str:
                 if row_idx < len(accuracy_values_display):
                     pct = accuracy_values_display[row_idx][acc_idx]
-                    if not Color.enabled():
-                        return cell_str
-                    if pct > mid_acc:
-                        intensity = (pct - mid_acc) / (1.0 - mid_acc) if mid_acc < 1.0 else 0
-                        return Color.green(cell_str, intensity)
-                    elif pct < mid_acc:
-                        intensity = (mid_acc - pct) / (mid_acc - min_acc) if mid_acc > min_acc else 0
-                        return Color.red(cell_str, intensity)
+                    return Color.accuracy(cell_str, pct)
                 return cell_str
             return formatter
 

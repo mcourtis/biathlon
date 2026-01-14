@@ -22,7 +22,7 @@ from ..constants import (
     RELAY_WOMEN_CAT,
     SINGLE_MIXED_RELAY_DISCIPLINE,
 )
-from ..formatting import format_pct, format_seconds, is_pretty_output, rank_style, render_table
+from ..formatting import Color, format_pct, format_seconds, is_pretty_output, rank_style, render_table
 from ..utils import (
     base_time_seconds,
     extract_results,
@@ -631,8 +631,50 @@ def handle_cumulate_pursuit(args: argparse.Namespace) -> int:
         row["row"][0] = idx
     rows = _apply_limit(rows, args.limit)
     headers = ["Rank", "Biathlete", "Country", "Races", "Total Pursuit"]
-    row_styles = [rank_style(r["row"][0]) for r in rows] if is_pretty_output(args) else None
-    render_table(headers, [r["row"] for r in rows], pretty=is_pretty_output(args), row_styles=row_styles)
+    render_rows = [r["row"] for r in rows]
+    row_styles = [rank_style(r[0]) for r in render_rows] if is_pretty_output(args) else None
+
+    cell_formatters = None
+    if is_pretty_output(args):
+        def parse_pct(value: str) -> float | None:
+            text = value.strip()
+            if not text or text == "-":
+                return None
+            if text.endswith("%"):
+                text = text[:-1]
+            try:
+                return float(text) / 100.0
+            except ValueError:
+                return None
+
+        accuracy_values = []
+        for row in render_rows:
+            acc = parse_pct(str(row[5]))
+            prone = parse_pct(str(row[6]))
+            standing = parse_pct(str(row[7]))
+            accuracy_values.append((acc, prone, standing))
+
+        def make_acc_formatter(acc_idx: int):
+            def formatter(cell_str: str, row_idx: int) -> str:
+                if row_idx < len(accuracy_values):
+                    pct = accuracy_values[row_idx][acc_idx]
+                    if pct is not None:
+                        return Color.accuracy(cell_str, pct)
+                return cell_str
+            return formatter
+
+        cell_formatters = [None] * len(headers)
+        cell_formatters[headers.index("Accuracy %")] = make_acc_formatter(0)
+        cell_formatters[headers.index("Prone %")] = make_acc_formatter(1)
+        cell_formatters[headers.index("Standing %")] = make_acc_formatter(2)
+
+    render_table(
+        headers,
+        render_rows,
+        pretty=is_pretty_output(args),
+        row_styles=row_styles,
+        cell_formatters=cell_formatters,
+    )
     return 0
 
 
@@ -722,8 +764,50 @@ def handle_cumulate_course(args: argparse.Namespace) -> int:
         row["row"][0] = idx
     rows = _apply_limit(rows, args.limit)
     headers = ["Rank", "Biathlete", "Country", "Races", "Total Course Time"]
-    row_styles = [rank_style(r["row"][0]) for r in rows] if is_pretty_output(args) else None
-    render_table(headers, [r["row"] for r in rows], pretty=is_pretty_output(args), row_styles=row_styles)
+    render_rows = [r["row"] for r in rows]
+    row_styles = [rank_style(r[0]) for r in render_rows] if is_pretty_output(args) else None
+
+    cell_formatters = None
+    if is_pretty_output(args):
+        def parse_pct(value: str) -> float | None:
+            text = value.strip()
+            if not text or text == "-":
+                return None
+            if text.endswith("%"):
+                text = text[:-1]
+            try:
+                return float(text) / 100.0
+            except ValueError:
+                return None
+
+        accuracy_values = []
+        for row in render_rows:
+            acc = parse_pct(str(row[7]))
+            prone = parse_pct(str(row[8]))
+            standing = parse_pct(str(row[9]))
+            accuracy_values.append((acc, prone, standing))
+
+        def make_acc_formatter(acc_idx: int):
+            def formatter(cell_str: str, row_idx: int) -> str:
+                if row_idx < len(accuracy_values):
+                    pct = accuracy_values[row_idx][acc_idx]
+                    if pct is not None:
+                        return Color.accuracy(cell_str, pct)
+                return cell_str
+            return formatter
+
+        cell_formatters = [None] * len(headers)
+        cell_formatters[headers.index("Accuracy %")] = make_acc_formatter(0)
+        cell_formatters[headers.index("Prone %")] = make_acc_formatter(1)
+        cell_formatters[headers.index("Standing %")] = make_acc_formatter(2)
+
+    render_table(
+        headers,
+        render_rows,
+        pretty=is_pretty_output(args),
+        row_styles=row_styles,
+        cell_formatters=cell_formatters,
+    )
     return 0
 
 

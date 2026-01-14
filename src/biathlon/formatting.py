@@ -13,7 +13,15 @@ class Color:
     RESET = "\033[0m"
     DIM = "\033[2m"
     BOLD = "\033[1m"
-    BOLD_GREEN = "\033[1;32m"
+    OCEAN_BLUE = (79, 193, 255)
+    ACCURACY_BANDS = [
+        (0.0, 60.0, (176, 0, 32), (176, 0, 32)),       # #B00020
+        (60.0, 75.0, (176, 0, 32), (230, 81, 0)),       # #E65100
+        (75.0, 85.0, (230, 81, 0), (255, 214, 0)),      # #FFD600
+        (85.0, 92.0, (255, 214, 0), (174, 234, 0)),     # #AEEA00
+        (92.0, 97.0, (174, 234, 0), (0, 200, 83)),      # #00C853
+        (97.0, 100.0, (0, 200, 83), (0, 230, 118)),     # #00E676
+    ]
     COLOR_PREFIX = "\033[38;2;"
     COLOR_SUFFIX = "m"
 
@@ -47,7 +55,7 @@ class Color:
         """Apply highlight style (for current/next event)."""
         if not cls.enabled():
             return text
-        return f"{cls.BOLD_GREEN}{text}{cls.RESET}"
+        return cls.rgb(text, cls.OCEAN_BLUE, bold=True)
 
     @classmethod
     def highlight_soft(cls, text: str) -> str:
@@ -106,21 +114,27 @@ class Color:
 
     @classmethod
     def accuracy(cls, text: str, pct: float) -> str:
-        """Apply color based on accuracy percentage (0.0 to 1.0).
-
-        Green for > 50%, red for < 50%, no color at 50%.
-        """
+        """Apply color based on accuracy percentage (0.0 to 1.0)."""
         if not cls.enabled():
             return text
-        if pct > 0.5:
-            # Scale from 50% to 100% -> intensity 0.0 to 1.0
-            intensity = (pct - 0.5) * 2
-            return cls.green(text, intensity)
-        elif pct < 0.5:
-            # Scale from 50% to 0% -> intensity 0.0 to 1.0
-            intensity = (0.5 - pct) * 2
-            return cls.red(text, intensity)
-        return text
+        percent = max(0.0, min(100.0, pct * 100.0))
+        for low, high, low_color, high_color in cls.ACCURACY_BANDS:
+            if percent <= high:
+                if high == low:
+                    return cls.rgb(text, high_color)
+                t = (percent - low) / (high - low)
+                color = cls._interp_color(low_color, high_color, t)
+                return cls.rgb(text, color)
+        return cls.rgb(text, cls.ACCURACY_BANDS[-1][3])
+
+    @staticmethod
+    def _interp_color(low: tuple[int, int, int], high: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+        t = max(0.0, min(1.0, t))
+        return (
+            int(low[0] + (high[0] - low[0]) * t),
+            int(low[1] + (high[1] - low[1]) * t),
+            int(low[2] + (high[2] - low[2]) * t),
+        )
 
 
 def render_table(
