@@ -335,36 +335,34 @@ def handle_athlete_id(args: argparse.Namespace) -> int:
         print("error: provide --search", file=sys.stderr)
         return 1
 
-    season_id = args.season or get_current_season_id()
-    level_arg = getattr(args, "level", 0)
-    levels = [level_arg] if level_arg in {1, 2, 3, 4, 5} else [1, 2, 3, 4, 5]
     matches: dict[str, dict] = {}
     search_term = args.search.strip()
     tokens = [tok for tok in search_term.split() if tok]
     family_name = tokens[-1] if tokens else search_term
     given_name = " ".join(tokens[:-1]) if len(tokens) > 1 else ""
-    try:
-        def add_matches(athletes: list[dict]) -> None:
-            for athlete in athletes:
-                if not isinstance(athlete, dict):
-                    continue
-                ibu_id = athlete.get("IBUId") or athlete.get("IbuId") or ""
-                if not ibu_id:
-                    continue
-                given = athlete.get("GivenName") or ""
-                family = athlete.get("FamilyName") or ""
-                name = athlete.get("Name") or " ".join(part for part in [given, family] if part)
-                nat = athlete.get("Nat") or athlete.get("Nation") or athlete.get("Country") or ""
-                if not nat and isinstance(athlete.get("NF"), dict):
-                    nat = athlete["NF"].get("Nat") or athlete["NF"].get("Country") or ""
-                matches.setdefault(ibu_id, {"name": name or f"IBU {ibu_id}", "nat": nat})
 
+    def add_matches(athletes: list[dict]) -> None:
+        for athlete in athletes:
+            if not isinstance(athlete, dict):
+                continue
+            ibu_id = athlete.get("IBUId") or athlete.get("IbuId") or ""
+            if not ibu_id:
+                continue
+            given = athlete.get("GivenName") or ""
+            family = athlete.get("FamilyName") or ""
+            name = athlete.get("Name") or " ".join(part for part in [given, family] if part)
+            nat = athlete.get("Nat") or athlete.get("Nation") or athlete.get("Country") or ""
+            if not nat and isinstance(athlete.get("NF"), dict):
+                nat = athlete["NF"].get("Nat") or athlete["NF"].get("Country") or ""
+            matches.setdefault(ibu_id, {"name": name or f"IBU {ibu_id}", "nat": nat})
+
+    try:
         add_matches(get_athletes(family_name, given_name))
         if search_term and not given_name:
             add_matches(get_athletes(search_term, ""))
             add_matches(get_athletes("", search_term))
     except BiathlonError:
-        matches = _find_athletes_by_search(season_id, levels, search_term)
+        pass
 
     if not matches:
         print(f"no athletes matched search '{args.search}'", file=sys.stderr)
