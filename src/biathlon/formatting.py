@@ -14,6 +14,7 @@ class Color:
     DIM = "\033[2m"
     BOLD = "\033[1m"
     OCEAN_BLUE = (79, 193, 255)
+    SECTION_TITLE = (255, 170, 0)
     ACCURACY_BANDS = [
         (0.0, 60.0, (176, 0, 32), (176, 0, 32)),       # #B00020
         (60.0, 75.0, (176, 0, 32), (230, 81, 0)),       # #E65100
@@ -56,6 +57,13 @@ class Color:
         if not cls.enabled():
             return text
         return cls.rgb(text, cls.OCEAN_BLUE, bold=True)
+
+    @classmethod
+    def section_title(cls, text: str) -> str:
+        """Apply section title style."""
+        if not cls.enabled():
+            return text
+        return cls.rgb(text, cls.SECTION_TITLE, bold=True)
 
     @classmethod
     def highlight_soft(cls, text: str) -> str:
