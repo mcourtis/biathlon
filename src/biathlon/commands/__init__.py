@@ -22,6 +22,7 @@ from .relay import handle_relay
 from .startlist import handle_startlist
 from .post_race import handle_post_race
 from .brief import handle_brief_event, handle_brief_startlist, handle_brief_post_race
+from .form import handle_form
 
 __all__ = [
     "handle_seasons",
@@ -49,4 +50,5 @@ __all__ = [
     "handle_brief_event",
     "handle_brief_startlist",
     "handle_brief_post_race",
+    "handle_form",
 ]

@@ -37,6 +37,7 @@ from .commands import (
     handle_cumulate_penalty,
     handle_cumulate_remontada,
     handle_events,
+    handle_form,
     handle_results,
     handle_scores,
     handle_seasons,
@@ -100,7 +101,7 @@ _biathlon_completion() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="seasons events results cumulate standings ceremony biathlete shooting brief"
+    commands="seasons events results cumulate standings ceremony biathlete shooting brief form"
 
     case "${COMP_WORDS[1]}" in
         cumulate)
@@ -144,6 +145,7 @@ _biathlon() {
         'biathlete:Biathlete information'
         'shooting:Shooting accuracy'
         'brief:Race analysis (event, startlist, post-race)'
+        'form:Show recent athlete form (course time ranks)'
     )
 
     _arguments -C \\
@@ -569,6 +571,41 @@ def build_parser() -> argparse.ArgumentParser:
     brief_post_race.add_argument("--major", action="store_true", help="Use WC+WCH+OWG milestones")
     add_output_flag(brief_post_race)
     brief_post_race.set_defaults(func=handle_brief_post_race)
+
+    # --- form ---
+    form_parser = subparsers.add_parser(
+        "form",
+        help="Show recent athlete form (course time ranks)",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
+    form_parser._optionals.title = "optional parameters"
+    form_parser.add_argument("--men", action="store_true", help="Show men (default: women)")
+    form_parser.add_argument("--races", type=int, default=5, help="Number of recent races for current form (default: 5)")
+    form_parser.add_argument(
+        "--event",
+        type=int,
+        default=0,
+        metavar="N",
+        help="Current form from last N events (mutually exclusive with --races)",
+    )
+    form_parser.add_argument("--limit", type=int, default=25, help="Limit output rows (default: 25, 0 for all)")
+    form_parser.add_argument("--top", type=int, default=0, help="Filter to top N in WC standings")
+    form_parser.add_argument(
+        "--remove",
+        action="append",
+        default=[],
+        metavar="DISC",
+        help="Remove discipline from calculations (sprint, pursuit, individual, mass-start). Can be repeated.",
+    )
+    form_parser.add_argument(
+        "--include-relay",
+        default="",
+        choices=["relay", "mixed-relay", "single-mixed", "all", ""],
+        help="Include relay races (relay, mixed-relay, single-mixed, all)",
+    )
+    add_output_flag(form_parser)
+    form_parser.set_defaults(func=handle_form)
 
     return parser
 
