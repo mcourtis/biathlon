@@ -64,15 +64,24 @@ def _fetch_leg_lap_times(
     laps: int,
     laps_per_leg: int,
 ) -> dict[tuple[str, int], dict[str, str]]:
-    """Fetch analytic lap times keyed by (Bib, Leg) -> {lapN: time_str}."""
-    times: dict[tuple[str, int], dict[str, str]] = {}
-    for idx in range(1, laps + 1):
+    """Fetch analytic lap times in parallel keyed by (Bib, Leg) -> {lapN: time_str}."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def fetch_one(idx: int) -> tuple[int, list]:
         type_id = f"{lap_prefix}{idx}{lap_suffix}"
         try:
             analytic = get_analytic_results(race_id, type_id)
         except BiathlonError:
-            continue
-        for res in analytic.get("Results", []):
+            return idx, []
+        return idx, analytic.get("Results", [])
+
+    times: dict[tuple[str, int], dict[str, str]] = {}
+    with ThreadPoolExecutor(max_workers=laps) as executor:
+        results = list(executor.map(fetch_one, range(1, laps + 1)))
+
+    # Process all results after parallel fetch
+    for idx, res_list in results:
+        for res in res_list:
             if res.get("IsTeam"):
                 continue
             bib = str(res.get("Bib") or "")
@@ -129,7 +138,7 @@ def _find_latest_relay_race(
         discipline: Discipline code (RL or SR)
         category: Category code (SW, SM, or MX)
     """
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     season_id = get_current_season_id()
     events = get_events(season_id, level=1)
 
