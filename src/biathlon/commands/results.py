@@ -160,11 +160,17 @@ def _fetch_analytic_map(race_id: str, type_id: str) -> dict[str, str]:
 
 
 def _fetch_stage_times(race_id: str, prefix: str, suffix: str, count: int) -> dict[int, dict[str, str]]:
-    """Fetch analytic stage times keyed by stage -> {ident: time_str}."""
-    stages: dict[int, dict[str, str]] = {}
-    for idx in range(1, count + 1):
+    """Fetch analytic stage times in parallel."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    def fetch_one(idx: int) -> tuple[int, dict[str, str]]:
         type_id = f"{prefix}{idx}{suffix}"
-        stages[idx] = _fetch_analytic_map(race_id, type_id)
+        return idx, _fetch_analytic_map(race_id, type_id)
+
+    stages: dict[int, dict[str, str]] = {}
+    with ThreadPoolExecutor(max_workers=count) as executor:
+        for idx, times in executor.map(fetch_one, range(1, count + 1)):
+            stages[idx] = times
     return stages
 
 
@@ -206,9 +212,16 @@ def _shooting_totals(misses: list[int]) -> tuple[int, int, int]:
     return misses_total, prone, standing
 
 
-def _shooting_stages(misses: list[int]) -> tuple[str, str, str, str]:
+def _shooting_stages(misses: list[int], stages: int) -> tuple[str, str, str, str]:
     """Return stage misses for Prone1/Prone2/Standing1/Standing2."""
     stage_vals = ["-", "-", "-", "-"]
+    if not misses or stages <= 0:
+        return stage_vals[0], stage_vals[1], stage_vals[2], stage_vals[3]
+    if stages <= 2:
+        stage_vals[0] = str(misses[0])
+        if len(misses) >= 2:
+            stage_vals[2] = str(misses[1])
+        return stage_vals[0], stage_vals[1], stage_vals[2], stage_vals[3]
     for idx, val in enumerate(misses[:4]):
         stage_vals[idx] = str(val)
     return stage_vals[0], stage_vals[1], stage_vals[2], stage_vals[3]
@@ -216,7 +229,7 @@ def _shooting_stages(misses: list[int]) -> tuple[str, str, str, str]:
 
 def _find_latest_race_with_results_any() -> tuple[str, dict]:
     """Return the most recent race id with completed results (incl. relay)."""
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     season_id = get_current_season_id()
     events = get_events(season_id, level=1)
 
@@ -261,7 +274,7 @@ def _find_latest_race_by_discipline(
 
     mixed_mode: "any", "mixed-only", or "non-mixed".
     """
-    now = datetime.datetime.utcnow()
+    now = datetime.datetime.now(datetime.timezone.utc)
     season_id = get_current_season_id()
     events = get_events(season_id, level=1)
 
@@ -915,13 +928,54 @@ def handle_results(args: argparse.Namespace) -> int:
     laps = SKI_LAPS.get(discipline, 0)
     stages = SHOOTING_STAGES.get(discipline, 0)
 
-    course_times = _fetch_analytic_map(race_id, "CRST")
-    ski_times = _fetch_analytic_map(race_id, "SKIT")
-    range_times = _fetch_analytic_map(race_id, "RNGT")
-    shooting_times = _fetch_analytic_map(race_id, "STTM")
-    course_laps = _fetch_stage_times(race_id, "CRS", "", laps) if show_detail and laps else {}
-    range_laps = _fetch_stage_times(race_id, "RNG", "", stages) if show_detail and stages else {}
-    shooting_laps = _fetch_stage_times(race_id, "S", "TM", stages) if show_detail and stages else {}
+    # Fetch all analytic data in parallel
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    course_times: dict[str, str] = {}
+    ski_times: dict[str, str] = {}
+    range_times: dict[str, str] = {}
+    shooting_times: dict[str, str] = {}
+    course_laps: dict[int, dict[str, str]] = {}
+    range_laps: dict[int, dict[str, str]] = {}
+    shooting_laps: dict[int, dict[str, str]] = {}
+
+    # Build list of all fetches needed
+    fetches: list[tuple[str, str, int | None]] = [
+        ("map", "CRST", None),
+        ("map", "SKIT", None),
+        ("map", "RNGT", None),
+        ("map", "STTM", None),
+    ]
+    if show_detail and laps:
+        for i in range(1, laps + 1):
+            fetches.append(("course_lap", f"CRS{i}", i))
+    if show_detail and stages:
+        for i in range(1, stages + 1):
+            fetches.append(("range_lap", f"RNG{i}", i))
+            fetches.append(("shooting_lap", f"S{i}TM", i))
+
+    def fetch_one(fetch_type: str, type_id: str, idx: int | None) -> tuple[str, str, int | None, dict[str, str]]:
+        return fetch_type, type_id, idx, _fetch_analytic_map(race_id, type_id)
+
+    with ThreadPoolExecutor(max_workers=len(fetches)) as executor:
+        futures = [executor.submit(fetch_one, ft, tid, idx) for ft, tid, idx in fetches]
+        for future in as_completed(futures):
+            fetch_type, type_id, idx, data = future.result()
+            if fetch_type == "map":
+                if type_id == "CRST":
+                    course_times = data
+                elif type_id == "SKIT":
+                    ski_times = data
+                elif type_id == "RNGT":
+                    range_times = data
+                elif type_id == "STTM":
+                    shooting_times = data
+            elif fetch_type == "course_lap" and idx is not None:
+                course_laps[idx] = data
+            elif fetch_type == "range_lap" and idx is not None:
+                range_laps[idx] = data
+            elif fetch_type == "shooting_lap" and idx is not None:
+                shooting_laps[idx] = data
 
     rows = []
     for res in results:
@@ -945,7 +999,7 @@ def handle_results(args: argparse.Namespace) -> int:
 
         misses_list = _parse_shootings(res.get("Shootings") or res.get("ShootingTotal"))
         misses_total, prone_total, standing_total = _shooting_totals(misses_list)
-        prone1, prone2, standing1, standing2 = _shooting_stages(misses_list)
+        prone1, prone2, standing1, standing2 = _shooting_stages(misses_list, stages)
 
         start_rank = res.get("StartOrder") or res.get("StartPosition") or "-"
         start_delay = res.get("StartInfo") or "-"

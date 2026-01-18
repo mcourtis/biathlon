@@ -23,6 +23,9 @@ from .commands import (
     handle_athlete_id,
     handle_athlete_info,
     handle_athlete_results,
+    handle_brief_event,
+    handle_brief_post_race,
+    handle_brief_startlist,
     handle_ceremony,
     handle_cumulate_results,
     handle_cumulate_ski,
@@ -34,13 +37,10 @@ from .commands import (
     handle_cumulate_penalty,
     handle_cumulate_remontada,
     handle_events,
-    handle_post_race,
-    handle_record_lap,
     handle_results,
     handle_scores,
     handle_seasons,
     handle_shooting,
-    handle_startlist,
 )
 
 
@@ -100,17 +100,17 @@ _biathlon_completion() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="seasons events results cumulate record standings ceremony biathlete shooting startlist post-race"
+    commands="seasons events results cumulate standings ceremony biathlete shooting brief"
 
     case "${COMP_WORDS[1]}" in
         cumulate)
             subcommands="results ski pursuit course range shooting miss penalty remontada"
             ;;
-        record)
-            subcommands="lap"
-            ;;
         biathlete)
             subcommands="info results"
+            ;;
+        brief)
+            subcommands="event startlist post-race"
             ;;
         *)
             subcommands=""
@@ -139,13 +139,11 @@ _biathlon() {
         'events:List events'
         'results:Show race results'
         'cumulate:Cumulative statistics'
-        'record:Record lists'
         'standings:Cup standings'
         'ceremony:Medal ranking'
         'biathlete:Biathlete information'
         'shooting:Shooting accuracy'
-        'startlist:Startlist analysis'
-        'post-race:Post-race analysis'
+        'brief:Race analysis (event, startlist, post-race)'
     )
 
     _arguments -C \\
@@ -161,11 +159,11 @@ _biathlon() {
                 cumulate)
                     _values 'subcommand' results ski pursuit course range shooting miss penalty remontada
                     ;;
-                record)
-                    _values 'subcommand' lap
-                    ;;
                 biathlete)
                     _values 'subcommand' info results id
+                    ;;
+                brief)
+                    _values 'subcommand' event startlist post-race
                     ;;
             esac
             ;;
@@ -510,54 +508,67 @@ def build_parser() -> argparse.ArgumentParser:
     add_output_flag(athlete_id)
     athlete_id.set_defaults(func=handle_athlete_id)
 
-    # --- record ---
-    record_parser = subparsers.add_parser("record", help="Show records (lap, etc.)", formatter_class=CompactOptionalFormatter, add_help=False)
-    record_help: dict[str, str] = {}
+    # --- brief ---
+    brief_parser = subparsers.add_parser(
+        "brief",
+        help="Race analysis (event, startlist, post-race)",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
+    brief_help: dict[str, str] = {}
 
-    def _show_record_help(_args: argparse.Namespace) -> int:
-        print("usage: biathlon record <subcommand> [options]\n")
+    def _show_brief_help(_args: argparse.Namespace) -> int:
+        print("usage: biathlon brief <subcommand> [options]\n")
         print("subcommands:")
-        width = max((len(name) for name in record_sub.choices.keys()), default=0)
-        for name in record_sub.choices.keys():
-            help_text = record_help.get(name, "")
+        width = max((len(name) for name in brief_sub.choices.keys()), default=0)
+        for name in brief_sub.choices.keys():
+            help_text = brief_help.get(name, "")
             print(f"  {name.ljust(width)}  {help_text}")
         return 0
 
-    record_parser._custom_help = _show_record_help
-    record_parser.set_defaults(func=_show_record_help, record_command=None)
-    record_sub = record_parser.add_subparsers(dest="record_command", title="subcommands", metavar="")
+    brief_parser._custom_help = _show_brief_help
+    brief_parser.set_defaults(func=_show_brief_help, brief_command=None)
+    brief_sub = brief_parser.add_subparsers(dest="brief_command", title="subcommands", metavar="")
 
-    record_lap = record_sub.add_parser("lap", help="Top lap times", formatter_class=CompactOptionalFormatter, add_help=False)
-    record_help["lap"] = "Top lap times"
-    record_lap.add_argument("--event", default="", help="Event id")
-    record_lap.add_argument("--discipline", default="", choices=["individual", "sprint", "pursuit", "massstart", "mass-start", ""], help="Discipline filter")
-    record_lap.add_argument("--men", action="store_true", help="Show men")
-    add_output_flag(record_lap)
-    record_lap.set_defaults(func=handle_record_lap)
+    # brief event
+    brief_event = brief_sub.add_parser(
+        "event",
+        help="Venue history and records (before an event)",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
+    brief_help["event"] = "Venue history and records (before an event)"
+    brief_event.add_argument("--event", default="", help="Event id (default: current/upcoming WC event)")
+    brief_event.add_argument("--men", action="store_true", help="Show men (default: women)")
+    brief_event.add_argument("--major", action="store_true", help="Use WC+WCH+OWG stats")
+    add_output_flag(brief_event)
+    brief_event.set_defaults(func=handle_brief_event)
 
-    # --- startlist ---
-    startlist_parser = subparsers.add_parser(
+    # brief startlist
+    brief_startlist = brief_sub.add_parser(
         "startlist",
-        help="Analyze race startlists (beta)",
+        help="Startlist analysis (before a race)",
         formatter_class=CompactOptionalFormatter,
         add_help=False,
     )
-    startlist_parser.add_argument("--race", default="", help="Race id (default: latest WC startlist)")
-    startlist_parser.add_argument("--major", action="store_true", help="Use WC+WCH+OWG milestones")
-    add_output_flag(startlist_parser)
-    startlist_parser.set_defaults(func=handle_startlist)
+    brief_help["startlist"] = "Startlist analysis (before a race)"
+    brief_startlist.add_argument("--race", default="", help="Race id (default: latest WC startlist)")
+    brief_startlist.add_argument("--major", action="store_true", help="Use WC+WCH+OWG milestones")
+    add_output_flag(brief_startlist)
+    brief_startlist.set_defaults(func=handle_brief_startlist)
 
-    # --- post-race ---
-    post_race_parser = subparsers.add_parser(
+    # brief post-race
+    brief_post_race = brief_sub.add_parser(
         "post-race",
-        help="Post-race analysis (beta)",
+        help="Post-race analysis (after a race)",
         formatter_class=CompactOptionalFormatter,
         add_help=False,
     )
-    post_race_parser.add_argument("--race", default="", help="Race id (default: latest completed race)")
-    post_race_parser.add_argument("--major", action="store_true", help="Use WC+WCH+OWG milestones")
-    add_output_flag(post_race_parser)
-    post_race_parser.set_defaults(func=handle_post_race)
+    brief_help["post-race"] = "Post-race analysis (after a race)"
+    brief_post_race.add_argument("--race", default="", help="Race id (default: latest completed race)")
+    brief_post_race.add_argument("--major", action="store_true", help="Use WC+WCH+OWG milestones")
+    add_output_flag(brief_post_race)
+    brief_post_race.set_defaults(func=handle_brief_post_race)
 
     return parser
 
@@ -615,6 +626,11 @@ def main(argv: Iterable[str] | None = None) -> int:
 
     try:
         return args.func(args)
+    except KeyboardInterrupt:
+        print()  # Print newline to clean up partial output
+        return 130
+    except BrokenPipeError:
+        return 0
     except BiathlonError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
@@ -633,17 +649,6 @@ def _require_subcommand(args: argparse.Namespace) -> bool:
             file=sys.stderr,
         )
         return True
-    if args.command == "record" and getattr(args, "record_command", None) is None:
-        print(
-            "\nbiathlon record: [ERROR]: the following arguments are required: <subcommand>\n\n"
-            "Usage: biathlon record <subcommand> [parameters]\n\n"
-            "Example: biathlon record lap --event <EVENT_ID>\n\n"
-            "To see help text, you can run:\n"
-            "  biathlon record help\n"
-            "  biathlon record <subcommand> help\n",
-            file=sys.stderr,
-        )
-        return True
     if args.command == "biathlete" and getattr(args, "athlete_command", None) is None:
         print(
             "\nbiathlon biathlete: [ERROR]: the following arguments are required: <subcommand>\n\n"
@@ -652,6 +657,17 @@ def _require_subcommand(args: argparse.Namespace) -> bool:
             "To see help text, you can run:\n"
             "  biathlon biathlete help\n"
             "  biathlon biathlete <subcommand> help\n",
+            file=sys.stderr,
+        )
+        return True
+    if args.command == "brief" and getattr(args, "brief_command", None) is None:
+        print(
+            "\nbiathlon brief: [ERROR]: the following arguments are required: <subcommand>\n\n"
+            "Usage: biathlon brief <subcommand> [parameters]\n\n"
+            "Example: biathlon brief startlist\n\n"
+            "To see help text, you can run:\n"
+            "  biathlon brief help\n"
+            "  biathlon brief <subcommand> help\n",
             file=sys.stderr,
         )
         return True

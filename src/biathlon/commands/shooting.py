@@ -17,7 +17,7 @@ from ..constants import (
     SINGLE_MIXED_RELAY_DISCIPLINE,
 )
 from ..formatting import Color, format_pct, is_pretty_output, rank_style, render_table
-from ..utils import extract_results
+from ..utils import extract_results, parse_relay_shootings
 from .results import _has_completed_results
 from .scores import find_cup_id
 
@@ -63,17 +63,48 @@ def accumulate_accuracy_by_athlete(results: list[dict]) -> dict[str, dict]:
         if not ident:
             continue
         race_id = res.get("_race_id") or ""
-        parts = [p.strip() for p in shootings.split("+") if p.strip()]
-        if not parts:
-            continue
-        misses_list: list[int] = []
-        for part in parts:
-            try:
-                misses_list.append(int(part))
-            except ValueError:
-                misses_list.append(0)
-        shots = len(parts) * 5
-        total_misses = sum(misses_list)
+        discipline = res.get("_discipline", "")
+        is_relay = discipline in {RELAY_DISCIPLINE, SINGLE_MIXED_RELAY_DISCIPLINE}
+
+        if is_relay:
+            # Relay format: "P+S P+S" where P=penalties, S=spares used
+            # Shots = 5 + spares per stage, Misses = penalties + spares
+            stages = parse_relay_shootings(shootings)
+            if not stages:
+                continue
+            prone, standing = stages
+            prone_pen, prone_spare = prone
+            stand_pen, stand_spare = standing
+            prone_shots = 5 + prone_spare
+            stand_shots = 5 + stand_spare
+            prone_misses = prone_pen + prone_spare
+            stand_misses = stand_pen + stand_spare
+            shots = prone_shots + stand_shots
+            total_misses = prone_misses + stand_misses
+        else:
+            # Individual race format: "0+1+0+1" (misses per stage, 5 shots each)
+            parts = [p.strip() for p in shootings.split("+") if p.strip()]
+            if not parts:
+                continue
+            misses_list: list[int] = []
+            for part in parts:
+                try:
+                    misses_list.append(int(part))
+                except ValueError:
+                    misses_list.append(0)
+            shots = len(parts) * 5
+            total_misses = sum(misses_list)
+            prone_shots = 0
+            stand_shots = 0
+            prone_misses = 0
+            stand_misses = 0
+            for idx, miss_val in enumerate(misses_list):
+                if idx % 2 == 0:
+                    prone_shots += 5
+                    prone_misses += miss_val
+                else:
+                    stand_shots += 5
+                    stand_misses += miss_val
         entry = stats.setdefault(ident, {
             "name": res.get("Name") or res.get("ShortName") or "",
             "nat": res.get("Nat") or "",
@@ -90,13 +121,10 @@ def accumulate_accuracy_by_athlete(results: list[dict]) -> dict[str, dict]:
             entry["races"] += 1
         entry["shots"] += shots
         entry["misses"] += total_misses
-        for idx, miss_val in enumerate(misses_list):
-            if idx % 2 == 0:
-                entry["prone_shots"] += 5
-                entry["prone_misses"] += miss_val
-            else:
-                entry["standing_shots"] += 5
-                entry["standing_misses"] += miss_val
+        entry["prone_shots"] += prone_shots
+        entry["prone_misses"] += prone_misses
+        entry["standing_shots"] += stand_shots
+        entry["standing_misses"] += stand_misses
     return stats
 
 

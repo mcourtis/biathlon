@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..api import (
     BiathlonError,
@@ -36,6 +37,8 @@ from ..utils import (
 )
 from .results import _get_top_n_ibu_ids
 
+MAX_FETCH_WORKERS = 8
+
 
 def _fetch_analytic_map(race_id: str, type_id: str) -> dict[str, str]:
     """Fetch analytic times keyed by IBUId/Bib/Name."""
@@ -60,6 +63,38 @@ def _lookup_analytic_time(times: dict[str, str], res: dict) -> str:
         if key and str(key) in times:
             return times[str(key)]
     return ""
+
+
+def _prefetch_analytic_maps(
+    requests: list[tuple[str, str]],
+) -> dict[tuple[str, str], dict[str, str]]:
+    """Fetch multiple analytic maps in parallel.
+
+    Args:
+        requests: List of (race_id, type_id) tuples to fetch.
+
+    Returns:
+        Dict mapping (race_id, type_id) to the analytic map result.
+    """
+    if not requests:
+        return {}
+    results: dict[tuple[str, str], dict[str, str]] = {}
+    if len(requests) == 1:
+        race_id, type_id = requests[0]
+        results[(race_id, type_id)] = _fetch_analytic_map(race_id, type_id)
+        return results
+    with ThreadPoolExecutor(max_workers=_max_workers(len(requests))) as executor:
+        futures = {
+            executor.submit(_fetch_analytic_map, race_id, type_id): (race_id, type_id)
+            for race_id, type_id in requests
+        }
+        for future in as_completed(futures):
+            key = futures[future]
+            try:
+                results[key] = future.result()
+            except Exception:
+                results[key] = {}
+    return results
 
 
 def _parse_shootings(value: str | None) -> list[int]:
@@ -109,11 +144,16 @@ def _race_list(season_id: str, event_id: str | None) -> list[dict]:
     """Return list of races for season or event."""
     events = get_events(season_id, level=1) if not event_id else [{"EventId": event_id}]
     races: list[dict] = []
-    for event in events:
-        ev_id = event.get("EventId")
-        if not ev_id:
-            continue
-        races.extend(get_races(ev_id))
+    event_ids = [event.get("EventId") for event in events if event.get("EventId")]
+    if not event_ids:
+        return races
+    if len(event_ids) == 1:
+        races.extend(get_races(event_ids[0]))
+        return races
+    with ThreadPoolExecutor(max_workers=_max_workers(len(event_ids))) as executor:
+        futures = {executor.submit(get_races, ev_id): ev_id for ev_id in event_ids}
+        for future in as_completed(futures):
+            races.extend(future.result())
     return races
 
 
@@ -136,6 +176,39 @@ def _discipline_filter(discipline: str) -> tuple[set[str], str | None, bool]:
     if discipline == "single-mixed-relay":
         return {SINGLE_MIXED_RELAY_DISCIPLINE}, RELAY_MIXED_CAT, True
     raise BiathlonError(f"unknown discipline {discipline}")
+
+
+def _max_workers(total: int) -> int:
+    """Return a capped worker count for concurrent fetches."""
+    return min(MAX_FETCH_WORKERS, max(1, total))
+
+
+def _race_cat_allows(
+    race_disc: str,
+    cat_id: str,
+    allow_relay: bool,
+    cat_filter: str | None,
+    gender_cat: str,
+) -> bool:
+    """Return True when cat_id matches the requested scope."""
+    if race_disc in {RELAY_DISCIPLINE, SINGLE_MIXED_RELAY_DISCIPLINE}:
+        if not allow_relay:
+            return False
+        if cat_id:
+            if cat_filter and cat_id != cat_filter:
+                return False
+            if not cat_filter and cat_id == RELAY_MIXED_CAT:
+                return False
+            if not cat_filter and cat_id not in {RELAY_MEN_CAT, RELAY_WOMEN_CAT}:
+                return False
+            if not cat_filter and cat_id != gender_cat:
+                return False
+            if cat_id not in {RELAY_MEN_CAT, RELAY_WOMEN_CAT, RELAY_MIXED_CAT}:
+                return False
+    else:
+        if cat_id and cat_id != gender_cat:
+            return False
+    return True
 
 
 def _event_label(payload: dict) -> str:
@@ -181,15 +254,47 @@ def _calc_accuracy(entry: dict) -> tuple[str, str, str]:
 
 
 def _apply_top_filter(
-    results: list[dict], top_n: int, cat_id: str, season_id: str
+    results: list[dict],
+    top_n: int,
+    cat_id: str,
+    season_id: str,
+    top_ibu_ids: set[str] | None = None,
 ) -> list[dict]:
-    """Filter results to top N WC athletes."""
+    """Filter results to top N WC athletes.
+
+    Args:
+        results: List of race results to filter.
+        top_n: Number of top athletes to include (0 for all).
+        cat_id: Category ID (e.g., 'SW' for women).
+        season_id: Season ID.
+        top_ibu_ids: Pre-fetched set of top IBU IDs to use (avoids repeated API calls).
+    """
     if top_n <= 0:
         return results
-    top_ibu_ids = _get_top_n_ibu_ids(cat_id, top_n, season_id)
+    if top_ibu_ids is None:
+        top_ibu_ids = set(_get_top_n_ibu_ids(cat_id, top_n, season_id))
     if not top_ibu_ids:
         return results
     return [r for r in results if r.get("IBUId") in top_ibu_ids]
+
+
+def _get_top_ibu_ids_set(
+    payloads: list[tuple[str, dict]], top_n: int, season_id: str
+) -> set[str] | None:
+    """Pre-fetch top IBU IDs for filtering.
+
+    Returns a set of top IBU IDs based on the first non-relay payload's category,
+    or None if top_n <= 0.
+    """
+    if top_n <= 0:
+        return None
+    # Find the first non-relay payload to get the category
+    for _, payload in payloads:
+        if not _is_relay(payload):
+            cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
+            if cat_id:
+                return set(_get_top_n_ibu_ids(cat_id, top_n, season_id))
+    return None
 
 
 def _apply_limit(rows: list[dict], limit: int) -> list[dict]:
@@ -305,7 +410,8 @@ def _collect_races(
         disc_set = set(disc_set)
         disc_set.add(RELAY_DISCIPLINE)
 
-    payloads: list[tuple[str, dict]] = []
+    gender_cat = GENDER_TO_CAT["men"] if getattr(args, "men", False) else GENDER_TO_CAT["women"]
+    candidates: list[tuple[str, str]] = []
     for race in sorted(races, key=get_race_start_key):
         race_id = race.get("RaceId") or race.get("Id")
         if not race_id:
@@ -313,29 +419,39 @@ def _collect_races(
         race_disc = str(race.get("DisciplineId") or "").upper()
         if race_disc not in disc_set:
             continue
+        race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
+        if not _race_cat_allows(race_disc, race_cat, allow_relay, cat_filter, gender_cat):
+            continue
+        candidates.append((race_id, race_disc))
+    if not candidates:
+        return ([], season_id)
+
+    payload_by_id: dict[str, dict] = {}
+    if len(candidates) == 1:
+        race_id = candidates[0][0]
         try:
-            payload = get_race_results(race_id)
+            payload_by_id[race_id] = get_race_results(race_id)
         except BiathlonError:
+            pass
+    else:
+        with ThreadPoolExecutor(max_workers=_max_workers(len(candidates))) as executor:
+            futures = {executor.submit(get_race_results, race_id): race_id for race_id, _ in candidates}
+            for future in as_completed(futures):
+                race_id = futures[future]
+                try:
+                    payload_by_id[race_id] = future.result()
+                except BiathlonError:
+                    continue
+
+    payloads: list[tuple[str, dict]] = []
+    for race_id, race_disc in candidates:
+        payload = payload_by_id.get(race_id)
+        if not payload:
             continue
         comp = payload.get("Competition") or {}
         comp_cat = str(comp.get("catId") or comp.get("CatId") or "").upper()
-        gender_cat = GENDER_TO_CAT["men"] if getattr(args, "men", False) else GENDER_TO_CAT["women"]
-        if race_disc in {RELAY_DISCIPLINE, SINGLE_MIXED_RELAY_DISCIPLINE}:
-            if not allow_relay:
-                continue
-            if cat_filter and comp_cat and comp_cat != cat_filter:
-                continue
-            if not cat_filter and comp_cat == RELAY_MIXED_CAT:
-                continue
-            if not cat_filter and comp_cat and comp_cat not in {RELAY_MEN_CAT, RELAY_WOMEN_CAT}:
-                continue
-            if not cat_filter and comp_cat and comp_cat != gender_cat:
-                continue
-            if comp_cat and comp_cat not in {RELAY_MEN_CAT, RELAY_WOMEN_CAT, RELAY_MIXED_CAT}:
-                continue
-        else:
-            if comp_cat and comp_cat != gender_cat:
-                continue
+        if not _race_cat_allows(race_disc, comp_cat, allow_relay, cat_filter, gender_cat):
+            continue
         payloads.append((race_id, payload))
     return (payloads, season_id)
 
@@ -435,10 +551,13 @@ def handle_cumulate_results(args: argparse.Namespace) -> int:
         print("no races found for the requested scope", file=sys.stderr)
         return 1
 
+    # Pre-fetch top IBU IDs once for filtering (avoids repeated API calls)
+    top_ibu_ids = _get_top_ibu_ids_set(payloads, args.top, season_id)
+    include_relay = bool(getattr(args, "include_relay", False))
+
     entries: dict[str, dict] = {}
     total_races = 0
     for race_id, payload in payloads:
-        include_relay = bool(getattr(args, "include_relay", False))
         is_relay = _is_relay(payload)
         if is_relay and include_relay:
             results = _relay_leg_results(payload)
@@ -449,21 +568,9 @@ def handle_cumulate_results(args: argparse.Namespace) -> int:
         base_secs = base_time_seconds(results) if not is_relay else None
         cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
         if not is_relay:
-            results = _apply_top_filter(results, args.top, cat_id, season_id)
+            results = _apply_top_filter(results, args.top, cat_id, season_id, top_ibu_ids)
         if not results:
             continue
-        leg_cumulative: dict[tuple[str, int], float] = {}
-        if is_relay and include_relay:
-            for res in results:
-                bib = str(res.get("Bib") or "")
-                leg = res.get("Leg")
-                if not bib or not isinstance(leg, int):
-                    continue
-                cum_val = get_first_time(res, ["LegResult", "LegTime", "LegTimeTotal", "TotalTime", "Result"])
-                cum_secs = parse_time_seconds(cum_val) if cum_val else None
-                if cum_secs is None:
-                    continue
-                leg_cumulative[(bib, leg)] = cum_secs
         race_has_data = False
         leg_cumulative: dict[tuple[str, int], float] = {}
         if is_relay:
@@ -550,6 +657,18 @@ def handle_cumulate_ski(args: argparse.Namespace) -> int:
     if not payloads:
         print("no races found for the requested scope", file=sys.stderr)
         return 1
+
+    # Prefetch analytic data in parallel (non-relay races only)
+    analytic_requests = [
+        (race_id, "SKIT")
+        for race_id, payload in payloads
+        if not _is_relay(payload)
+    ]
+    prefetched_analytic = _prefetch_analytic_maps(analytic_requests)
+
+    # Pre-fetch top IBU IDs once for filtering
+    top_ibu_ids = _get_top_ibu_ids_set(payloads, args.top, season_id)
+
     entries: dict[str, dict] = {}
     total_races = 0
     for race_id, payload in payloads:
@@ -559,10 +678,10 @@ def handle_cumulate_ski(args: argparse.Namespace) -> int:
         cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
         if _is_relay(payload):
             continue
-        results = _apply_top_filter(results, args.top, cat_id, season_id)
+        results = _apply_top_filter(results, args.top, cat_id, season_id, top_ibu_ids)
         if not results:
             continue
-        ski_times = _fetch_analytic_map(race_id, "SKIT")
+        ski_times = prefetched_analytic.get((race_id, "SKIT"), {})
         race_has_data = False
         for res in results:
             ident = res.get("IBUId") or res.get("Name") or res.get("ShortName") or ""
@@ -623,6 +742,10 @@ def handle_cumulate_pursuit(args: argparse.Namespace) -> int:
     if not payloads:
         print("no pursuit races found", file=sys.stderr)
         return 1
+
+    # Pre-fetch top IBU IDs once for filtering
+    top_ibu_ids = _get_top_ibu_ids_set(payloads, args.top, season_id)
+
     entries: dict[str, dict] = {}
     total_races = 0
     for _, payload in payloads:
@@ -631,7 +754,7 @@ def handle_cumulate_pursuit(args: argparse.Namespace) -> int:
             continue
         base_secs = base_time_seconds(results)
         cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
-        results = _apply_top_filter(results, args.top, cat_id, season_id)
+        results = _apply_top_filter(results, args.top, cat_id, season_id, top_ibu_ids)
         if not results:
             continue
         total_races += 1
@@ -693,10 +816,40 @@ def handle_cumulate_course(args: argparse.Namespace) -> int:
     if not payloads:
         print("no races found for the requested scope", file=sys.stderr)
         return 1
+
+    # Prefetch analytic data in parallel
+    include_relay = bool(getattr(args, "include_relay", False))
+    analytic_requests: list[tuple[str, str]] = []
+    relay_race_ids: list[str] = []
+    for race_id, payload in payloads:
+        if _is_relay(payload):
+            if include_relay:
+                relay_race_ids.append(race_id)
+        else:
+            analytic_requests.append((race_id, "CRST"))
+    prefetched_analytic = _prefetch_analytic_maps(analytic_requests)
+
+    # Prefetch relay course times in parallel
+    prefetched_relay_course: dict[str, dict[tuple[str, int], float]] = {}
+    if relay_race_ids:
+        with ThreadPoolExecutor(max_workers=_max_workers(len(relay_race_ids))) as executor:
+            futures = {
+                executor.submit(_fetch_leg_total_times, rid, "CRST"): rid
+                for rid in relay_race_ids
+            }
+            for future in as_completed(futures):
+                rid = futures[future]
+                try:
+                    prefetched_relay_course[rid] = future.result()
+                except Exception:
+                    prefetched_relay_course[rid] = {}
+
+    # Pre-fetch top IBU IDs once for filtering (avoids repeated API calls)
+    top_ibu_ids = _get_top_ibu_ids_set(payloads, args.top, season_id)
+
     entries: dict[str, dict] = {}
     total_races = 0
     for race_id, payload in payloads:
-        include_relay = bool(getattr(args, "include_relay", False))
         is_relay = _is_relay(payload)
         if is_relay and include_relay:
             results = _relay_leg_results(payload)
@@ -706,12 +859,12 @@ def handle_cumulate_course(args: argparse.Namespace) -> int:
             continue
         cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
         if not is_relay:
-            results = _apply_top_filter(results, args.top, cat_id, season_id)
+            results = _apply_top_filter(results, args.top, cat_id, season_id, top_ibu_ids)
         if not results:
             continue
         race_has_data = False
-        course_times = _fetch_analytic_map(race_id, "CRST") if not is_relay else {}
-        relay_course_times = _fetch_leg_total_times(race_id, "CRST") if is_relay else {}
+        course_times = prefetched_analytic.get((race_id, "CRST"), {}) if not is_relay else {}
+        relay_course_times = prefetched_relay_course.get(race_id, {}) if is_relay else {}
         for res in results:
             ident = res.get("IBUId") or res.get("Name") or res.get("ShortName") or ""
             if not ident:
@@ -791,20 +944,47 @@ def _cumulate_range_or_shooting(args: argparse.Namespace, kind: str) -> int:
     if not payloads:
         print("no races found for the requested scope", file=sys.stderr)
         return 1
-    entries: dict[str, dict] = {}
-    total_races = 0
+
+    include_relay = bool(getattr(args, "include_relay", False))
     type_id = "RNGT" if kind == "range" else "STTM"
     time_label = "Range" if kind == "range" else "Shooting"
     relay_stage_keys = ("R1", "R2") if kind == "range" else ("S1", "S2")
+
+    # Prefetch analytic data in parallel
+    analytic_requests = [
+        (race_id, type_id)
+        for race_id, payload in payloads
+        if not _is_relay(payload)
+    ]
+    prefetched_analytic = _prefetch_analytic_maps(analytic_requests)
+
+    # Prefetch relay lap times in parallel
+    prefetched_relay_laps: dict[str, dict[tuple[str, int], dict[str, str]]] = {}
+    if include_relay:
+        relay_race_ids = [rid for rid, p in payloads if _is_relay(p)]
+        if relay_race_ids:
+            lap_prefix = "RNG" if kind == "range" else "S"
+            lap_suffix = "" if kind == "range" else "TM"
+            with ThreadPoolExecutor(max_workers=_max_workers(len(relay_race_ids))) as executor:
+                futures = {
+                    executor.submit(_fetch_leg_lap_times, rid, lap_prefix, lap_suffix, 8, 2): rid
+                    for rid in relay_race_ids
+                }
+                for future in as_completed(futures):
+                    rid = futures[future]
+                    try:
+                        prefetched_relay_laps[rid] = future.result()
+                    except Exception:
+                        prefetched_relay_laps[rid] = {}
+
+    # Pre-fetch top IBU IDs once for filtering
+    top_ibu_ids = _get_top_ibu_ids_set(payloads, args.top, season_id)
+
+    entries: dict[str, dict] = {}
+    total_races = 0
     for race_id, payload in payloads:
-        include_relay = bool(getattr(args, "include_relay", False))
         is_relay = _is_relay(payload)
-        relay_laps = {}
-        if is_relay and include_relay:
-            if kind == "range":
-                relay_laps = _fetch_leg_lap_times(race_id, "RNG", "", 8, 2)
-            else:
-                relay_laps = _fetch_leg_lap_times(race_id, "S", "TM", 8, 2)
+        relay_laps = prefetched_relay_laps.get(race_id, {}) if is_relay and include_relay else {}
         if is_relay and include_relay:
             results = _relay_leg_results(payload)
         else:
@@ -813,11 +993,11 @@ def _cumulate_range_or_shooting(args: argparse.Namespace, kind: str) -> int:
             continue
         cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
         if not is_relay:
-            results = _apply_top_filter(results, args.top, cat_id, season_id)
+            results = _apply_top_filter(results, args.top, cat_id, season_id, top_ibu_ids)
         if not results:
             continue
         race_has_data = False
-        times = _fetch_analytic_map(race_id, type_id) if not is_relay else {}
+        times = prefetched_analytic.get((race_id, type_id), {}) if not is_relay else {}
         for res in results:
             ident = res.get("IBUId") or res.get("Name") or res.get("ShortName") or ""
             if not ident:
@@ -936,10 +1116,14 @@ def handle_cumulate_miss(args: argparse.Namespace) -> int:
     if not payloads:
         print("no races found for the requested scope", file=sys.stderr)
         return 1
+
+    # Pre-fetch top IBU IDs once for filtering
+    top_ibu_ids = _get_top_ibu_ids_set(payloads, args.top, season_id)
+    include_relay = bool(getattr(args, "include_relay", False))
+
     entries: dict[str, dict] = {}
     total_races = 0
     for race_id, payload in payloads:
-        include_relay = bool(getattr(args, "include_relay", False))
         is_relay = _is_relay(payload)
         if is_relay and not include_relay:
             continue
@@ -951,7 +1135,7 @@ def handle_cumulate_miss(args: argparse.Namespace) -> int:
             continue
         cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
         if not is_relay:
-            results = _apply_top_filter(results, args.top, cat_id, season_id)
+            results = _apply_top_filter(results, args.top, cat_id, season_id, top_ibu_ids)
         if not results:
             continue
         race_has_data = False
@@ -1058,10 +1242,52 @@ def handle_cumulate_penalty(args: argparse.Namespace) -> int:
     if not payloads:
         print("no races found for the requested scope", file=sys.stderr)
         return 1
+
+    include_relay = bool(getattr(args, "include_relay", False))
+
+    # Prefetch analytic data for non-relay races (CRST and RNGT) in parallel
+    analytic_requests: list[tuple[str, str]] = []
+    for race_id, payload in payloads:
+        if not _is_relay(payload):
+            analytic_requests.append((race_id, "CRST"))
+            analytic_requests.append((race_id, "RNGT"))
+    prefetched_analytic = _prefetch_analytic_maps(analytic_requests)
+
+    # Prefetch relay data in parallel
+    prefetched_range_laps: dict[str, dict[tuple[str, int], dict[str, str]]] = {}
+    prefetched_course_leg: dict[str, dict[tuple[str, int], float]] = {}
+    if include_relay:
+        relay_race_ids = [rid for rid, p in payloads if _is_relay(p)]
+        if relay_race_ids:
+            with ThreadPoolExecutor(max_workers=_max_workers(len(relay_race_ids) * 2)) as executor:
+                lap_futures = {
+                    executor.submit(_fetch_leg_lap_times, rid, "RNG", "", 8, 2): ("laps", rid)
+                    for rid in relay_race_ids
+                }
+                course_futures = {
+                    executor.submit(_fetch_leg_total_times, rid, "CRST"): ("course", rid)
+                    for rid in relay_race_ids
+                }
+                all_futures = {**lap_futures, **course_futures}
+                for future in as_completed(all_futures):
+                    kind, rid = all_futures[future]
+                    try:
+                        if kind == "laps":
+                            prefetched_range_laps[rid] = future.result()
+                        else:
+                            prefetched_course_leg[rid] = future.result()
+                    except Exception:
+                        if kind == "laps":
+                            prefetched_range_laps[rid] = {}
+                        else:
+                            prefetched_course_leg[rid] = {}
+
+    # Pre-fetch top IBU IDs once for filtering
+    top_ibu_ids = _get_top_ibu_ids_set(payloads, args.top, season_id)
+
     entries: dict[str, dict] = {}
     total_races = 0
     for race_id, payload in payloads:
-        include_relay = bool(getattr(args, "include_relay", False))
         is_relay = _is_relay(payload)
         if is_relay and not include_relay:
             continue
@@ -1074,13 +1300,13 @@ def handle_cumulate_penalty(args: argparse.Namespace) -> int:
         base_secs = base_time_seconds(results) if not is_relay else None
         cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
         if not is_relay:
-            results = _apply_top_filter(results, args.top, cat_id, season_id)
+            results = _apply_top_filter(results, args.top, cat_id, season_id, top_ibu_ids)
         if not results:
             continue
-        course_times = _fetch_analytic_map(race_id, "CRST") if not is_relay else {}
-        range_times = _fetch_analytic_map(race_id, "RNGT") if not is_relay else {}
-        range_laps = _fetch_leg_lap_times(race_id, "RNG", "", 8, 2) if is_relay else {}
-        course_leg_times = _fetch_leg_total_times(race_id, "CRST") if is_relay else {}
+        course_times = prefetched_analytic.get((race_id, "CRST"), {}) if not is_relay else {}
+        range_times = prefetched_analytic.get((race_id, "RNGT"), {}) if not is_relay else {}
+        range_laps = prefetched_range_laps.get(race_id, {}) if is_relay else {}
+        course_leg_times = prefetched_course_leg.get(race_id, {}) if is_relay else {}
         leg_cumulative: dict[tuple[str, int], float] = {}
         if is_relay:
             for res in results:
@@ -1267,11 +1493,14 @@ def handle_cumulate_remontada(args: argparse.Namespace) -> int:
         labels.append(uniq)
         race_payloads.append(payload)
 
+    # Pre-fetch top IBU IDs once for filtering
+    top_ibu_ids = _get_top_ibu_ids_set(payloads, args.top, season_id)
+
     entries: dict[str, dict] = {}
     for label, payload in zip(labels, race_payloads):
         results = extract_results(payload)
         cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
-        results = _apply_top_filter(results, args.top, cat_id, season_id)
+        results = _apply_top_filter(results, args.top, cat_id, season_id, top_ibu_ids)
         for res in results:
             status = _status_label(res)
             start_rank = res.get("StartOrder") or res.get("StartPosition")

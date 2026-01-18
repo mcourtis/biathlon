@@ -7,16 +7,41 @@ import re
 import sys
 from typing import Any
 
-from ..api import BiathlonError, get_all_results, get_analytic_results, get_race_results
-from ..constants import RELAY_DISCIPLINE, SINGLE_MIXED_RELAY_DISCIPLINE, SKI_LAPS
-from ..formatting import is_pretty_output, render_table
+from ..api import (
+    BiathlonError,
+    get_all_results,
+    get_analytic_results,
+    get_cup_results,
+    get_current_season_id,
+    get_race_results,
+)
+from ..constants import (
+    INDIVIDUAL_DISCIPLINES,
+    RELAY_DISCIPLINE,
+    SINGLE_MIXED_RELAY_DISCIPLINE,
+    SKI_LAPS,
+)
+from ..formatting import Color, is_pretty_output, render_table
 from ..utils import format_race_header, get_first_time, parse_time_seconds, format_seconds
 from .relay import _has_completed_results as _has_completed_relay_results
 from .results import _find_latest_race_with_results_any, _has_completed_results
+from .startlist import _get_cup_ids_for_race
 
 
 MAJOR_LEVELS = {"WC", "WCH", "OWG"}
 TOP_N = 6
+DISCIPLINE_LABELS = {
+    "SP": "Sprint",
+    "PU": "Pursuit",
+    "IN": "Individual",
+    "MS": "Mass Start",
+}
+
+
+def _format_section_title(text: str, args: argparse.Namespace) -> str:
+    if not is_pretty_output(args):
+        return text
+    return Color.section_title(text)
 
 
 def _parse_rank(value: Any) -> int | None:
@@ -26,8 +51,103 @@ def _parse_rank(value: Any) -> int | None:
     return None
 
 
+def _parse_int(value: Any) -> int | None:
+    text = str(value).strip()
+    if not text:
+        return None
+    try:
+        return int(text)
+    except ValueError:
+        return None
+
+
 def _is_relay_discipline(discipline: str) -> bool:
     return discipline in {RELAY_DISCIPLINE, SINGLE_MIXED_RELAY_DISCIPLINE}
+
+
+def _row_ibu_id(row: dict) -> str:
+    for key in ("IBUId", "IbuId", "ibuId", "Id"):
+        val = row.get(key)
+        if val:
+            return str(val)
+    return ""
+
+
+def _sort_results_by_rank(results: list[dict]) -> list[dict]:
+    def _key(res: dict) -> tuple[int, int]:
+        rank_val = _parse_rank(res.get("Rank") or res.get("Standing") or res.get("ResultOrder"))
+        order_val = _parse_rank(res.get("ResultOrder")) or 10**9
+        return (rank_val if rank_val is not None else 10**9, order_val)
+
+    return sorted(results, key=_key)
+
+
+def _collect_flower_entries(results: list[dict], is_team: bool) -> list[dict]:
+    filtered = [res for res in results if bool(res.get("IsTeam")) == is_team]
+    sorted_results = _sort_results_by_rank(filtered)
+    entries = []
+    for res in sorted_results:
+        rank_val = _parse_rank(res.get("Rank") or res.get("Standing") or res.get("ResultOrder"))
+        if rank_val is None or rank_val > TOP_N:
+            continue
+        name = res.get("Name") or res.get("ShortName") or ""
+        nat = res.get("Nat") or ""
+        if is_team and not name:
+            name = nat
+        entries.append({
+            "rank": rank_val,
+            "name": name,
+            "nat": nat,
+            "ibu_id": str(res.get("IBUId") or ""),
+        })
+        if len(entries) >= TOP_N:
+            break
+    return entries
+
+
+def _fetch_cup_rows(cup_id: str | None) -> list[dict]:
+    if not cup_id:
+        return []
+    try:
+        payload = get_cup_results(cup_id)
+    except BiathlonError:
+        return []
+    return payload.get("Rows") or payload.get("Results") or []
+
+
+def _build_standings_lookup(rows: list[dict]) -> tuple[dict[str, dict], dict[str, dict]]:
+    by_id: dict[str, dict] = {}
+    by_name: dict[str, dict] = {}
+    for row in rows:
+        ibu_id = _row_ibu_id(row)
+        name = row.get("Name") or row.get("ShortName") or ""
+        if ibu_id:
+            by_id[ibu_id] = row
+        if name:
+            by_name[name] = row
+    return by_id, by_name
+
+
+def _format_rank_change(row: dict | None) -> str:
+    if not row:
+        return "-"
+    rank_val = _parse_rank(row.get("Rank") or row.get("Standing") or row.get("ResultOrder"))
+    if rank_val is None:
+        return "-"
+
+    diff_val = None
+    for key in ("RnkDiff", "RankDiff", "RankChange"):
+        if key in row:
+            diff_val = _parse_int(row.get(key))
+            if diff_val is None:
+                diff_val = 0
+            break
+
+    if diff_val is None:
+        return str(rank_val)
+
+    diff_text = f"{diff_val:+d}"
+    return f"{rank_val} ({diff_text})"
 
 
 def _make_key(ibu_id: str | None, bib: str | None, name: str | None, leg: int | None) -> str:
@@ -197,37 +317,6 @@ def _fetch_lap_times(race_id: str, discipline: str) -> list[dict]:
     return lap_rows[:TOP_N]
 
 
-def _best_zero_miss_stage(
-    ibu_id: str,
-    all_results: list[dict],
-    stage_cache: dict[str, dict[int, dict[str, float]]],
-) -> tuple[float | None, str, str]:
-    best_time: float | None = None
-    best_race = ""
-    best_stage = ""
-    for res in all_results:
-        race_id = res.get("RaceId") or ""
-        if not race_id:
-            continue
-        discipline = str(res.get("Comp") or "").upper()
-        stage_misses = _parse_stage_misses(res.get("Shootings") or res.get("ShootingTotal"))
-        if not stage_misses:
-            continue
-        stage_times = _fetch_stage_times_by_stage(race_id, stage_cache)
-        for stage_idx, times in stage_times.items():
-            for key, secs in times.items():
-                if not _key_matches_ibu_id(key, ibu_id):
-                    continue
-                miss_val = _stage_miss_for_index(stage_misses, stage_idx, discipline)
-                if miss_val is None or miss_val != 0:
-                    continue
-                if best_time is None or secs < best_time:
-                    best_time = secs
-                    best_race = race_id
-                    best_stage = _stage_label(stage_idx, discipline, _extract_leg_from_key(key))
-    return best_time, best_race, best_stage
-
-
 def handle_post_race(args: argparse.Namespace) -> int:
     """Show post-race highlights and milestones."""
     try:
@@ -255,6 +344,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
     results = payload.get("Results", []) or []
     team_results = [r for r in results if r.get("IsTeam")]
     leg_results = [r for r in results if not r.get("IsTeam")]
+    flower_entries = _collect_flower_entries(results, is_relay)
 
     entries = []
     key_to_entry: dict[str, dict] = {}
@@ -310,8 +400,54 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     flowers.add(entry["ibu_id"])
 
     print()
-    print(format_race_header(payload, race_id))
+    print(_format_section_title(format_race_header(payload, race_id), args))
     print()
+
+    if flower_entries:
+        headers = ["Rank", "Team", "Nat"] if is_relay else ["Rank", "Athlete", "Nat"]
+        rows = [[entry["rank"], entry["name"], entry["nat"]] for entry in flower_entries]
+        print(_format_section_title("Winner + flower ceremony (top 6):", args))
+        render_table(headers, rows, pretty=is_pretty_output(args))
+        print()
+    else:
+        print(_format_section_title("Winner + flower ceremony (top 6): none", args))
+        print()
+
+    if flower_entries and not is_relay and discipline in INDIVIDUAL_DISCIPLINES:
+        comp = payload.get("Competition") or {}
+        cat_id = str(comp.get("catId") or comp.get("CatId") or "").upper()
+        sport_evt = payload.get("SportEvt") or {}
+        season_id = str(sport_evt.get("SeasonId") or "") or get_current_season_id()
+        total_cup_id, disc_cup_id = _get_cup_ids_for_race(season_id, cat_id, discipline)
+        total_rows = _fetch_cup_rows(total_cup_id)
+        disc_rows = _fetch_cup_rows(disc_cup_id)
+        if total_rows or disc_rows:
+            total_by_id, total_by_name = _build_standings_lookup(total_rows)
+            disc_by_id, disc_by_name = _build_standings_lookup(disc_rows)
+            disc_label = DISCIPLINE_LABELS.get(discipline, discipline)
+            standings_rows = []
+            for entry in flower_entries:
+                total_row = total_by_id.get(entry["ibu_id"]) or total_by_name.get(entry["name"])
+                disc_row = disc_by_id.get(entry["ibu_id"]) or disc_by_name.get(entry["name"])
+                standings_rows.append([
+                    entry["name"],
+                    entry["nat"],
+                    _format_rank_change(total_row),
+                    _format_rank_change(disc_row),
+                ])
+            print(_format_section_title(
+                f"World Cup standing changes (Total + {disc_label}):",
+                args,
+            ))
+            render_table(
+                ["Athlete", "Nat", "WC Total", f"{disc_label} WC"],
+                standings_rows,
+                pretty=is_pretty_output(args),
+            )
+            print()
+        else:
+            print(_format_section_title("World Cup standing changes: no data available", args))
+            print()
 
     use_major = bool(getattr(args, "major", False))
     level_set = MAJOR_LEVELS if use_major else {"WC"}
@@ -379,12 +515,12 @@ def handle_post_race(args: argparse.Namespace) -> int:
     if race_milestones:
         race_milestones.sort(key=lambda row: row[0], reverse=True)
         label = "World Cup + WCH + OWG race milestones:" if use_major else "World Cup race milestones:"
-        print(label)
+        print(_format_section_title(label, args))
         render_table(["Milestone", "Athlete", "Nat"], race_milestones, pretty=is_pretty_output(args))
         print()
     else:
         label = "World Cup + WCH + OWG race milestones: none" if use_major else "World Cup race milestones: none"
-        print(label)
+        print(_format_section_title(label, args))
         print()
 
     if win_milestones:
@@ -394,12 +530,12 @@ def handle_post_race(args: argparse.Namespace) -> int:
             if use_major
             else "World Cup win milestones:"
         )
-        print(label)
+        print(_format_section_title(label, args))
         render_table(["Milestone", "Athlete", "Nat"], win_milestones, pretty=is_pretty_output(args))
         print()
     else:
         label = "World Cup + WCH + OWG win milestones: none" if use_major else "World Cup win milestones: none"
-        print(label)
+        print(_format_section_title(label, args))
         print()
 
     if podium_milestones:
@@ -409,12 +545,12 @@ def handle_post_race(args: argparse.Namespace) -> int:
             if use_major
             else "World Cup podium milestones:"
         )
-        print(label)
+        print(_format_section_title(label, args))
         render_table(["Milestone", "Athlete", "Nat"], podium_milestones, pretty=is_pretty_output(args))
         print()
     else:
         label = "World Cup + WCH + OWG podium milestones: none" if use_major else "World Cup podium milestones: none"
-        print(label)
+        print(_format_section_title(label, args))
         print()
 
     if flower_milestones:
@@ -424,7 +560,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             if use_major
             else "World Cup flower ceremony milestones:"
         )
-        print(label)
+        print(_format_section_title(label, args))
         render_table(["Milestone", "Athlete", "Nat"], flower_milestones, pretty=is_pretty_output(args))
         print()
     else:
@@ -433,12 +569,12 @@ def handle_post_race(args: argparse.Namespace) -> int:
             if use_major
             else "World Cup flower ceremony milestones: none"
         )
-        print(label)
+        print(_format_section_title(label, args))
         print()
 
     lap_rows = _fetch_lap_times(race_id, discipline)
     if lap_rows:
-        print("Top 6 fastest laps:")
+        print(_format_section_title("Top 6 fastest laps:", args))
         headers = ["Time", "Athlete", "Nat", "Lap"]
         if is_relay:
             headers.insert(3, "Leg")
@@ -451,7 +587,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
         render_table(headers, rows, pretty=is_pretty_output(args))
         print()
     else:
-        print("Top 6 fastest laps: none")
+        print(_format_section_title("Top 6 fastest laps: none", args))
         print()
 
     if is_relay:
@@ -494,12 +630,12 @@ def handle_post_race(args: argparse.Namespace) -> int:
         leg_times.sort(key=lambda row: row[0])
         leg_times = leg_times[:TOP_N]
         if leg_times:
-            print("Top 6 fastest legs (total time):")
+            print(_format_section_title("Top 6 fastest legs (total time):", args))
             rows = [[row[4], row[1], row[2], row[3]] for row in leg_times]
             render_table(["Time", "Athlete", "Nat", "Leg"], rows, pretty=is_pretty_output(args))
             print()
         else:
-            print("Top 6 fastest legs (total time): none")
+            print(_format_section_title("Top 6 fastest legs (total time): none", args))
             print()
 
         from .relay import _fetch_analytic_times
@@ -514,12 +650,12 @@ def handle_post_race(args: argparse.Namespace) -> int:
         leg_course_rows.sort(key=lambda row: row[0])
         leg_course_rows = leg_course_rows[:TOP_N]
         if leg_course_rows:
-            print("Top 6 fastest legs (course time):")
+            print(_format_section_title("Top 6 fastest legs (course time):", args))
             rows = [[row[4], row[1], row[2], row[3]] for row in leg_course_rows]
             render_table(["Time", "Athlete", "Nat", "Leg"], rows, pretty=is_pretty_output(args))
             print()
         else:
-            print("Top 6 fastest legs (course time): none")
+            print(_format_section_title("Top 6 fastest legs (course time): none", args))
             print()
 
     stage_times = _fetch_stage_times_by_stage(race_id, stage_cache)
@@ -544,7 +680,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
     zero_miss_rows.sort(key=lambda row: row[0])
     zero_miss_rows = zero_miss_rows[:TOP_N]
     if zero_miss_rows:
-        print("Top 6 fastest shooters (0 miss):")
+        print(_format_section_title("Top 6 fastest shooters (0 miss):", args))
         headers = ["Time", "Athlete", "Nat", "Stage"]
         rows = []
         for row in zero_miss_rows:
@@ -553,51 +689,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
         render_table(headers, rows, pretty=is_pretty_output(args))
         print()
     else:
-        print("Top 6 fastest shooters (0 miss): none")
-        print()
-
-    record_rows = []
-    best_stage_map: dict[str, tuple[float | None, str, str]] = {}
-    for entry in entries:
-        ibu_id = entry["ibu_id"]
-        if not ibu_id or ibu_id in best_stage_map:
-            continue
-        all_results = all_results_cache.get(ibu_id)
-        if all_results is None:
-            try:
-                all_payload = get_all_results(ibu_id)
-            except BiathlonError:
-                continue
-            all_results = list(all_payload.get("Results") or [])
-            all_results_cache[ibu_id] = all_results
-        best_stage_map[ibu_id] = _best_zero_miss_stage(ibu_id, all_results, stage_cache)
-
-    for stage_idx, times in stage_times.items():
-        for key, secs in times.items():
-            entry = key_to_entry.get(key)
-            if not entry or not entry["ibu_id"]:
-                continue
-            misses = _stage_miss_for_index(stage_misses_map.get(key, []), stage_idx, discipline)
-            if misses is None or misses != 0:
-                continue
-            best_secs, best_race, best_stage = best_stage_map.get(entry["ibu_id"], (None, "", ""))
-            if best_secs is None:
-                continue
-            if abs(secs - best_secs) <= 0.01:
-                record_rows.append([
-                    format_seconds(secs),
-                    entry["name"],
-                    entry["nat"],
-                    best_race or "-",
-                    best_stage or _stage_label(stage_idx, discipline, entry.get("leg")),
-                ])
-
-    if record_rows:
-        print("Personal shooting records (0 miss):")
-        render_table(["Time", "Athlete", "Nat", "RaceId", "Stage"], record_rows, pretty=is_pretty_output(args))
-        print()
-    else:
-        print("Personal shooting records (0 miss): none")
+        print(_format_section_title("Top 6 fastest shooters (0 miss): none", args))
         print()
 
     return 0

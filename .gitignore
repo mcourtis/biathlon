@@ -32,3 +32,5 @@ htmlcov/
 # Local development
 *.local.json
 .claude/
+CLAUDE.md
+
