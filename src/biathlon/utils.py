@@ -20,18 +20,24 @@ def parse_date(value: str | None) -> datetime.date | None:
 
 
 def parse_start_datetime(value: str | None) -> datetime.datetime | None:
-    """Parse an ISO datetime string (allowing Z suffix) into a datetime object."""
+    """Parse an ISO datetime string (allowing Z suffix) into a timezone-aware datetime."""
     if not value:
         return None
     text = value.strip()
     if not text:
         return None
+    # Replace Z with +00:00 for proper timezone parsing
     if text.endswith("Z"):
-        text = text[:-1]
+        text = text[:-1] + "+00:00"
     try:
         if "T" in text:
-            return datetime.datetime.fromisoformat(text)
-        return datetime.datetime.fromisoformat(f"{text}T00:00:00")
+            dt = datetime.datetime.fromisoformat(text)
+        else:
+            dt = datetime.datetime.fromisoformat(f"{text}T00:00:00")
+        # Ensure timezone-aware (assume UTC if naive)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        return dt
     except ValueError:
         return None
 
