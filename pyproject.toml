@@ -34,10 +34,16 @@ Issues = "https://github.com/thbtmntgn/biathlon/issues"
 biathlon = "biathlon.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest>=7.0"]
+dev = ["pytest>=7.0", "ruff>=0.4", "mypy>=1.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+[tool.ruff]
+src = ["src"]
+
+[tool.mypy]
+packages = ["biathlon"]
