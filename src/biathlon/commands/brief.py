@@ -1376,29 +1376,29 @@ def _render_team_startlist(
             all_rows = []
             all_row_styles = []
             for idx, (key, stats) in enumerate(medalists, 1):
-                total = stats["gold"] + stats["silver"] + stats["bronze"]
-                total_ind = stats.get("gold_ind", 0) + stats.get("silver_ind", 0) + stats.get("bronze_ind", 0)
-                total_relay = stats.get("gold_relay", 0) + stats.get("silver_relay", 0) + stats.get("bronze_relay", 0)
+                gold = stats["gold"]
+                silver = stats["silver"]
+                bronze = stats["bronze"]
+                total = gold + silver + bronze
+                races = stats["races"]
+                gold_ind = stats.get("gold_ind", 0)
+                silver_ind = stats.get("silver_ind", 0)
+                bronze_ind = stats.get("bronze_ind", 0)
+                total_ind = gold_ind + silver_ind + bronze_ind
+                races_ind = stats.get("races_ind", 0)
+                gold_relay = stats.get("gold_relay", 0)
+                silver_relay = stats.get("silver_relay", 0)
+                bronze_relay = stats.get("bronze_relay", 0)
+                total_relay = gold_relay + silver_relay + bronze_relay
+                races_relay = stats.get("races_relay", 0)
                 all_rows.append([
                     str(idx),
                     stats["name"],
                     stats["nat"],
                     stats["gender"],
-                    str(stats["gold"]),
-                    str(stats.get("gold_ind", 0)),
-                    str(stats.get("gold_relay", 0)),
-                    str(stats["silver"]),
-                    str(stats.get("silver_ind", 0)),
-                    str(stats.get("silver_relay", 0)),
-                    str(stats["bronze"]),
-                    str(stats.get("bronze_ind", 0)),
-                    str(stats.get("bronze_relay", 0)),
-                    str(total),
-                    str(total_ind),
-                    str(total_relay),
-                    str(stats["races"]),
-                    str(stats.get("races_ind", 0)),
-                    str(stats.get("races_relay", 0)),
+                    str(gold), str(silver), str(bronze), str(total), str(races),
+                    str(gold_ind), str(silver_ind), str(bronze_ind), str(total_ind), str(races_ind),
+                    str(gold_relay), str(silver_relay), str(bronze_relay), str(total_relay), str(races_relay),
                 ])
                 if key in highlight_ids:
                     all_row_styles.append("highlight")
@@ -1407,16 +1407,15 @@ def _render_team_startlist(
             render_table(
                 [
                     "#", "Athlete", "Nat", "Gender",
-                    Color.gold("Gold"), Color.gold("Ind"), Color.gold("Relay"),
-                    Color.silver("Silver"), Color.silver("Ind"), Color.silver("Relay"),
-                    Color.bronze("Bronze"), Color.bronze("Ind"), Color.bronze("Relay"),
-                    "Total", "Ind", "Relay",
-                    "Races", "Ind", "Relay",
+                    Color.gold("Gold"), Color.silver("Silver"), Color.bronze("Bronze"), "Total", "Races",
+                    Color.gold("Gold"), Color.silver("Silver"), Color.bronze("Bronze"), "Total", "Races",
+                    Color.gold("Gold"), Color.silver("Silver"), Color.bronze("Bronze"), "Total", "Races",
                 ],
                 all_rows,
                 pretty=pretty,
                 row_styles=all_row_styles,
-                column_separators={4, 7, 10, 13, 16},
+                column_separators={4, 9, 14},
+                group_headers=[(4, 9, "All"), (9, 14, "Individual"), (14, 19, "Relay")],
             )
             print()
 

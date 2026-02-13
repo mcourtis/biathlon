@@ -297,6 +297,7 @@ def render_table(
     highlight_header_styles: dict[int, str] | None = None,
     show_headers: bool = True,
     column_separators: set[int] | None = None,
+    group_headers: list[tuple[int, int, str]] | None = None,
 ) -> None:
     """Render tabular data either aligned (pretty) or TSV.
 
@@ -311,6 +312,9 @@ def render_table(
         highlight_headers: Optional list of column indices to highlight in the header row.
         show_headers: If False, skip printing the header row (default True).
         column_separators: Optional set of column indices before which a vertical separator is drawn.
+        group_headers: Optional list of (start_col, end_col, label) tuples to print a
+            group header line above the column headers. Each label is centered over
+            the span of columns [start_col, end_col).
     """
     if not pretty:
         if show_headers:
@@ -405,6 +409,35 @@ def render_table(
         return f"{Color.BOLD}{text}{Color.RESET}"
 
     if show_headers:
+        if group_headers:
+            # Build a group header line above the column headers.
+            # Compute position of each column in the rendered line.
+            col_positions = []  # (start_char, end_char) for each column
+            pos = 0
+            for i in range(len(headers)):
+                if i > 0:
+                    pos += 3 if i in sep else 2  # " | " or "  "
+                col_start = pos
+                pos += widths[i]
+                col_positions.append((col_start, pos))
+            line_len = pos
+            group_line = [" "] * line_len
+            for start_col, end_col, label in group_headers:
+                span_start = col_positions[start_col][0]
+                span_end = col_positions[end_col - 1][1]
+                span_width = span_end - span_start
+                bold_label = f"{Color.BOLD}{label}{Color.RESET}"
+                # Center the label within the span
+                pad = span_width - len(label)
+                left_pad = pad // 2
+                # Place label characters
+                for ci, ch in enumerate(label):
+                    group_line[span_start + left_pad + ci] = ch
+            raw_line = "".join(group_line).rstrip()
+            # Apply bold to the group labels
+            for start_col, end_col, label in group_headers:
+                raw_line = raw_line.replace(label, f"{Color.BOLD}{label}{Color.RESET}", 1)
+            print(raw_line)
         header_parts = [fmt_header(i, h) for i, h in enumerate(headers)]
         print(_join(header_parts))
         if sep:
