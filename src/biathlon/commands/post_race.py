@@ -17,6 +17,7 @@ from ..api import (
     get_race_results,
 )
 from ..constants import (
+    EVENT_TYPE_WC,
     INDIVIDUAL_DISCIPLINES,
     RELAY_DISCIPLINE,
     SINGLE_MIXED_RELAY_DISCIPLINE,
@@ -31,6 +32,7 @@ from ._common import (
     _ordinal,
     _parse_rank,
     _row_ibu_id,
+    detect_event_type,
     is_relay_discipline as _is_relay_discipline,
 )
 from .relay import _has_completed_results as _has_completed_relay_results
@@ -510,6 +512,9 @@ def handle_post_race(args: argparse.Namespace) -> int:
     comp = payload.get("Competition") or {}
     discipline = str(comp.get("DisciplineId") or "").upper()
     is_relay = _is_relay_discipline(discipline)
+    sport_evt = payload.get("SportEvt") or {}
+    event_type = detect_event_type(sport_evt)
+    is_wc_race = event_type == EVENT_TYPE_WC
     if is_relay:
         if not _has_completed_relay_results(payload):
             print(f"race {race_id} does not have completed results", file=sys.stderr)
@@ -585,9 +590,8 @@ def handle_post_race(args: argparse.Namespace) -> int:
     discipline_leader = {"id": "", "name": "", "nat": ""}
     cat_id = ""
     season_id = ""
-    if not is_relay and _is_individual_like_discipline(discipline):
+    if is_wc_race and not is_relay and _is_individual_like_discipline(discipline):
         cat_id = str(comp.get("catId") or comp.get("CatId") or "").upper()
-        sport_evt = payload.get("SportEvt") or {}
         season_id = str(sport_evt.get("SeasonId") or "") or get_current_season_id()
         total_cup_id, disc_cup_id = _get_cup_ids_for_race(season_id, cat_id, discipline)
         race_points_by_id = _build_race_points_map(results, discipline)
@@ -623,35 +627,47 @@ def handle_post_race(args: argparse.Namespace) -> int:
     print(_format_section_title(format_race_header(payload, race_id), args))
     print()
 
+    sec = 0
+
+    sec += 1
     if flower_entries:
-        headers = ["Rank", "Team", "Nat", "Points"] if is_relay else ["Rank", "Athlete", "Nat", "Points"]
-        points_rows = []
+        if is_wc_race:
+            headers = ["Rank", "Team", "Nat", "Points"] if is_relay else ["Rank", "Athlete", "Nat", "Points"]
+        else:
+            headers = ["Rank", "Team", "Nat"] if is_relay else ["Rank", "Athlete", "Nat"]
+        results_rows = []
         is_mass_start = discipline == "MS"
         for entry in flower_entries:
-            points_rows.append([
+            row = [
                 entry["rank"],
                 decorate_any(entry["name"], entry["nat"], entry["ibu_id"]),
                 entry["nat"],
-                _format_race_points(_get_wc_points(entry["rank"], mass_start=is_mass_start)),
-            ])
+            ]
+            if is_wc_race:
+                row.append(_format_race_points(_get_wc_points(entry["rank"], mass_start=is_mass_start)))
+            results_rows.append(row)
         row_styles = [rank_style(entry["rank"]) for entry in flower_entries]
         rank_formatter = _make_row_style_formatter(row_styles)
         name_formatter = _make_name_formatter(row_styles)
-        print(_format_section_title("1. Results:", args))
+        cell_fmts = [rank_formatter, name_formatter, None]
+        if is_wc_race:
+            cell_fmts.append(None)
+        print(_format_section_title(f"{sec}. Results:", args))
         render_table(
             headers,
-            points_rows,
+            results_rows,
             pretty=pretty,
-            cell_formatters=[rank_formatter, name_formatter, None, None],
+            cell_formatters=cell_fmts,
         )
         print()
     else:
-        print(_format_section_title("1. Results: none", args))
+        print(_format_section_title(f"{sec}. Results: none", args))
         print()
 
-    if flower_entries and not is_relay and _is_individual_like_discipline(discipline):
+    if is_wc_race and flower_entries and not is_relay and _is_individual_like_discipline(discipline):
         disc_label = DISCIPLINE_LABELS.get(discipline, discipline)
         if total_rows or disc_rows:
+            sec += 1
             if total_rows:
                 total_standings_rows, total_row_styles = _build_standings_rows(
                     total_rows,
@@ -661,7 +677,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     participating_ids=participating_ids,
                 )
                 total_name_formatter = _make_name_formatter(total_row_styles)
-                print(_format_section_title("2. World Cup standing changes (Total):", args))
+                print(_format_section_title(f"{sec}. World Cup standing changes (Total):", args))
                 render_table(
                     ["Rank", "Athlete", "Nat", "Race Pts", "Total Pts", "Change"],
                     total_standings_rows,
@@ -678,9 +694,10 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 )
                 print()
             else:
-                print(_format_section_title("2. World Cup standing changes (Total): no data available", args))
+                print(_format_section_title(f"{sec}. World Cup standing changes (Total): no data available", args))
                 print()
 
+            sec += 1
             if disc_rows:
                 disc_standings_rows, disc_row_styles = _build_standings_rows(
                     disc_rows,
@@ -690,7 +707,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     participating_ids=participating_ids,
                 )
                 disc_name_formatter = _make_name_formatter(disc_row_styles)
-                print(_format_section_title(f"3. World Cup standing changes ({disc_label}):", args))
+                print(_format_section_title(f"{sec}. World Cup standing changes ({disc_label}):", args))
                 render_table(
                     ["Rank", "Athlete", "Nat", "Race Pts", "Total Pts", "Change"],
                     disc_standings_rows,
@@ -708,12 +725,13 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 print()
             else:
                 print(_format_section_title(
-                    f"3. World Cup standing changes ({disc_label}): no data available",
+                    f"{sec}. World Cup standing changes ({disc_label}): no data available",
                     args,
                 ))
                 print()
         else:
-            print(_format_section_title("2. World Cup standing changes: no data available", args))
+            sec += 1
+            print(_format_section_title(f"{sec}. World Cup standing changes: no data available", args))
             print()
 
     use_major = bool(getattr(args, "major", False))
@@ -853,11 +871,12 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 stat["flower"], "Individual Flower", decorated_name, entry["nat"], ibu_id, rank_val,
             ])
 
+    sec += 1
     if race_milestones:
         race_milestones.sort(key=lambda row: row[0], reverse=True)
         # Convert milestone numbers to ordinal
         race_milestones = [[_ordinal(row[0]), row[1], row[2]] for row in race_milestones]
-        label = "4. World Cup + WCH + OWG race milestones:" if use_major else "4. World Cup race milestones:"
+        label = f"{sec}. World Cup + WCH + OWG race milestones:" if use_major else f"{sec}. World Cup race milestones:"
         print(_format_section_title(label, args))
         render_table(
             ["Milestone", "Athlete", "Nat"],
@@ -867,10 +886,11 @@ def handle_post_race(args: argparse.Namespace) -> int:
         )
         print()
     else:
-        label = "4. World Cup + WCH + OWG race milestones: none" if use_major else "4. World Cup race milestones: none"
+        label = f"{sec}. World Cup + WCH + OWG race milestones: none" if use_major else f"{sec}. World Cup race milestones: none"
         print(_format_section_title(label, args))
         print()
 
+    sec += 1
     if top_milestones:
         # Group by athlete (ibu_id), sort groups by race finish rank
         from itertools import groupby
@@ -896,9 +916,9 @@ def handle_post_race(args: argparse.Namespace) -> int:
         grouped.sort(key=lambda g: g[0])
 
         label = (
-            "5. World Cup + WCH + OWG Top 6 Milestones:"
+            f"{sec}. World Cup + WCH + OWG Top 6 Milestones:"
             if use_major
-            else "5. World Cup Top 6 Milestones:"
+            else f"{sec}. World Cup Top 6 Milestones:"
         )
         print(_format_section_title(label, args))
         for i, (rank, athlete_name, athlete_nat, group_rows) in enumerate(grouped):
@@ -930,16 +950,17 @@ def handle_post_race(args: argparse.Namespace) -> int:
         print()
     else:
         label = (
-            "5. World Cup + WCH + OWG Top 6 Milestones: none"
+            f"{sec}. World Cup + WCH + OWG Top 6 Milestones: none"
             if use_major
-            else "5. World Cup Top 6 Milestones: none"
+            else f"{sec}. World Cup Top 6 Milestones: none"
         )
         print(_format_section_title(label, args))
         print()
 
+    sec += 1
     lap_rows = _fetch_lap_times(race_id, discipline)
     if lap_rows:
-        print(_format_section_title("6. Top 6 fastest laps:", args))
+        print(_format_section_title(f"{sec}. Top 6 fastest laps:", args))
         headers = ["Time", "Athlete", "Nat", "Lap"]
         if is_relay:
             headers.insert(3, "Leg")
@@ -957,7 +978,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
         render_table(headers, rows, pretty=is_pretty_output(args), cell_formatters=cell_formatters)
         print()
     else:
-        print(_format_section_title("6. Top 6 fastest laps: none", args))
+        print(_format_section_title(f"{sec}. Top 6 fastest laps: none", args))
         print()
 
     if is_relay:
@@ -999,8 +1020,9 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 prev_secs = total_secs
         leg_times.sort(key=lambda row: row[0])
         leg_times = leg_times[:TOP_N]
+        sec += 1
         if leg_times:
-            print(_format_section_title("7. Top 6 fastest legs (total time):", args))
+            print(_format_section_title(f"{sec}. Top 6 fastest legs (total time):", args))
             rows = []
             for row in leg_times:
                 ibu_id = name_nat_to_id.get((row[1], row[2]), "")
@@ -1014,7 +1036,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             )
             print()
         else:
-            print(_format_section_title("7. Top 6 fastest legs (total time): none", args))
+            print(_format_section_title(f"{sec}. Top 6 fastest legs (total time): none", args))
             print()
 
         from .relay import _fetch_analytic_times
@@ -1028,8 +1050,9 @@ def handle_post_race(args: argparse.Namespace) -> int:
             leg_course_rows.append([secs, entry["name"], entry["nat"], leg, format_seconds(secs)])
         leg_course_rows.sort(key=lambda row: row[0])
         leg_course_rows = leg_course_rows[:TOP_N]
+        sec += 1
         if leg_course_rows:
-            print(_format_section_title("8. Top 6 fastest legs (course time):", args))
+            print(_format_section_title(f"{sec}. Top 6 fastest legs (course time):", args))
             rows = []
             for row in leg_course_rows:
                 ibu_id = name_nat_to_id.get((row[1], row[2]), "")
@@ -1043,7 +1066,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             )
             print()
         else:
-            print(_format_section_title("8. Top 6 fastest legs (course time): none", args))
+            print(_format_section_title(f"{sec}. Top 6 fastest legs (course time): none", args))
             print()
 
     stage_times = _fetch_stage_times_by_stage(race_id, stage_cache)
@@ -1067,8 +1090,9 @@ def handle_post_race(args: argparse.Namespace) -> int:
             zero_miss_rows.append([secs, entry["name"], entry["nat"], format_seconds(secs), stage_label])
     zero_miss_rows.sort(key=lambda row: row[0])
     zero_miss_rows = zero_miss_rows[:TOP_N]
+    sec += 1
     if zero_miss_rows:
-        print(_format_section_title("9. Top 6 fastest shooters (0 miss):", args))
+        print(_format_section_title(f"{sec}. Top 6 fastest shooters (0 miss):", args))
         headers = ["Time", "Athlete", "Nat", "Stage"]
         rows = []
         for row in zero_miss_rows:
@@ -1084,7 +1108,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
         )
         print()
     else:
-        print(_format_section_title("9. Top 6 fastest shooters (0 miss): none", args))
+        print(_format_section_title(f"{sec}. Top 6 fastest shooters (0 miss): none", args))
         print()
 
     return 0

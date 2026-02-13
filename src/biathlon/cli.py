@@ -96,99 +96,6 @@ def traverse_to_parser(
     return traverse_to_parser(choices[command], tokens[1:])
 
 
-BASH_COMPLETION = '''
-_biathlon_completion() {
-    local cur prev commands subcommands
-    COMPREPLY=()
-    cur="${COMP_WORDS[COMP_CWORD]}"
-    prev="${COMP_WORDS[COMP_CWORD-1]}"
-
-    commands="seasons events results cumulate standings ceremony athlete shooting brief form"
-
-    case "${COMP_WORDS[1]}" in
-        cumulate)
-            subcommands="results ski pursuit course range shooting miss penalty remontada cleansheet"
-            ;;
-        athlete)
-            subcommands="info results"
-            ;;
-        brief)
-            subcommands="event season startlist postrace"
-            ;;
-        *)
-            subcommands=""
-            ;;
-    esac
-
-    if [[ ${COMP_CWORD} -eq 1 ]]; then
-        COMPREPLY=( $(compgen -W "${commands}" -- ${cur}) )
-    elif [[ ${COMP_CWORD} -eq 2 && -n "${subcommands}" ]]; then
-        COMPREPLY=( $(compgen -W "${subcommands}" -- ${cur}) )
-    elif [[ ${cur} == -* ]]; then
-        local opts="--help --tsv --men --season --race --event --level"
-        COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
-    fi
-}
-complete -F _biathlon_completion biathlon
-'''
-
-ZSH_COMPLETION = '''
-#compdef biathlon
-
-_biathlon() {
-    local -a commands subcommands
-    commands=(
-        'seasons:List available seasons'
-        'events:List events'
-        'results:Show race results'
-        'cumulate:Cumulative statistics'
-        'standings:Cup standings'
-        'ceremony:Medal ranking'
-        'athlete:Athlete information'
-        'shooting:Shooting accuracy'
-        'brief:Race analysis (event, season, startlist, postrace)'
-        'form:Show recent athlete form (course time ranks)'
-    )
-
-    _arguments -C \\
-        '1: :->command' \\
-        '*: :->args'
-
-    case $state in
-        command)
-            _describe 'command' commands
-            ;;
-        args)
-            case $words[2] in
-                cumulate)
-                    _values 'subcommand' results ski pursuit course range shooting miss penalty remontada cleansheet
-                    ;;
-                athlete)
-                    _values 'subcommand' info results id
-                    ;;
-                brief)
-                    _values 'subcommand' event season startlist postrace
-                    ;;
-            esac
-            ;;
-    esac
-}
-
-_biathlon "$@"
-'''
-
-
-def print_completion(shell: str) -> int:
-    """Print shell completion script and exit."""
-    if shell == "bash":
-        print(BASH_COMPLETION.strip())
-    elif shell == "zsh":
-        print(ZSH_COMPLETION.strip())
-    else:
-        print(f"Unknown shell: {shell}. Use 'bash' or 'zsh'.", file=sys.stderr)
-        return 1
-    return 0
-
 
 def add_output_flag(subparser: argparse.ArgumentParser) -> None:
     """Add --tsv flag to a subparser."""
@@ -659,12 +566,6 @@ def main(argv: Iterable[str] | None = None) -> int:
         print(f"biathlon {get_version()}")
         return 0
 
-    # Handle --completion before parsing
-    if len(tokens) >= 2 and tokens[0] == "--completion":
-        return print_completion(tokens[1])
-    if len(tokens) == 1 and tokens[0] == "--completion":
-        print("Usage: biathlon --completion [bash|zsh]", file=sys.stderr)
-        return 1
 
     parser = build_parser()
 

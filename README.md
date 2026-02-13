@@ -136,11 +136,11 @@ biathlon form --startlist
 biathlon form --season --top 10
 ```
 
-Event/race briefs (venue history, startlist analysis, post-race recap):
+Season, event and race briefs (venue history, startlist analysis, post-race recap):
 
 ```bash
-biathlon brief event
 biathlon brief season
+biathlon brief event
 biathlon brief startlist
 biathlon brief postrace
 ```
@@ -149,26 +149,6 @@ Run without installing:
 
 ```bash
 python -m biathlon.cli seasons
-```
-
-## Shell Completion
-
-Enable tab completion for bash:
-
-```bash
-eval "$(biathlon --completion bash)"
-```
-
-Or add to your `~/.bashrc`:
-
-```bash
-source <(biathlon --completion bash)
-```
-
-For zsh, add to your `~/.zshrc`:
-
-```zsh
-source <(biathlon --completion zsh)
 ```
 
 ## License
