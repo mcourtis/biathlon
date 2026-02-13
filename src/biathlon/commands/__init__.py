@@ -17,12 +17,22 @@ from .cumulate import (
 )
 from .standings import handle_standings
 from .ceremony import handle_ceremony
-from .athlete import handle_athlete_results, handle_athlete_results_scan, handle_athlete_info, handle_athlete_id
+from .athlete import (
+    handle_athlete_results,
+    handle_athlete_results_scan,
+    handle_athlete_info,
+    handle_athlete_id,
+)
 from .shooting import handle_shooting
 from .relay import handle_relay
 from .startlist import handle_startlist
 from .post_race import handle_post_race
-from .brief import handle_brief_event, handle_brief_startlist, handle_brief_post_race, handle_brief_season
+from .brief import (
+    handle_brief_event,
+    handle_brief_startlist,
+    handle_brief_post_race,
+    handle_brief_season,
+)
 from .form import handle_form
 
 __all__ = [

@@ -48,7 +48,13 @@ def get_version() -> str:
 class CompactOptionalFormatter(argparse.RawTextHelpFormatter):
     """Formatter that groups optional flags before their metavar."""
 
-    def __init__(self, prog: str, indent_increment: int = 2, max_help_position: int = 40, width: int | None = None) -> None:
+    def __init__(
+        self,
+        prog: str,
+        indent_increment: int = 2,
+        max_help_position: int = 40,
+        width: int | None = None,
+    ) -> None:
         super().__init__(prog, indent_increment, max_help_position, width)
 
     def _format_action_invocation(self, action: argparse.Action) -> str:
@@ -94,7 +100,6 @@ def traverse_to_parser(
     return traverse_to_parser(choices[command], tokens[1:])
 
 
-
 def add_output_flag(subparser: argparse.ArgumentParser) -> None:
     """Add --tsv flag to a subparser."""
     subparser.add_argument(
@@ -104,7 +109,9 @@ def add_output_flag(subparser: argparse.ArgumentParser) -> None:
     )
 
 
-def add_cumulate_args(subparser: argparse.ArgumentParser, allow_discipline_event: bool) -> None:
+def add_cumulate_args(
+    subparser: argparse.ArgumentParser, allow_discipline_event: bool
+) -> None:
     """Add common cumulate arguments to a subparser."""
     subparser.add_argument(
         "--men",
@@ -114,7 +121,6 @@ def add_cumulate_args(subparser: argparse.ArgumentParser, allow_discipline_event
     if allow_discipline_event:
         subparser.add_argument(
             "--discipline",
-           
             default="all",
             choices=[
                 "individual",
@@ -134,13 +140,11 @@ def add_cumulate_args(subparser: argparse.ArgumentParser, allow_discipline_event
         event_help = "Event id (only supported for cumulate results)"
     subparser.add_argument(
         "--event",
-       
         default="",
         help=event_help,
     )
     subparser.add_argument(
         "--season",
-       
         default="",
         help="Season id (default: current season)",
     )
@@ -151,14 +155,12 @@ def add_cumulate_args(subparser: argparse.ArgumentParser, allow_discipline_event
     )
     subparser.add_argument(
         "--top",
-       
         type=int,
         default=0,
         help="Filter to top N athletes in WC standings",
     )
     subparser.add_argument(
         "--limit",
-       
         type=int,
         default=25,
         help="Number of rows to display (default: 25, 0 for all)",
@@ -194,7 +196,13 @@ def build_parser() -> argparse.ArgumentParser:
         add_help=False,
     )
     seasons_parser._optionals.title = "optional parameters"
-    seasons_parser.add_argument("--limit", metavar="INT", type=int, default=25, help="Limit output rows (default: 25, 0 for all)")
+    seasons_parser.add_argument(
+        "--limit",
+        metavar="INT",
+        type=int,
+        default=25,
+        help="Limit output rows (default: 25, 0 for all)",
+    )
     add_output_flag(seasons_parser)
     seasons_parser.set_defaults(func=handle_seasons)
 
@@ -206,20 +214,34 @@ def build_parser() -> argparse.ArgumentParser:
         add_help=False,
     )
     events_parser._optionals.title = "optional parameters"
-    events_parser.add_argument("--season", default="", help="Select specific season Id or 'all' (default: current season)")
     events_parser.add_argument(
-        "--level", default="1",
+        "--season",
+        default="",
+        help="Select specific season Id or 'all' (default: current season)",
+    )
+    events_parser.add_argument(
+        "--level",
+        default="1",
         help="Select specific competitien levels: -1=All, 0=Mixed, 1=World Cup (default), 2=IBU Cup, 3=Junior, 4=Other, 5=Regional, 6=Para",
     )
     events_parser.add_argument("--search", default="", help="Filter events by name")
     events_parser.add_argument("--sort", default="startdate", help="Sort order")
-    events_parser.add_argument("--completed", action="store_true", help="Only completed events")
-    events_parser.add_argument("--upcoming", action="store_true", help="Only current/next and upcoming events")
-    events_parser.add_argument("--summary", action="store_true", help="Show race-type availability per event")
-    events_parser.add_argument("--races", action="store_true", help="Include races under each event")
     events_parser.add_argument(
-        "--discipline", default="", 
-        help="Filter races by discipline (individual, sprint, pursuit, mass-start, relay, mixed-relay, single-mixed-relay)"
+        "--completed", action="store_true", help="Only completed events"
+    )
+    events_parser.add_argument(
+        "--upcoming", action="store_true", help="Only current/next and upcoming events"
+    )
+    events_parser.add_argument(
+        "--summary", action="store_true", help="Show race-type availability per event"
+    )
+    events_parser.add_argument(
+        "--races", action="store_true", help="Include races under each event"
+    )
+    events_parser.add_argument(
+        "--discipline",
+        default="",
+        help="Filter races by discipline (individual, sprint, pursuit, mass-start, relay, mixed-relay, single-mixed-relay)",
     )
     add_output_flag(events_parser)
     events_parser.set_defaults(func=handle_events)
@@ -231,20 +253,42 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=CompactOptionalFormatter,
         add_help=False,
     )
-    results_parser.add_argument("--race", default="", help="Race id (default: most recent race)")
-    results_parser.add_argument("--men", action="store_true", help="Show men (default: women)")
+    results_parser.add_argument(
+        "--race", default="", help="Race id (default: most recent race)"
+    )
+    results_parser.add_argument(
+        "--men", action="store_true", help="Show men (default: women)"
+    )
     results_parser.add_argument(
         "--discipline",
-       
         default="",
         help="Discipline filter (mutually exclusive with --race)",
     )
-    results_parser.add_argument("--detail", action="store_true", help="Show detailed split columns")
+    results_parser.add_argument(
+        "--detail", action="store_true", help="Show detailed split columns"
+    )
     results_parser.add_argument("--sort", default="", help="Sort by column")
-    results_parser.add_argument("--country", default="", metavar="COUNTRY", help="Filter by country code (e.g., FRA, GER, NOR)")
-    results_parser.add_argument("--top", type=int, default=0, help="Filter to top N athletes in World Cup standings")
-    results_parser.add_argument("--first", type=int, default=0, help="Filter to first N finishers in the race")
-    results_parser.add_argument("--limit", type=int, default=25, help="Limit output rows (default: 25, 0 for all)")
+    results_parser.add_argument(
+        "--country",
+        default="",
+        metavar="COUNTRY",
+        help="Filter by country code (e.g., FRA, GER, NOR)",
+    )
+    results_parser.add_argument(
+        "--top",
+        type=int,
+        default=0,
+        help="Filter to top N athletes in World Cup standings",
+    )
+    results_parser.add_argument(
+        "--first", type=int, default=0, help="Filter to first N finishers in the race"
+    )
+    results_parser.add_argument(
+        "--limit",
+        type=int,
+        default=25,
+        help="Limit output rows (default: 25, 0 for all)",
+    )
     results_parser.add_argument(
         "--highlight-wc",
         action="store_true",
@@ -275,73 +319,111 @@ def build_parser() -> argparse.ArgumentParser:
     add_cumulate_args(cumulate_parser, allow_discipline_event=True)
     cumulate_parser._custom_help = _show_cumulate_help
     cumulate_parser.set_defaults(func=_show_cumulate_help, cumulate_command=None)
-    cumulate_sub = cumulate_parser.add_subparsers(dest="cumulate_command", title="subcommands", metavar="")
+    cumulate_sub = cumulate_parser.add_subparsers(
+        dest="cumulate_command", title="subcommands", metavar=""
+    )
 
     cumulate_results = cumulate_sub.add_parser(
-        "results", help="Cumulated results", formatter_class=CompactOptionalFormatter, add_help=False
+        "results",
+        help="Cumulated results",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
     )
     cumulate_help["results"] = "Cumulated race results"
     add_cumulate_args(cumulate_results, allow_discipline_event=True)
     cumulate_results.set_defaults(func=handle_cumulate_results)
 
     cumulate_ski = cumulate_sub.add_parser(
-        "ski", help="Cumulated ski times", formatter_class=CompactOptionalFormatter, add_help=False
+        "ski",
+        help="Cumulated ski times",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
     )
-    cumulate_help["ski"] = "Cumulated ski times (individual races only ; results without penalties)"
+    cumulate_help["ski"] = (
+        "Cumulated ski times (individual races only ; results without penalties)"
+    )
     add_cumulate_args(cumulate_ski, allow_discipline_event=False)
     cumulate_ski.set_defaults(func=handle_cumulate_ski)
 
     cumulate_pursuit = cumulate_sub.add_parser(
-        "pursuit", help="Cumulated pursuit times", formatter_class=CompactOptionalFormatter, add_help=False
+        "pursuit",
+        help="Cumulated pursuit times",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
     )
-    cumulate_help["pursuit"] = "Cumulated pursuit times (pursuit races only ; results without start delay)"
+    cumulate_help["pursuit"] = (
+        "Cumulated pursuit times (pursuit races only ; results without start delay)"
+    )
     add_cumulate_args(cumulate_pursuit, allow_discipline_event=False)
     cumulate_pursuit.set_defaults(func=handle_cumulate_pursuit)
 
     cumulate_course = cumulate_sub.add_parser(
-        "course", help="Cumulated course times", formatter_class=CompactOptionalFormatter, add_help=False
+        "course",
+        help="Cumulated course times",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
     )
-    cumulate_help["course"] = "Cumulated course times (ski time only ; range, start delay, penalties excluded)"
+    cumulate_help["course"] = (
+        "Cumulated course times (ski time only ; range, start delay, penalties excluded)"
+    )
     add_cumulate_args(cumulate_course, allow_discipline_event=True)
     cumulate_course.set_defaults(func=handle_cumulate_course)
 
     cumulate_range = cumulate_sub.add_parser(
-        "range", help="Cumulated range times", formatter_class=CompactOptionalFormatter, add_help=False
+        "range",
+        help="Cumulated range times",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
     )
     cumulate_help["range"] = "Cumulated range times"
     add_cumulate_args(cumulate_range, allow_discipline_event=True)
     cumulate_range.set_defaults(func=handle_cumulate_range)
 
     cumulate_shooting = cumulate_sub.add_parser(
-        "shooting", help="Cumulated shooting times", formatter_class=CompactOptionalFormatter, add_help=False
+        "shooting",
+        help="Cumulated shooting times",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
     )
     cumulate_help["shooting"] = "Cumulated shooting times"
     add_cumulate_args(cumulate_shooting, allow_discipline_event=True)
     cumulate_shooting.set_defaults(func=handle_cumulate_shooting)
 
     cumulate_miss = cumulate_sub.add_parser(
-        "miss", help="Cumulated misses", formatter_class=CompactOptionalFormatter, add_help=False
+        "miss",
+        help="Cumulated misses",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
     )
     cumulate_help["miss"] = "Cumulated misses"
     add_cumulate_args(cumulate_miss, allow_discipline_event=True)
     cumulate_miss.set_defaults(func=handle_cumulate_miss)
 
     cumulate_penalty = cumulate_sub.add_parser(
-        "penalty", help="Cumulated penalty times", formatter_class=CompactOptionalFormatter, add_help=False
+        "penalty",
+        help="Cumulated penalty times",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
     )
     cumulate_help["penalty"] = "Cumulated penalty times"
     add_cumulate_args(cumulate_penalty, allow_discipline_event=True)
     cumulate_penalty.set_defaults(func=handle_cumulate_penalty)
 
     cumulate_remontada = cumulate_sub.add_parser(
-        "remontada", help="Cumulated pursuit gains", formatter_class=CompactOptionalFormatter, add_help=False
+        "remontada",
+        help="Cumulated pursuit gains",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
     )
     cumulate_help["remontada"] = "Cumulated pursuit gains"
     add_cumulate_args(cumulate_remontada, allow_discipline_event=False)
     cumulate_remontada.set_defaults(func=handle_cumulate_remontada)
 
     cumulate_cleansheet = cumulate_sub.add_parser(
-        "cleansheet", help="Cumulated clean shooting stages (5/5)", formatter_class=CompactOptionalFormatter, add_help=False
+        "cleansheet",
+        help="Cumulated clean shooting stages (5/5)",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
     )
     cumulate_help["cleansheet"] = "Cumulated clean shooting stages (5/5)"
     add_cumulate_args(cumulate_cleansheet, allow_discipline_event=True)
@@ -362,31 +444,70 @@ def build_parser() -> argparse.ArgumentParser:
     cumulate_cleansheet.set_defaults(func=handle_cumulate_cleansheet)
 
     # --- standings ---
-    standings_parser = subparsers.add_parser("standings", help="Show standings (world cup, IBU Cup, etc.)", formatter_class=CompactOptionalFormatter, add_help=False)
+    standings_parser = subparsers.add_parser(
+        "standings",
+        help="Show standings (world cup, IBU Cup, etc.)",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
     standings_parser.add_argument("--season", default="", help="Season id")
     standings_parser.add_argument("--men", action="store_true", help="Show men")
     standings_parser.add_argument("--level", default="1", help="Cup level")
-    standings_parser.add_argument("--sort", default="total", choices=["total", "sprint", "pursuit", "individual", "massstart"], help="Sort by column")
-    standings_parser.add_argument("--limit", type=int, default=25, help="Limit output rows (default: 25, 0 for all)")
+    standings_parser.add_argument(
+        "--sort",
+        default="total",
+        choices=["total", "sprint", "pursuit", "individual", "massstart"],
+        help="Sort by column",
+    )
+    standings_parser.add_argument(
+        "--limit",
+        type=int,
+        default=25,
+        help="Limit output rows (default: 25, 0 for all)",
+    )
     add_output_flag(standings_parser)
     standings_parser.set_defaults(func=handle_standings)
 
     # --- ceremony ---
-    ceremony_parser = subparsers.add_parser("ceremony", help="Show medal standing (default: men+women, World Cup, current season)", formatter_class=CompactOptionalFormatter, add_help=False)
-    ceremony_parser.add_argument("--athlete", action="store_true", help="Rank by athlete (default: by country)")
+    ceremony_parser = subparsers.add_parser(
+        "ceremony",
+        help="Show medal standing (default: men+women, World Cup, current season)",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
+    ceremony_parser.add_argument(
+        "--athlete", action="store_true", help="Rank by athlete (default: by country)"
+    )
     ceremony_parser.add_argument("--race", default="", help="Race id")
     ceremony_parser.add_argument("--event", default="", help="Event id")
     gender_group = ceremony_parser.add_mutually_exclusive_group()
-    gender_group.add_argument("--men", action="store_true", help="Show men only (default: men+women)")
-    gender_group.add_argument("--women", action="store_true", help="Show women only (default: men+women)")
-    ceremony_parser.add_argument("--country", default="", help="Filter by host country (where event is held)")
-    ceremony_parser.add_argument("--search", default="", help="Filter events by name (e.g., 'annecy', 'holmenkollen')")
-    ceremony_parser.add_argument("--season", default="", help="Season id (default: current season)")
+    gender_group.add_argument(
+        "--men", action="store_true", help="Show men only (default: men+women)"
+    )
+    gender_group.add_argument(
+        "--women", action="store_true", help="Show women only (default: men+women)"
+    )
+    ceremony_parser.add_argument(
+        "--country", default="", help="Filter by host country (where event is held)"
+    )
+    ceremony_parser.add_argument(
+        "--search",
+        default="",
+        help="Filter events by name (e.g., 'annecy', 'holmenkollen')",
+    )
+    ceremony_parser.add_argument(
+        "--season", default="", help="Season id (default: current season)"
+    )
     add_output_flag(ceremony_parser)
     ceremony_parser.set_defaults(func=handle_ceremony)
 
     # --- shooting ---
-    shooting_parser = subparsers.add_parser("shooting", help="Show shooting accuracy", formatter_class=CompactOptionalFormatter, add_help=False)
+    shooting_parser = subparsers.add_parser(
+        "shooting",
+        help="Show shooting accuracy",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
     shooting_parser.add_argument("--race", default="", help="Race id")
     shooting_parser.add_argument("--event", default="", help="Event id")
     shooting_parser.add_argument("--season", default="", help="Season id")
@@ -397,44 +518,99 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["relay", "mixed-relay", "single-mixed", "all", ""],
         help="Include relay races in shooting stats (relay, mixed-relay, single-mixed, all)",
     )
-    shooting_parser.add_argument("--all-races", action="store_true", help="Only athletes who started every race")
+    shooting_parser.add_argument(
+        "--all-races", action="store_true", help="Only athletes who started every race"
+    )
     shooting_parser.add_argument("--sort", default="", help="Sort order")
-    shooting_parser.add_argument("--min", type=int, default=50, dest="min_pct", help="Minimum race participation %% (default: 50)")
-    shooting_parser.add_argument("--top", type=int, default=0, help="Restrict to top N athletes in WC standings")
-    shooting_parser.add_argument("--limit", type=int, default=25, help="Limit output rows (default: 25, 0 for all)")
-    shooting_parser.add_argument("--debug-races", action="store_true", help="Debug: print races considered")
+    shooting_parser.add_argument(
+        "--min",
+        type=int,
+        default=50,
+        dest="min_pct",
+        help="Minimum race participation %% (default: 50)",
+    )
+    shooting_parser.add_argument(
+        "--top", type=int, default=0, help="Restrict to top N athletes in WC standings"
+    )
+    shooting_parser.add_argument(
+        "--limit",
+        type=int,
+        default=25,
+        help="Limit output rows (default: 25, 0 for all)",
+    )
+    shooting_parser.add_argument(
+        "--debug-races", action="store_true", help="Debug: print races considered"
+    )
     add_output_flag(shooting_parser)
     shooting_parser.set_defaults(func=handle_shooting)
 
     # --- athlete ---
-    athlete_parser = subparsers.add_parser("athlete", help="Show athlete information", formatter_class=CompactOptionalFormatter, add_help=False)
-    athlete_parser.add_argument("--id", default="", help="Athlete IBU id (comma-separated)")
+    athlete_parser = subparsers.add_parser(
+        "athlete",
+        help="Show athlete information",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
+    athlete_parser.add_argument(
+        "--id", default="", help="Athlete IBU id (comma-separated)"
+    )
     athlete_parser.add_argument("--search", default="", help="Search by name")
     athlete_parser.add_argument("--season", default="", help="Season id")
     add_output_flag(athlete_parser)
     athlete_parser.set_defaults(func=handle_athlete_info, athlete_command=None)
-    athlete_sub = athlete_parser.add_subparsers(dest="athlete_command", title="subcommands", metavar="")
+    athlete_sub = athlete_parser.add_subparsers(
+        dest="athlete_command", title="subcommands", metavar=""
+    )
 
-    athlete_results = athlete_sub.add_parser("results", help="Season race ranks (AllResults)", formatter_class=CompactOptionalFormatter, add_help=False)
+    athlete_results = athlete_sub.add_parser(
+        "results",
+        help="Season race ranks (AllResults)",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
     athlete_results.add_argument("--id", default="", help="Athlete IBU id")
-    athlete_results.add_argument("--season", default="", help="Season id or label (e.g., 2526 or 25/26)")
-    athlete_results.add_argument("--level", default="WC,OWG,WCH", help="Level filter (default: WC,OWG,WCH — use 'all' for all levels)")
-    athlete_results.add_argument("--course", action="store_true", help="Use course time rank")
+    athlete_results.add_argument(
+        "--season", default="", help="Season id or label (e.g., 2526 or 25/26)"
+    )
+    athlete_results.add_argument(
+        "--level",
+        default="WC,OWG,WCH",
+        help="Level filter (default: WC,OWG,WCH — use 'all' for all levels)",
+    )
+    athlete_results.add_argument(
+        "--course", action="store_true", help="Use course time rank"
+    )
     add_output_flag(athlete_results)
     athlete_results.set_defaults(func=handle_athlete_results)
 
-    athlete_info = athlete_sub.add_parser("info", help="Athlete bio info", formatter_class=CompactOptionalFormatter, add_help=False)
-    athlete_info.add_argument("--id", default="", help="Athlete IBU id (comma-separated)")
+    athlete_info = athlete_sub.add_parser(
+        "info",
+        help="Athlete bio info",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
+    athlete_info.add_argument(
+        "--id", default="", help="Athlete IBU id (comma-separated)"
+    )
     athlete_info.add_argument("--search", default="", help="Search by name")
     athlete_info.add_argument("--season", default="", help="Season id")
-    athlete_info.add_argument("--level", type=int, default=0, help="Event level (1-5, 0 for all)")
+    athlete_info.add_argument(
+        "--level", type=int, default=0, help="Event level (1-5, 0 for all)"
+    )
     add_output_flag(athlete_info)
     athlete_info.set_defaults(func=handle_athlete_info)
 
-    athlete_id = athlete_sub.add_parser("id", help="Find athlete IBU ids", formatter_class=CompactOptionalFormatter, add_help=False)
+    athlete_id = athlete_sub.add_parser(
+        "id",
+        help="Find athlete IBU ids",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
     athlete_id.add_argument("--search", default="", help="Search by name")
     athlete_id.add_argument("--season", default="", help="Season id")
-    athlete_id.add_argument("--level", type=int, default=0, help="Event level (1-5, 0 for all)")
+    athlete_id.add_argument(
+        "--level", type=int, default=0, help="Event level (1-5, 0 for all)"
+    )
     add_output_flag(athlete_id)
     athlete_id.set_defaults(func=handle_athlete_id)
 
@@ -458,7 +634,9 @@ def build_parser() -> argparse.ArgumentParser:
 
     brief_parser._custom_help = _show_brief_help
     brief_parser.set_defaults(func=_show_brief_help, brief_command=None)
-    brief_sub = brief_parser.add_subparsers(dest="brief_command", title="subcommands", metavar="")
+    brief_sub = brief_parser.add_subparsers(
+        dest="brief_command", title="subcommands", metavar=""
+    )
 
     # brief event
     brief_event = brief_sub.add_parser(
@@ -468,9 +646,15 @@ def build_parser() -> argparse.ArgumentParser:
         add_help=False,
     )
     brief_help["event"] = "Venue history and records (before an event)"
-    brief_event.add_argument("--event", default="", help="Event id (default: current/upcoming WC event)")
-    brief_event.add_argument("--men", action="store_true", help="Show men (default: women)")
-    brief_event.add_argument("--major", action="store_true", help="Use WC+WCH+OWG stats")
+    brief_event.add_argument(
+        "--event", default="", help="Event id (default: current/upcoming WC event)"
+    )
+    brief_event.add_argument(
+        "--men", action="store_true", help="Show men (default: women)"
+    )
+    brief_event.add_argument(
+        "--major", action="store_true", help="Use WC+WCH+OWG stats"
+    )
     add_output_flag(brief_event)
     brief_event.set_defaults(func=handle_brief_event)
 
@@ -482,7 +666,9 @@ def build_parser() -> argparse.ArgumentParser:
         add_help=False,
     )
     brief_help["season"] = "Season summary (events and race counts)"
-    brief_season.add_argument("--season", default="", help="Season id (default: current season)")
+    brief_season.add_argument(
+        "--season", default="", help="Season id (default: current season)"
+    )
     brief_season.add_argument("--level", default="1", help="Event level (default: 1)")
     add_output_flag(brief_season)
     brief_season.set_defaults(func=handle_brief_season)
@@ -495,8 +681,12 @@ def build_parser() -> argparse.ArgumentParser:
         add_help=False,
     )
     brief_help["startlist"] = "Startlist analysis (before a race)"
-    brief_startlist.add_argument("--race", default="", help="Race id (default: latest WC startlist)")
-    brief_startlist.add_argument("--major", action="store_true", help="Use WC+WCH+OWG milestones")
+    brief_startlist.add_argument(
+        "--race", default="", help="Race id (default: latest WC startlist)"
+    )
+    brief_startlist.add_argument(
+        "--major", action="store_true", help="Use WC+WCH+OWG milestones"
+    )
     add_output_flag(brief_startlist)
     brief_startlist.set_defaults(func=handle_brief_startlist)
 
@@ -508,8 +698,12 @@ def build_parser() -> argparse.ArgumentParser:
         add_help=False,
     )
     brief_help["postrace"] = "Post-race analysis (after a race)"
-    brief_post_race.add_argument("--race", default="", help="Race id (default: latest completed race)")
-    brief_post_race.add_argument("--major", action="store_true", help="Use WC+WCH+OWG milestones")
+    brief_post_race.add_argument(
+        "--race", default="", help="Race id (default: latest completed race)"
+    )
+    brief_post_race.add_argument(
+        "--major", action="store_true", help="Use WC+WCH+OWG milestones"
+    )
     add_output_flag(brief_post_race)
     brief_post_race.set_defaults(func=handle_brief_post_race)
 
@@ -521,9 +715,22 @@ def build_parser() -> argparse.ArgumentParser:
         add_help=False,
     )
     form_parser._optionals.title = "optional parameters"
-    form_parser.add_argument("--men", action="store_true", help="Show men (default: women)")
-    form_parser.add_argument("--startlist", nargs="?", const="", default=None, help="Filter to athletes from a race startlist (auto-detects gender). Without a race id, discovers available startlists.")
-    form_parser.add_argument("--races", type=int, default=5, help="Number of recent races for current form (default: 5)")
+    form_parser.add_argument(
+        "--men", action="store_true", help="Show men (default: women)"
+    )
+    form_parser.add_argument(
+        "--startlist",
+        nargs="?",
+        const="",
+        default=None,
+        help="Filter to athletes from a race startlist (auto-detects gender). Without a race id, discovers available startlists.",
+    )
+    form_parser.add_argument(
+        "--races",
+        type=int,
+        default=5,
+        help="Number of recent races for current form (default: 5)",
+    )
     form_parser.add_argument(
         "--event",
         type=int,
@@ -531,11 +738,31 @@ def build_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="Current form from last N events (mutually exclusive with --races)",
     )
-    form_parser.add_argument("--limit", type=int, default=25, help="Limit output rows (default: 25, 0 for all)")
-    form_parser.add_argument("--top", type=int, default=0, help="Filter to top N in WC standings")
-    form_parser.add_argument("--shoot", action="store_true", help="Show shooting accuracy instead of course time ranks")
-    form_parser.add_argument("--min", type=int, default=50, dest="min_pct", metavar="PCT", help="Minimum race participation percentage (0-100, default: 50)")
-    form_parser.add_argument("--season", action="store_true", help="Calculate form based on all season races")
+    form_parser.add_argument(
+        "--limit",
+        type=int,
+        default=25,
+        help="Limit output rows (default: 25, 0 for all)",
+    )
+    form_parser.add_argument(
+        "--top", type=int, default=0, help="Filter to top N in WC standings"
+    )
+    form_parser.add_argument(
+        "--shoot",
+        action="store_true",
+        help="Show shooting accuracy instead of course time ranks",
+    )
+    form_parser.add_argument(
+        "--min",
+        type=int,
+        default=50,
+        dest="min_pct",
+        metavar="PCT",
+        help="Minimum race participation percentage (0-100, default: 50)",
+    )
+    form_parser.add_argument(
+        "--season", action="store_true", help="Calculate form based on all season races"
+    )
     form_parser.add_argument(
         "--remove",
         action="append",
@@ -563,7 +790,6 @@ def main(argv: Iterable[str] | None = None) -> int:
     if tokens and tokens[0] in ("--version", "-V"):
         print(f"biathlon {get_version()}")
         return 0
-
 
     parser = build_parser()
 
@@ -629,7 +855,7 @@ def _require_subcommand(args: argparse.Namespace) -> bool:
         print(
             "\nbiathlon athlete: [ERROR]: the following arguments are required: <subcommand>\n\n"
             "Usage: biathlon athlete <subcommand> [parameters]\n\n"
-            "Example: biathlon athlete info --search \"Boe\"\n\n"
+            'Example: biathlon athlete info --search "Boe"\n\n'
             "To see help text, you can run:\n"
             "  biathlon athlete help\n"
             "  biathlon athlete <subcommand> help\n",

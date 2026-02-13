@@ -106,7 +106,9 @@ def parse_relay_shooting(value: str | None) -> tuple[int, int] | None:
         return None
 
 
-def parse_relay_shootings(value: str | None) -> tuple[tuple[int, int], tuple[int, int]] | None:
+def parse_relay_shootings(
+    value: str | None,
+) -> tuple[tuple[int, int], tuple[int, int]] | None:
     """Parse relay Shootings format 'P+S P+S' into ((prone_p, prone_s), (stand_p, stand_s)).
 
     Returns tuple of (prone, standing) where each is (penalties, spares).
@@ -255,7 +257,9 @@ def build_analytic_times(
             ident = res.get("IBUId") or res.get("Bib") or res.get("Name")
             if not ident:
                 continue
-            times.setdefault(ident, {})[key] = get_first_time(res, ["TotalTime", "Result"])
+            times.setdefault(ident, {})[key] = get_first_time(
+                res, ["TotalTime", "Result"]
+            )
 
     merge(total_type, "total")
     for idx in range(1, laps + 1):
@@ -266,7 +270,12 @@ def build_analytic_times(
 
 def get_race_label(race: dict) -> str:
     """Return a display label for a race."""
-    return race.get("RaceName") or race.get("ShortDescription") or race.get("Description") or ""
+    return (
+        race.get("RaceName")
+        or race.get("ShortDescription")
+        or race.get("Description")
+        or ""
+    )
 
 
 def get_event_label(event: dict) -> str:
@@ -276,7 +285,9 @@ def get_event_label(event: dict) -> str:
 
 def get_race_start_key(race: dict) -> str:
     """Return a sortable start key for a race."""
-    return race.get("StartTime") or race.get("StartDate") or race.get("FirstStart") or ""
+    return (
+        race.get("StartTime") or race.get("StartDate") or race.get("FirstStart") or ""
+    )
 
 
 def format_race_header(payload: dict, race_id: str) -> str:
@@ -296,7 +307,9 @@ def format_race_header(payload: dict, race_id: str) -> str:
     return f"# {race_label}{location} {date_part} {time_part} ({race_id})".strip()
 
 
-def format_result_row(result: dict, analytic_times: dict, base_secs: float | None) -> str:
+def format_result_row(
+    result: dict, analytic_times: dict, base_secs: float | None
+) -> str:
     """Format a single competitor result with rank and finish time details."""
     rank = result.get("Rank") or result.get("ResultOrder") or ""
     name = result.get("Name") or result.get("ShortName") or ""
@@ -304,13 +317,23 @@ def format_result_row(result: dict, analytic_times: dict, base_secs: float | Non
     identifier = result.get("IBUId") or result.get("Bib") or name
     times = analytic_times.get(identifier, {})
     course_time = (
-        times.get("course") or get_first_time(result, ["TotalCourseTime", "CourseTime", "RunTime"]) or "-"
+        times.get("course")
+        or get_first_time(result, ["TotalCourseTime", "CourseTime", "RunTime"])
+        or "-"
     )
-    range_time = times.get("range") or get_first_time(result, ["TotalRangeTime", "RangeTime"]) or "-"
+    range_time = (
+        times.get("range")
+        or get_first_time(result, ["TotalRangeTime", "RangeTime"])
+        or "-"
+    )
     shooting_time = (
-        times.get("shooting") or get_first_time(result, ["TotalShootingTime", "ShootingTime"]) or "-"
+        times.get("shooting")
+        or get_first_time(result, ["TotalShootingTime", "ShootingTime"])
+        or "-"
     )
-    return f"{rank}\t{name}\t{result_time}\t{course_time}\t{range_time}\t{shooting_time}"
+    return (
+        f"{rank}\t{name}\t{result_time}\t{course_time}\t{range_time}\t{shooting_time}"
+    )
 
 
 def resolve_race(race_arg: str, find_latest_func) -> tuple[str, dict]:

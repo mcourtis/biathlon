@@ -7,7 +7,14 @@ import datetime
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from ..api import BiathlonError, get_events, get_race_results, get_races, get_current_season_id, get_seasons
+from ..api import (
+    BiathlonError,
+    get_events,
+    get_race_results,
+    get_races,
+    get_current_season_id,
+    get_seasons,
+)
 from ..constants import (
     CATEGORY_DISPLAY_NAMES,
     DISCIPLINE_NAMES,
@@ -20,7 +27,13 @@ from ..formatting import is_pretty_output, Color, render_table
 from ..utils import format_race_header, parse_date
 from .events import compute_event_styles, format_level
 
-from ._common import _format_section_title, _max_workers, _row_ibu_id, detect_event_type, is_relay_discipline
+from ._common import (
+    _format_section_title,
+    _max_workers,
+    _row_ibu_id,
+    detect_event_type,
+    is_relay_discipline,
+)
 from .post_race import handle_post_race
 from .results import _get_wc_rows
 from .startlist import (
@@ -83,7 +96,9 @@ def _find_current_event() -> dict | None:
     return None
 
 
-def _find_first_race_for_event(event_id: str, cat_id: str = "SW") -> tuple[str, dict] | None:
+def _find_first_race_for_event(
+    event_id: str, cat_id: str = "SW"
+) -> tuple[str, dict] | None:
     """Find the first race for an event to use as reference.
 
     Returns (race_id, payload) or None if no race found.
@@ -179,7 +194,12 @@ def _render_venue_history_table(
         use_medal_columns: If True, use Gold/Silver/Bronze/Total columns instead of Wins/Podiums/Flowers
     """
     if not alltime_stats:
-        print(_format_section_title(f"Most decorated {gender_label.lower()} at {location_label}: no data", args))
+        print(
+            _format_section_title(
+                f"Most decorated {gender_label.lower()} at {location_label}: no data",
+                args,
+            )
+        )
         print()
         return
 
@@ -194,18 +214,30 @@ def _render_venue_history_table(
                 s.get("silver", 0),
                 s.get("bronze", 0),
             ),
-            reverse=True
+            reverse=True,
         )
     else:
         alltime_decorated = [s for s in alltime_stats if s["wins"] > 0]
-        alltime_decorated.sort(key=lambda s: (s["wins"], s["podiums"], s["flowers"], -s["races"]), reverse=True)
+        alltime_decorated.sort(
+            key=lambda s: (s["wins"], s["podiums"], s["flowers"], -s["races"]),
+            reverse=True,
+        )
     alltime_decorated = alltime_decorated[:10]
 
     if not alltime_decorated:
-        print(_format_section_title(f"Most decorated {gender_label.lower()} at {location_label}: no winners found", args))
+        print(
+            _format_section_title(
+                f"Most decorated {gender_label.lower()} at {location_label}: no winners found",
+                args,
+            )
+        )
         print()
     else:
-        print(_format_section_title(f"Most decorated {gender_label.lower()} at {location_label}:", args))
+        print(
+            _format_section_title(
+                f"Most decorated {gender_label.lower()} at {location_label}:", args
+            )
+        )
         venue_rows = []
         highlight_rows: set[int] = set()
         for idx, stats in enumerate(alltime_decorated):
@@ -216,24 +248,28 @@ def _render_venue_history_table(
                 silver = stats.get("silver", 0)
                 bronze = stats.get("bronze", 0)
                 total = gold + silver + bronze
-                venue_rows.append([
-                    idx + 1,
-                    stats["name"],
-                    gold,
-                    silver,
-                    bronze,
-                    total,
-                    stats["races"],
-                ])
+                venue_rows.append(
+                    [
+                        idx + 1,
+                        stats["name"],
+                        gold,
+                        silver,
+                        bronze,
+                        total,
+                        stats["races"],
+                    ]
+                )
             else:
-                venue_rows.append([
-                    idx + 1,
-                    stats["name"],
-                    stats["wins"],
-                    stats["podiums"],
-                    stats["flowers"],
-                    stats["races"],
-                ])
+                venue_rows.append(
+                    [
+                        idx + 1,
+                        stats["name"],
+                        stats["wins"],
+                        stats["podiums"],
+                        stats["flowers"],
+                        stats["races"],
+                    ]
+                )
 
         def highlight_cell(cell_str: str, row_idx: int) -> str:
             return Color.highlight(cell_str) if row_idx in highlight_rows else cell_str
@@ -262,18 +298,30 @@ def _render_venue_history_table(
                 s.get("gold", 0) + s.get("silver", 0) + s.get("bronze", 0),
                 s.get("gold", 0),
             ),
-            reverse=True
+            reverse=True,
         )
     else:
-        alltime_experienced.sort(key=lambda s: (s["races"], s["wins"], s["podiums"], s["flowers"]), reverse=True)
+        alltime_experienced.sort(
+            key=lambda s: (s["races"], s["wins"], s["podiums"], s["flowers"]),
+            reverse=True,
+        )
     alltime_experienced = alltime_experienced[:10]
 
     if not alltime_experienced:
-        print(_format_section_title(f"Most experienced {gender_label.lower()} at {location_label}: no data", args))
+        print(
+            _format_section_title(
+                f"Most experienced {gender_label.lower()} at {location_label}: no data",
+                args,
+            )
+        )
         print()
         return
 
-    print(_format_section_title(f"Most experienced {gender_label.lower()} at {location_label}:", args))
+    print(
+        _format_section_title(
+            f"Most experienced {gender_label.lower()} at {location_label}:", args
+        )
+    )
     venue_rows = []
     highlight_rows = set()
     for idx, stats in enumerate(alltime_experienced):
@@ -284,24 +332,28 @@ def _render_venue_history_table(
             silver = stats.get("silver", 0)
             bronze = stats.get("bronze", 0)
             total = gold + silver + bronze
-            venue_rows.append([
-                idx + 1,
-                stats["name"],
-                stats["races"],
-                gold,
-                silver,
-                bronze,
-                total,
-            ])
+            venue_rows.append(
+                [
+                    idx + 1,
+                    stats["name"],
+                    stats["races"],
+                    gold,
+                    silver,
+                    bronze,
+                    total,
+                ]
+            )
         else:
-            venue_rows.append([
-                idx + 1,
-                stats["name"],
-                stats["races"],
-                stats["wins"],
-                stats["podiums"],
-                stats["flowers"],
-            ])
+            venue_rows.append(
+                [
+                    idx + 1,
+                    stats["name"],
+                    stats["races"],
+                    stats["wins"],
+                    stats["podiums"],
+                    stats["flowers"],
+                ]
+            )
 
     def highlight_cell(cell_str: str, row_idx: int) -> str:
         return Color.highlight(cell_str) if row_idx in highlight_rows else cell_str
@@ -421,7 +473,9 @@ def handle_brief_event(args: argparse.Namespace) -> int:
         return _get_alltime_venue_stats(venue_name, "SW", use_major, show_progress=True)
 
     def fetch_men_venue():
-        return _get_alltime_venue_stats(venue_name, "SM", use_major, show_progress=False)
+        return _get_alltime_venue_stats(
+            venue_name, "SM", use_major, show_progress=False
+        )
 
     def fetch_women_major():
         return _get_alltime_major_event_stats(event_type, "SW", show_progress=True)
@@ -501,7 +555,11 @@ def handle_brief_event(args: argparse.Namespace) -> int:
                     continue
 
                 event_data = ev.get("event", {})
-                desc = str(event_data.get("Description") or event_data.get("ShortDescription") or "").lower()
+                desc = str(
+                    event_data.get("Description")
+                    or event_data.get("ShortDescription")
+                    or ""
+                ).lower()
                 # Olympic events
                 if "olympic" in desc:
                     owg_events.append(ev)
@@ -518,12 +576,18 @@ def handle_brief_event(args: argparse.Namespace) -> int:
                 if ev.get("season_id") in season_years
             }
             if wc_season_years:
-                first_season = min(wc_season_years.keys(), key=lambda s: wc_season_years[s])
+                first_season = min(
+                    wc_season_years.keys(), key=lambda s: wc_season_years[s]
+                )
                 first_year = wc_season_years[first_season]
                 # Format season (e.g., "1112" -> "2011/2012")
                 s = str(first_season)
                 if len(s) >= 4:
-                    season_display = f"20{s[:2]}/20{s[2:]}" if int(s[:2]) < 50 else f"19{s[:2]}/19{s[2:]}"
+                    season_display = (
+                        f"20{s[:2]}/20{s[2:]}"
+                        if int(s[:2]) < 50
+                        else f"19{s[:2]}/19{s[2:]}"
+                    )
                 else:
                     season_display = s
             else:
@@ -531,38 +595,53 @@ def handle_brief_event(args: argparse.Namespace) -> int:
                 season_display = ""
 
             # Get years for WC events (already filtered to exclude future)
-            wc_years = sorted({
-                season_years[ev["season_id"]]
-                for ev in wc_events
-                if ev.get("season_id") in season_years and season_years[ev["season_id"]] <= max_event_year
-            })
+            wc_years = sorted(
+                {
+                    season_years[ev["season_id"]]
+                    for ev in wc_events
+                    if ev.get("season_id") in season_years
+                    and season_years[ev["season_id"]] <= max_event_year
+                }
+            )
             wc_years_str = ", ".join(str(y) for y in wc_years)
 
             # Get years for WCH events (already filtered to exclude future)
-            wch_years = sorted({
-                season_years[ev["season_id"]]
-                for ev in wch_events
-                if ev.get("season_id") in season_years and season_years[ev["season_id"]] <= max_event_year
-            })
+            wch_years = sorted(
+                {
+                    season_years[ev["season_id"]]
+                    for ev in wch_events
+                    if ev.get("season_id") in season_years
+                    and season_years[ev["season_id"]] <= max_event_year
+                }
+            )
             wch_years_str = ", ".join(str(y) for y in wch_years)
 
             # Get years for OWG events (already filtered to exclude future)
-            owg_years = sorted({
-                season_years[ev["season_id"]]
-                for ev in owg_events
-                if ev.get("season_id") in season_years and season_years[ev["season_id"]] <= max_event_year
-            })
+            owg_years = sorted(
+                {
+                    season_years[ev["season_id"]]
+                    for ev in owg_events
+                    if ev.get("season_id") in season_years
+                    and season_years[ev["season_id"]] <= max_event_year
+                }
+            )
             owg_years_str = ", ".join(str(y) for y in owg_years)
 
             print(_format_section_title("Event Facts:", args))
             print(f"  Event type: {EVENT_TYPE_LABELS.get(event_type, 'World Cup')}")
             if first_year:
-                print(f"  First World Cup event: {first_year} (season {season_display})")
+                print(
+                    f"  First World Cup event: {first_year} (season {season_display})"
+                )
             print(f"  Total World Cup events: {len(wc_events)} ({wc_years_str})")
             if wch_events:
-                print(f"  Total World Championship events: {len(wch_events)} ({wch_years_str})")
+                print(
+                    f"  Total World Championship events: {len(wch_events)} ({wch_years_str})"
+                )
             if owg_events:
-                print(f"  Total Olympic Games events: {len(owg_events)} ({owg_years_str})")
+                print(
+                    f"  Total Olympic Games events: {len(owg_events)} ({owg_years_str})"
+                )
             else:
                 print("  Total Olympic Games events: 0")
             print()
@@ -601,13 +680,21 @@ def handle_brief_event(args: argparse.Namespace) -> int:
 
     # History for women (highlight athletes active in current WC season)
     _render_venue_history_table(
-        women_stats, women_active_ids, location_label, "Women", args,
+        women_stats,
+        women_active_ids,
+        location_label,
+        "Women",
+        args,
         use_medal_columns=is_major_event,
     )
 
     # History for men (highlight athletes active in current WC season)
     _render_venue_history_table(
-        men_stats, men_active_ids, location_label, "Men", args,
+        men_stats,
+        men_active_ids,
+        location_label,
+        "Men",
+        args,
         use_medal_columns=is_major_event,
     )
 
@@ -632,7 +719,9 @@ def handle_brief_season(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    season_entry = next((s for s in seasons if str(s.get("SeasonId")) == season_id), None)
+    season_entry = next(
+        (s for s in seasons if str(s.get("SeasonId")) == season_id), None
+    )
     if not season_entry:
         print(f"season {season_id} not found", file=sys.stderr)
         return 1
@@ -745,7 +834,9 @@ def handle_brief_season(args: argparse.Namespace) -> int:
 
     agenda_events = sorted(
         events,
-        key=lambda event: event.get("StartDate") or event.get("FirstCompetitionDate") or "",
+        key=lambda event: (
+            event.get("StartDate") or event.get("FirstCompetitionDate") or ""
+        ),
     )
     agenda_rows: list[list[str]] = []
 
@@ -772,7 +863,12 @@ def handle_brief_season(args: argparse.Namespace) -> int:
         }
 
         for race in race_list:
-            name = (race.get("RaceName") or race.get("ShortDescription") or race.get("Description") or "").lower()
+            name = (
+                race.get("RaceName")
+                or race.get("ShortDescription")
+                or race.get("Description")
+                or ""
+            ).lower()
             disc = (race.get("DisciplineId") or "").upper()
             gender_tag = ""
             if "women" in name or "women's" in name:
@@ -796,34 +892,64 @@ def handle_brief_season(args: argparse.Namespace) -> int:
                 else:
                     flags["relay"].add(gender_tag or "W+M")
 
-        agenda_rows.append([
-            event.get("Description") or "",
-            event.get("ShortDescription") or event.get("Organizer") or "",
-            event.get("Nat") or event.get("Nation") or event.get("CountryId") or event.get("Country") or "",
-            date_only(event.get("StartDate") or event.get("FirstCompetitionDate") or ""),
-            len(race_list),
-            mark(flags["individual"]),
-            mark(flags["sprint"]),
-            mark(flags["pursuit"]),
-            mark(flags["mass"]),
-            mark(flags["relay"]),
-            mark(flags["mixed_relay"]),
-            mark(flags["single_mixed"]),
-        ])
+        agenda_rows.append(
+            [
+                event.get("Description") or "",
+                event.get("ShortDescription") or event.get("Organizer") or "",
+                event.get("Nat")
+                or event.get("Nation")
+                or event.get("CountryId")
+                or event.get("Country")
+                or "",
+                date_only(
+                    event.get("StartDate") or event.get("FirstCompetitionDate") or ""
+                ),
+                len(race_list),
+                mark(flags["individual"]),
+                mark(flags["sprint"]),
+                mark(flags["pursuit"]),
+                mark(flags["mass"]),
+                mark(flags["relay"]),
+                mark(flags["mixed_relay"]),
+                mark(flags["single_mixed"]),
+            ]
+        )
 
     if agenda_rows:
         print(_format_section_title("Agenda:", args))
         agenda_styles = compute_event_styles(agenda_events) if pretty else None
         render_table(
             [
-                "Event", "Location", "Country", "StartDate",
-                "Races", "Individual", "Sprint", "Pursuit", "MassStart",
-                "Relay", "MixedRelay", "SingleMixedRelay",
+                "Event",
+                "Location",
+                "Country",
+                "StartDate",
+                "Races",
+                "Individual",
+                "Sprint",
+                "Pursuit",
+                "MassStart",
+                "Relay",
+                "MixedRelay",
+                "SingleMixedRelay",
             ],
             agenda_rows,
             pretty=pretty,
             row_styles=agenda_styles,
-            cell_formatters=[None, None, None, None, None, None, None, None, None, None, None, None],
+            cell_formatters=[
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            ],
         )
         print()
 
@@ -862,7 +988,9 @@ def handle_brief_season(args: argparse.Namespace) -> int:
                 for res in results:
                     if res.get("IsTeam"):
                         continue
-                    rank_val = parse_rank(res.get("Rank") or res.get("SO") or res.get("ResultOrder"))
+                    rank_val = parse_rank(
+                        res.get("Rank") or res.get("SO") or res.get("ResultOrder")
+                    )
                     if rank_val is None:
                         continue
                     ibu_id = _row_ibu_id(res)
@@ -891,7 +1019,8 @@ def handle_brief_season(args: argparse.Namespace) -> int:
     def render_decorated_section(label: str, stats_map: dict) -> None:
         decorated = [s for s in stats_map.values() if s["flowers"] > 0]
         decorated.sort(
-            key=lambda s: (s["wins"], s["podiums"], s["flowers"], -s["races"]), reverse=True
+            key=lambda s: (s["wins"], s["podiums"], s["flowers"], -s["races"]),
+            reverse=True,
         )
         decorated = decorated[:10]
         if decorated:
@@ -899,19 +1028,30 @@ def handle_brief_season(args: argparse.Namespace) -> int:
             rows = []
             for idx, stats in enumerate(decorated, start=1):
                 total = stats["wins"] + stats["podiums"] + stats["flowers"]
-                rows.append([
-                    idx,
-                    stats["name"],
-                    stats["nat"],
-                    stats["wins"],
-                    stats["podiums"],
-                    stats["flowers"],
-                    total,
-                    stats["races"],
-                ])
+                rows.append(
+                    [
+                        idx,
+                        stats["name"],
+                        stats["nat"],
+                        stats["wins"],
+                        stats["podiums"],
+                        stats["flowers"],
+                        total,
+                        stats["races"],
+                    ]
+                )
 
             render_table(
-                ["Rank", "Athlete", "Nat", "Wins", "Podiums", "Flowers", "Total", "Races"],
+                [
+                    "Rank",
+                    "Athlete",
+                    "Nat",
+                    "Wins",
+                    "Podiums",
+                    "Flowers",
+                    "Total",
+                    "Races",
+                ],
                 rows,
                 pretty=pretty,
                 cell_formatters=[None, None, None, None, None, None, None, None],
@@ -997,7 +1137,9 @@ def _build_team_rosters(payload: dict) -> dict[str, list[str]]:
     return formatted
 
 
-def _get_season_athlete_info(race_id: str, category: str = "") -> dict[str, dict[str, str]]:
+def _get_season_athlete_info(
+    race_id: str, category: str = ""
+) -> dict[str, dict[str, str]]:
     """Get info for athletes who participated in any WC race this season.
 
     Returns dict mapping ibu_id -> {"name": family_name, "nat": nation_code}.
@@ -1089,14 +1231,18 @@ def _render_team_startlist(
     season_athlete_info: dict[str, dict[str, str]] = {}
 
     with ThreadPoolExecutor(max_workers=3) as executor:
-        podiums_future = executor.submit(_get_past_olympic_relay_podiums, discipline, category)
+        podiums_future = executor.submit(
+            _get_past_olympic_relay_podiums, discipline, category
+        )
         medals_future = (
             executor.submit(_get_all_olympic_medals, category)
-            if event_type == EVENT_TYPE_OWG else None
+            if event_type == EVENT_TYPE_OWG
+            else None
         )
         season_info_future = (
             executor.submit(_get_season_athlete_info, race_id, category)
-            if is_provisional else None
+            if is_provisional
+            else None
         )
 
         podiums = podiums_future.result()
@@ -1149,7 +1295,11 @@ def _render_team_startlist(
 
         disc_name = DISCIPLINE_NAMES.get(discipline, discipline)
         cat_name = CATEGORY_DISPLAY_NAMES.get(category, category)
-        print(_format_section_title(f"2. Past Olympic {cat_name} {disc_name} podiums:", args))
+        print(
+            _format_section_title(
+                f"2. Past Olympic {cat_name} {disc_name} podiums:", args
+            )
+        )
 
         def format_athlete_names(athletes: list[dict]) -> str:
             """Format athlete names: highlight active, dim retired."""
@@ -1165,27 +1315,37 @@ def _render_team_startlist(
         podium_rows = []
         for p in podiums:
             # Row 1: Year, Venue, Country names
-            podium_rows.append([
-                p["year"],
-                p["venue"],
-                p["gold"],
-                p["silver"],
-                p["bronze"],
-            ])
+            podium_rows.append(
+                [
+                    p["year"],
+                    p["venue"],
+                    p["gold"],
+                    p["silver"],
+                    p["bronze"],
+                ]
+            )
             # Row 2: Empty, Empty, Athlete names (if available)
             gold_athletes = p.get("gold_athletes", [])
             silver_athletes = p.get("silver_athletes", [])
             bronze_athletes = p.get("bronze_athletes", [])
             if gold_athletes or silver_athletes or bronze_athletes:
-                podium_rows.append([
-                    "",
-                    "",
-                    format_athlete_names(gold_athletes),
-                    format_athlete_names(silver_athletes),
-                    format_athlete_names(bronze_athletes),
-                ])
+                podium_rows.append(
+                    [
+                        "",
+                        "",
+                        format_athlete_names(gold_athletes),
+                        format_athlete_names(silver_athletes),
+                        format_athlete_names(bronze_athletes),
+                    ]
+                )
         render_table(
-            ["Year", "Venue", Color.gold("Gold"), Color.silver("Silver"), Color.bronze("Bronze")],
+            [
+                "Year",
+                "Venue",
+                Color.gold("Gold"),
+                Color.silver("Silver"),
+                Color.bronze("Bronze"),
+            ],
             podium_rows,
             pretty=pretty,
         )
@@ -1195,7 +1355,11 @@ def _render_team_startlist(
         # Count medals per country
         medal_counts: dict[str, dict[str, int]] = {}
         for p in podiums:
-            for medal_type, key in [("gold", "gold"), ("silver", "silver"), ("bronze", "bronze")]:
+            for medal_type, key in [
+                ("gold", "gold"),
+                ("silver", "silver"),
+                ("bronze", "bronze"),
+            ]:
                 country = p[key]
                 if country:
                     # Extract country name (remove " (NAT)" suffix if present)
@@ -1212,20 +1376,33 @@ def _render_team_startlist(
             reverse=True,
         )
 
-        print(_format_section_title(f"3. Country medal table ({cat_name} {disc_name}):", args))
+        print(
+            _format_section_title(
+                f"3. Country medal table ({cat_name} {disc_name}):", args
+            )
+        )
         medal_rows = []
         for idx, (country, counts) in enumerate(sorted_countries, 1):
             total = counts["gold"] + counts["silver"] + counts["bronze"]
-            medal_rows.append([
-                str(idx),
-                country,
-                str(counts["gold"]),
-                str(counts["silver"]),
-                str(counts["bronze"]),
-                str(total),
-            ])
+            medal_rows.append(
+                [
+                    str(idx),
+                    country,
+                    str(counts["gold"]),
+                    str(counts["silver"]),
+                    str(counts["bronze"]),
+                    str(total),
+                ]
+            )
         render_table(
-            ["#", "Country", Color.gold("Gold"), Color.silver("Silver"), Color.bronze("Bronze"), "Total"],
+            [
+                "#",
+                "Country",
+                Color.gold("Gold"),
+                Color.silver("Silver"),
+                Color.bronze("Bronze"),
+                "Total",
+            ],
             medal_rows,
             pretty=pretty,
         )
@@ -1239,7 +1416,11 @@ def _render_team_startlist(
                     nat = m.get(medal_type, "")
                     if nat:
                         if nat not in all_country_counts:
-                            all_country_counts[nat] = {"gold": 0, "silver": 0, "bronze": 0}
+                            all_country_counts[nat] = {
+                                "gold": 0,
+                                "silver": 0,
+                                "bronze": 0,
+                            }
                         all_country_counts[nat][medal_type] += 1
 
             sorted_all_countries = sorted(
@@ -1248,20 +1429,33 @@ def _render_team_startlist(
                 reverse=True,
             )
 
-            print(_format_section_title("4. Country medal table (all Olympic disciplines):", args))
+            print(
+                _format_section_title(
+                    "4. Country medal table (all Olympic disciplines):", args
+                )
+            )
             all_country_rows = []
             for idx, (country, counts) in enumerate(sorted_all_countries, 1):
                 total = counts["gold"] + counts["silver"] + counts["bronze"]
-                all_country_rows.append([
-                    str(idx),
-                    country,
-                    str(counts["gold"]),
-                    str(counts["silver"]),
-                    str(counts["bronze"]),
-                    str(total),
-                ])
+                all_country_rows.append(
+                    [
+                        str(idx),
+                        country,
+                        str(counts["gold"]),
+                        str(counts["silver"]),
+                        str(counts["bronze"]),
+                        str(total),
+                    ]
+                )
             render_table(
-                ["#", "Country", Color.gold("Gold"), Color.silver("Silver"), Color.bronze("Bronze"), "Total"],
+                [
+                    "#",
+                    "Country",
+                    Color.gold("Gold"),
+                    Color.silver("Silver"),
+                    Color.bronze("Bronze"),
+                    "Total",
+                ],
                 all_country_rows,
                 pretty=pretty,
             )
@@ -1309,29 +1503,45 @@ def _render_team_startlist(
             reverse=True,
         )
 
-        print(_format_section_title(f"5. Athlete medal table ({cat_name} {disc_name}):", args))
+        print(
+            _format_section_title(
+                f"5. Athlete medal table ({cat_name} {disc_name}):", args
+            )
+        )
         athlete_rows = []
         row_styles = []
         for idx, (full_name, counts) in enumerate(sorted_athletes, 1):
             total = counts["gold"] + counts["silver"] + counts["bronze"]
-            athlete_rows.append([
-                str(idx),
-                full_name,
-                counts["nat"],
-                counts["gender"],
-                str(counts["gold"]),
-                str(counts["silver"]),
-                str(counts["bronze"]),
-                str(total),
-                str(counts["races"]),
-            ])
+            athlete_rows.append(
+                [
+                    str(idx),
+                    full_name,
+                    counts["nat"],
+                    counts["gender"],
+                    str(counts["gold"]),
+                    str(counts["silver"]),
+                    str(counts["bronze"]),
+                    str(total),
+                    str(counts["races"]),
+                ]
+            )
             # Highlight active athletes, dim retired
             if counts["family_name"] in highlight_athletes:
                 row_styles.append("highlight")
             else:
                 row_styles.append("dim")
         render_table(
-            ["#", "Athlete", "Nat", "Gender", Color.gold("Gold"), Color.silver("Silver"), Color.bronze("Bronze"), "Total", "Races"],
+            [
+                "#",
+                "Athlete",
+                "Nat",
+                "Gender",
+                Color.gold("Gold"),
+                Color.silver("Silver"),
+                Color.bronze("Bronze"),
+                "Total",
+                "Races",
+            ],
             athlete_rows,
             pretty=pretty,
             row_styles=row_styles,
@@ -1342,7 +1552,8 @@ def _render_team_startlist(
     if event_type == EVENT_TYPE_OWG:
         # Filter to gold medalists only
         medalists = [
-            (key, stats) for key, stats in all_athlete_stats.items()
+            (key, stats)
+            for key, stats in all_athlete_stats.items()
             if stats["gold"] > 0
         ]
         medalists.sort(
@@ -1357,21 +1568,36 @@ def _render_team_startlist(
                 -x[1].get("bronze_ind", 0),
                 -x[1].get("bronze_relay", 0),
                 -(x[1]["gold"] + x[1]["silver"] + x[1]["bronze"]),
-                -(x[1].get("gold_ind", 0) + x[1].get("silver_ind", 0) + x[1].get("bronze_ind", 0)),
-                -(x[1].get("gold_relay", 0) + x[1].get("silver_relay", 0) + x[1].get("bronze_relay", 0)),
+                -(
+                    x[1].get("gold_ind", 0)
+                    + x[1].get("silver_ind", 0)
+                    + x[1].get("bronze_ind", 0)
+                ),
+                -(
+                    x[1].get("gold_relay", 0)
+                    + x[1].get("silver_relay", 0)
+                    + x[1].get("bronze_relay", 0)
+                ),
                 x[1]["races"],
             ),
         )
 
         if not medalists:
-            print(_format_section_title("6. Athlete medal table (all Olympic disciplines): none", args))
+            print(
+                _format_section_title(
+                    "6. Athlete medal table (all Olympic disciplines): none", args
+                )
+            )
             print()
         else:
-            print(_format_section_title("6. Athlete medal table (all Olympic disciplines):", args))
+            print(
+                _format_section_title(
+                    "6. Athlete medal table (all Olympic disciplines):", args
+                )
+            )
             # Highlight: season athletes (provisional) or startlist athletes (non-provisional)
             highlight_ids = (
-                set(season_athlete_info.keys()) if is_provisional
-                else startlist_ids
+                set(season_athlete_info.keys()) if is_provisional else startlist_ids
             )
             all_rows = []
             all_row_styles = []
@@ -1391,25 +1617,54 @@ def _render_team_startlist(
                 bronze_relay = stats.get("bronze_relay", 0)
                 total_relay = gold_relay + silver_relay + bronze_relay
                 races_relay = stats.get("races_relay", 0)
-                all_rows.append([
-                    str(idx),
-                    stats["name"],
-                    stats["nat"],
-                    stats["gender"],
-                    str(gold), str(silver), str(bronze), str(total), str(races),
-                    str(gold_ind), str(silver_ind), str(bronze_ind), str(total_ind), str(races_ind),
-                    str(gold_relay), str(silver_relay), str(bronze_relay), str(total_relay), str(races_relay),
-                ])
+                all_rows.append(
+                    [
+                        str(idx),
+                        stats["name"],
+                        stats["nat"],
+                        stats["gender"],
+                        str(gold),
+                        str(silver),
+                        str(bronze),
+                        str(total),
+                        str(races),
+                        str(gold_ind),
+                        str(silver_ind),
+                        str(bronze_ind),
+                        str(total_ind),
+                        str(races_ind),
+                        str(gold_relay),
+                        str(silver_relay),
+                        str(bronze_relay),
+                        str(total_relay),
+                        str(races_relay),
+                    ]
+                )
                 if key in highlight_ids:
                     all_row_styles.append("highlight")
                 else:
                     all_row_styles.append("dim")
             render_table(
                 [
-                    "#", "Athlete", "Nat", "Gender",
-                    Color.gold("Gold"), Color.silver("Silver"), Color.bronze("Bronze"), "Total", "Races",
-                    Color.gold("Gold"), Color.silver("Silver"), Color.bronze("Bronze"), "Total", "Races",
-                    Color.gold("Gold"), Color.silver("Silver"), Color.bronze("Bronze"), "Total", "Races",
+                    "#",
+                    "Athlete",
+                    "Nat",
+                    "Gender",
+                    Color.gold("Gold"),
+                    Color.silver("Silver"),
+                    Color.bronze("Bronze"),
+                    "Total",
+                    "Races",
+                    Color.gold("Gold"),
+                    Color.silver("Silver"),
+                    Color.bronze("Bronze"),
+                    "Total",
+                    "Races",
+                    Color.gold("Gold"),
+                    Color.silver("Silver"),
+                    Color.bronze("Bronze"),
+                    "Total",
+                    "Races",
                 ],
                 all_rows,
                 pretty=pretty,

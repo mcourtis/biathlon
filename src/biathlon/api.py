@@ -30,7 +30,9 @@ def fetch_json(path: str) -> Iterable[dict[str, Any]]:
     except URLError as exc:
         raise BiathlonError(f"Network error: {exc.reason}") from exc
     except socket.timeout as exc:
-        raise BiathlonError("Request timed out - server may be slow or unreachable") from exc
+        raise BiathlonError(
+            "Request timed out - server may be slow or unreachable"
+        ) from exc
 
     try:
         return json.loads(payload.decode("utf-8"))
@@ -92,13 +94,17 @@ def get_athlete_bio(ibu_id: str) -> dict[str, Any]:
     return dict(fetch_json(f"CISBios?IBUId={ibu_id}"))
 
 
-def get_athletes(family_name: str, given_name: str = "", request_id: int = 0) -> list[dict[str, Any]]:
+def get_athletes(
+    family_name: str, given_name: str = "", request_id: int = 0
+) -> list[dict[str, Any]]:
     """Search athletes by family/given name."""
-    query = urlencode({
-        "FamilyName": family_name,
-        "GivenName": given_name,
-        "RequestId": request_id,
-    })
+    query = urlencode(
+        {
+            "FamilyName": family_name,
+            "GivenName": given_name,
+            "RequestId": request_id,
+        }
+    )
     payload = fetch_json(f"Athletes?{query}")
     if isinstance(payload, dict):
         athletes = payload.get("Athletes") or payload.get("athletes") or []

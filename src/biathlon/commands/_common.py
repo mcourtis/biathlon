@@ -13,9 +13,9 @@ from ..utils import get_first_time
 
 
 # Leader marker characters
-GENERAL_LEADER_MARKER = "\u25CB"  # placeholder for yellow circle
-DISCIPLINE_LEADER_MARKER = "\u25CC"  # placeholder for red circle
-LEADER_MARKER_DOT = "\u25CF"
+GENERAL_LEADER_MARKER = "\u25cb"  # placeholder for yellow circle
+DISCIPLINE_LEADER_MARKER = "\u25cc"  # placeholder for red circle
+LEADER_MARKER_DOT = "\u25cf"
 
 
 def _format_leader_markers(
@@ -151,7 +151,12 @@ def _fetch_analytic_map(race_id: str, type_id: str) -> dict[str, str]:
 
 def _lookup_analytic_time(times: dict[str, str], res: dict) -> str:
     """Return analytic time for a result using multiple identifier keys."""
-    for key in (res.get("IBUId"), res.get("Bib"), res.get("Name"), res.get("ShortName")):
+    for key in (
+        res.get("IBUId"),
+        res.get("Bib"),
+        res.get("Name"),
+        res.get("ShortName"),
+    ):
         if key and str(key) in times:
             return times[str(key)]
     return ""
@@ -224,7 +229,9 @@ def _fetch_leg_lap_times(
                 if bib:
                     times.setdefault((bib, leg_idx), {})[f"lap{local_idx}"] = time_str
                 if ibu_id:
-                    times.setdefault((ibu_id, leg_idx), {})[f"lap{local_idx}"] = time_str
+                    times.setdefault((ibu_id, leg_idx), {})[f"lap{local_idx}"] = (
+                        time_str
+                    )
                 if name:
                     times.setdefault((name, leg_idx), {})[f"lap{local_idx}"] = time_str
     return times

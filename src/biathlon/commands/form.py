@@ -25,8 +25,19 @@ from ..constants import (
     SINGLE_MIXED_RELAY_DISCIPLINE,
 )
 from ..formatting import Color, is_pretty_output, rank_style, render_table
-from ..utils import get_first_time, get_race_start_key, parse_relay_shootings, parse_time_seconds
-from ._common import _format_section_title, _max_workers, _row_ibu_id, is_mixed_relay as _is_mixed_relay, is_relay_discipline as _is_relay
+from ..utils import (
+    get_first_time,
+    get_race_start_key,
+    parse_relay_shootings,
+    parse_time_seconds,
+)
+from ._common import (
+    _format_section_title,
+    _max_workers,
+    _row_ibu_id,
+    is_mixed_relay as _is_mixed_relay,
+    is_relay_discipline as _is_relay,
+)
 from .results import _get_top_n_ibu_ids, _get_wc_rows
 from .startlist import _find_all_startlist_races, _select_race_interactive
 
@@ -157,7 +168,10 @@ def _should_include_relay(include_mode: str, discipline: str, category: str) -> 
     if include_mode == "mixed-relay":
         return discipline == RELAY_DISCIPLINE and category == RELAY_MIXED_CAT
     if include_mode == "relay":
-        return discipline == RELAY_DISCIPLINE and category in {RELAY_MEN_CAT, RELAY_WOMEN_CAT}
+        return discipline == RELAY_DISCIPLINE and category in {
+            RELAY_MEN_CAT,
+            RELAY_WOMEN_CAT,
+        }
     return False
 
 
@@ -191,7 +205,9 @@ def _compute_course_ranks(course_times: dict[str, float]) -> dict[str, int]:
     return ranks
 
 
-def _compute_leg_course_ranks(leg_course_times: dict[tuple[str, int], float]) -> dict[tuple[str, int], int]:
+def _compute_leg_course_ranks(
+    leg_course_times: dict[tuple[str, int], float],
+) -> dict[tuple[str, int], int]:
     """Compute course time ranks from relay leg course times dict.
 
     All leg performances are ranked together regardless of leg number.
@@ -218,9 +234,7 @@ def _compute_leg_course_ranks(leg_course_times: dict[tuple[str, int], float]) ->
     return ranks
 
 
-def _compute_shooting_accuracy(
-    results: list[dict], is_relay: bool
-) -> dict[str, float]:
+def _compute_shooting_accuracy(results: list[dict], is_relay: bool) -> dict[str, float]:
     """Compute shooting accuracy percentage for each athlete in a race.
 
     Returns dict mapping IBUId -> accuracy (0.0 to 100.0).
@@ -345,7 +359,10 @@ def _get_recent_event_ids(
         ev_id = race_to_event.get(rid)
         if ev_id and ev_id not in seen_events:
             # Skip events that aren't fully completed
-            if fully_completed_events is not None and ev_id not in fully_completed_events:
+            if (
+                fully_completed_events is not None
+                and ev_id not in fully_completed_events
+            ):
                 continue
             seen_events.append(ev_id)
             if len(seen_events) >= num_events:
@@ -436,7 +453,9 @@ def _fetch_form_data(
         except BiathlonError:
             pass
     elif event_ids:
-        with ThreadPoolExecutor(max_workers=_max_workers(len(event_ids), cap=8)) as executor:
+        with ThreadPoolExecutor(
+            max_workers=_max_workers(len(event_ids), cap=8)
+        ) as executor:
             futures = {executor.submit(get_races, ev_id): ev_id for ev_id in event_ids}
             for future in as_completed(futures):
                 ev_id = futures[future]
@@ -483,11 +502,16 @@ def _fetch_form_data(
         if _is_relay(disc):
             if _should_include_relay(include_relay_mode, disc, cat):
                 # For relays, allow MX category for mixed relays
-                allow_mixed = include_relay_mode in {"mixed-relay", "single-mixed", "all"} and cat == RELAY_MIXED_CAT
+                allow_mixed = (
+                    include_relay_mode in {"mixed-relay", "single-mixed", "all"}
+                    and cat == RELAY_MIXED_CAT
+                )
                 # For SR (single mixed relay), also allow if it passes include check
                 allow_sr = disc == SINGLE_MIXED_RELAY_DISCIPLINE
                 if cat == gender_cat or allow_mixed or allow_sr:
-                    candidates.append((race_id, get_race_start_key(race), True, disc, cat))
+                    candidates.append(
+                        (race_id, get_race_start_key(race), True, disc, cat)
+                    )
             continue
 
         # Individual disciplines
@@ -510,19 +534,24 @@ def _fetch_form_data(
     # All candidate IDs for fetching (includes removed disciplines for season form)
     fetch_candidate_ids = [rid for rid, _, _, _, _ in candidates]
     # Filtered candidate IDs for event computation (excludes removed disciplines)
-    all_candidate_ids = [rid for rid in fetch_candidate_ids if rid not in removed_candidate_ids]
+    all_candidate_ids = [
+        rid for rid in fetch_candidate_ids if rid not in removed_candidate_ids
+    ]
     # Track race metadata
-    race_is_relay: dict[str, bool] = {rid: is_rel for rid, _, is_rel, _, _ in candidates}
+    race_is_relay: dict[str, bool] = {
+        rid: is_rel for rid, _, is_rel, _, _ in candidates
+    }
     race_discipline: dict[str, str] = {rid: disc for rid, _, _, disc, _ in candidates}
     race_category: dict[str, str] = {rid: cat for rid, _, _, _, cat in candidates}
 
     # Fetch race results for all candidates in parallel to find completed races
     race_payloads: dict[str, dict] = {}
 
-    with ThreadPoolExecutor(max_workers=_max_workers(len(fetch_candidate_ids), cap=8)) as executor:
+    with ThreadPoolExecutor(
+        max_workers=_max_workers(len(fetch_candidate_ids), cap=8)
+    ) as executor:
         futures = {
-            executor.submit(get_race_results, rid): rid
-            for rid in fetch_candidate_ids
+            executor.submit(get_race_results, rid): rid for rid in fetch_candidate_ids
         }
         for future in as_completed(futures):
             rid = futures[future]
@@ -533,7 +562,8 @@ def _fetch_form_data(
 
     # Filter to races that have actual results (completed races), maintaining order
     completed_candidates = [
-        rid for rid in fetch_candidate_ids
+        rid
+        for rid in fetch_candidate_ids
         if race_payloads.get(rid)
         and race_payloads[rid].get("IsResult")
         and race_payloads[rid].get("Results")
@@ -548,7 +578,9 @@ def _fetch_form_data(
     all_completed_race_ids = list(reversed(completed_candidates))
 
     # Separate relay and individual races
-    individual_race_ids = [rid for rid in all_completed_race_ids if not race_is_relay.get(rid)]
+    individual_race_ids = [
+        rid for rid in all_completed_race_ids if not race_is_relay.get(rid)
+    ]
     relay_race_ids = [rid for rid in all_completed_race_ids if race_is_relay.get(rid)]
 
     shoot_mode = getattr(args, "shoot", False)
@@ -558,7 +590,9 @@ def _fetch_form_data(
     relay_leg_course_times: dict[str, dict[tuple[str, int], float]] = {}
     if not shoot_mode or force_fetch_course_times:
         if individual_race_ids:
-            with ThreadPoolExecutor(max_workers=_max_workers(len(individual_race_ids), cap=8)) as executor:
+            with ThreadPoolExecutor(
+                max_workers=_max_workers(len(individual_race_ids), cap=8)
+            ) as executor:
                 futures = {
                     executor.submit(_fetch_course_times, rid): rid
                     for rid in individual_race_ids
@@ -571,7 +605,9 @@ def _fetch_form_data(
                         race_course_times[rid] = {}
 
         if relay_race_ids:
-            with ThreadPoolExecutor(max_workers=_max_workers(len(relay_race_ids), cap=8)) as executor:
+            with ThreadPoolExecutor(
+                max_workers=_max_workers(len(relay_race_ids), cap=8)
+            ) as executor:
                 futures = {
                     executor.submit(_fetch_leg_course_times, rid): rid
                     for rid in relay_race_ids
@@ -586,7 +622,9 @@ def _fetch_form_data(
     # Season race IDs = all completed (including removed disciplines)
     season_race_ids = all_completed_race_ids
     # Display race IDs = excluding removed disciplines
-    completed_race_ids = [rid for rid in all_completed_race_ids if rid not in removed_candidate_ids]
+    completed_race_ids = [
+        rid for rid in all_completed_race_ids if rid not in removed_candidate_ids
+    ]
 
     # Build column headers (disc-venue) for display races only
     race_headers: list[str] = []
@@ -813,15 +851,15 @@ def _compute_athletes(
                 completed_race_ids, race_to_event, num_events, all_candidate_ids
             )
             athlete_recent_ranks = [
-                entry["ranks"][rid] for rid in reversed(completed_race_ids)
+                entry["ranks"][rid]
+                for rid in reversed(completed_race_ids)
                 if rid in entry["ranks"] and race_to_event.get(rid) in recent_event_ids
             ]
         else:
             # Last N races globally, then average only the ones this athlete participated in
             recent_race_ids = completed_race_ids[-num_races:]
             athlete_recent_ranks = [
-                entry["ranks"][rid] for rid in recent_race_ids
-                if rid in entry["ranks"]
+                entry["ranks"][rid] for rid in recent_race_ids if rid in entry["ranks"]
             ]
 
         has_current_form = bool(athlete_recent_ranks)
@@ -830,16 +868,18 @@ def _compute_athletes(
         else:
             current_form = 0.0 if shoot_mode else float("inf")
 
-        result.append({
-            "ibu_id": ibu_id,
-            "name": entry["name"],
-            "nat": entry["nat"],
-            "wc_rank": wc_rank_map.get(ibu_id),
-            "current_form": current_form,
-            "season_form": season_form,
-            "has_current_form": has_current_form,
-            "ranks": entry["ranks"],
-        })
+        result.append(
+            {
+                "ibu_id": ibu_id,
+                "name": entry["name"],
+                "nat": entry["nat"],
+                "wc_rank": wc_rank_map.get(ibu_id),
+                "current_form": current_form,
+                "season_form": season_form,
+                "has_current_form": has_current_form,
+                "ranks": entry["ranks"],
+            }
+        )
 
     # Filter by minimum participation percentage (based on display races only)
     min_pct = getattr(args, "min_pct", 75)
@@ -847,8 +887,12 @@ def _compute_athletes(
         display_race_set = set(completed_race_ids)
         total_display_races = len(completed_race_ids)
         result = [
-            a for a in result
-            if sum(1 for rid in a["ranks"] if rid in display_race_set) * 100 / total_display_races >= min_pct
+            a
+            for a in result
+            if sum(1 for rid in a["ranks"] if rid in display_race_set)
+            * 100
+            / total_display_races
+            >= min_pct
         ]
 
     if not result:
@@ -921,13 +965,15 @@ def _render_form_table(
             else:
                 row_data.append(str(val))
 
-        rows.append({
-            "season_form": entry["season_form"],
-            "current_form": entry["current_form"],
-            "name": entry["name"],
-            "row": row_data,
-            "_ranks": entry["ranks"],
-        })
+        rows.append(
+            {
+                "season_form": entry["season_form"],
+                "current_form": entry["current_form"],
+                "name": entry["name"],
+                "row": row_data,
+                "_ranks": entry["ranks"],
+            }
+        )
 
     # Sort: shoot mode descending (higher accuracy = better), rank mode ascending
     if season_mode:
@@ -963,7 +1009,9 @@ def _render_form_table(
     highlight_headers = None
     if season_mode:
         # All race columns contribute to form; highlight Season + all race cols
-        highlight_headers = [4] + list(range(race_col_offset, race_col_offset + len(completed_race_ids)))
+        highlight_headers = [4] + list(
+            range(race_col_offset, race_col_offset + len(completed_race_ids))
+        )
     elif num_events > 0:
         recent_event_ids = _get_recent_event_ids(
             completed_race_ids, race_to_event, num_events, all_candidate_ids
@@ -976,7 +1024,9 @@ def _render_form_table(
     else:
         num_race_cols = len(completed_race_ids)
         start_idx = max(0, num_race_cols - num_races)
-        highlight_headers = [current_col_idx] + list(range(race_col_offset + start_idx, race_col_offset + num_race_cols))
+        highlight_headers = [current_col_idx] + list(
+            range(race_col_offset + start_idx, race_col_offset + num_race_cols)
+        )
 
     # Render table
     pretty = is_pretty_output(args)
@@ -992,8 +1042,10 @@ def _render_form_table(
         current_col = -1 if season_mode else 4  # no current col in season mode
 
         if shoot_mode:
+
             def _make_cell_formatter(col_idx: int):
                 """Create a cell formatter that applies accuracy coloring."""
+
                 def _fmt(value, row_idx):
                     if row_idx < 0 or row_idx >= len(rows):
                         return value
@@ -1013,10 +1065,13 @@ def _render_form_table(
                     if pct is None:
                         return value
                     return Color.accuracy(str(value), pct / 100.0)
+
                 return _fmt
         else:
+
             def _make_cell_formatter(col_idx: int):
                 """Create a cell formatter that applies rank coloring."""
+
                 def _fmt(value, row_idx):
                     if row_idx < 0 or row_idx >= len(rows):
                         return value
@@ -1038,6 +1093,7 @@ def _render_form_table(
                     # Convert rank to 0-1 scale: rank 1 → ~1.0 (green), rank 100 → 0.0 (red)
                     pct = max(0.0, (100.0 - rank_val) / 100.0)
                     return Color.accuracy(str(value), pct)
+
                 return _fmt
 
         cell_formatters = [None] * num_cols
@@ -1068,7 +1124,9 @@ def _render_combined_table(
 
     # Rank course time athletes (ascending — lower avg rank is better)
     course_sorted = sorted(course_athletes, key=lambda a: (a[form_key], a["name"]))
-    course_rank: dict[str, int] = {a["ibu_id"]: i for i, a in enumerate(course_sorted, 1)}
+    course_rank: dict[str, int] = {
+        a["ibu_id"]: i for i, a in enumerate(course_sorted, 1)
+    }
 
     # Rank shooting athletes (descending — higher accuracy is better)
     shoot_sorted = sorted(shoot_athletes, key=lambda a: (-a[form_key], a["name"]))
@@ -1092,14 +1150,16 @@ def _render_combined_table(
         cr = course_rank[ibu_id]
         sr = shoot_rank[ibu_id]
         name, nat, wc_rank = athlete_info[ibu_id]
-        combined.append({
-            "name": name,
-            "nat": nat,
-            "wc_rank": wc_rank,
-            "score": cr + sr,
-            "course_rank": cr,
-            "shoot_rank": sr,
-        })
+        combined.append(
+            {
+                "name": name,
+                "nat": nat,
+                "wc_rank": wc_rank,
+                "score": cr + sr,
+                "course_rank": cr,
+                "shoot_rank": sr,
+            }
+        )
 
     combined.sort(key=lambda x: (x["score"], x["name"]))
 
@@ -1114,9 +1174,15 @@ def _render_combined_table(
 
     headers = ["Rank", "Biathlete", "Nat", "WC", "Score", "Course", "Shooting"]
     rows = [
-        [e["rank"], e["name"], e["nat"],
-         str(e["wc_rank"]) if e["wc_rank"] is not None else "-",
-         e["score"], e["course_rank"], e["shoot_rank"]]
+        [
+            e["rank"],
+            e["name"],
+            e["nat"],
+            str(e["wc_rank"]) if e["wc_rank"] is not None else "-",
+            e["score"],
+            e["course_rank"],
+            e["shoot_rank"],
+        ]
         for e in combined
     ]
 
@@ -1192,17 +1258,25 @@ def handle_form(args: argparse.Namespace) -> int:
             gender_cat = race_cat
         else:
             # Mixed relay or unknown: fall back to --men flag
-            gender_cat = GENDER_TO_CAT["men"] if getattr(args, "men", False) else GENDER_TO_CAT["women"]
+            gender_cat = (
+                GENDER_TO_CAT["men"]
+                if getattr(args, "men", False)
+                else GENDER_TO_CAT["women"]
+            )
 
         data = _fetch_form_data(args, gender_cat, force_fetch_course_times=True)
         if data is None:
             return 1
 
         # Compute athletes for both modes
-        course_athletes = _compute_athletes(data, args, shoot_mode=False, filter_ibu_ids=startlist_ids)
+        course_athletes = _compute_athletes(
+            data, args, shoot_mode=False, filter_ibu_ids=startlist_ids
+        )
         if course_athletes is None:
             return 1
-        shoot_athletes = _compute_athletes(data, args, shoot_mode=True, filter_ibu_ids=startlist_ids)
+        shoot_athletes = _compute_athletes(
+            data, args, shoot_mode=True, filter_ibu_ids=startlist_ids
+        )
         if shoot_athletes is None:
             return 1
 
@@ -1223,7 +1297,9 @@ def handle_form(args: argparse.Namespace) -> int:
         return _render_combined_table(course_athletes, shoot_athletes, args)
 
     # Standard mode (no --startlist flag)
-    gender_cat = GENDER_TO_CAT["men"] if getattr(args, "men", False) else GENDER_TO_CAT["women"]
+    gender_cat = (
+        GENDER_TO_CAT["men"] if getattr(args, "men", False) else GENDER_TO_CAT["women"]
+    )
     shoot_mode = getattr(args, "shoot", False)
 
     data = _fetch_form_data(args, gender_cat)

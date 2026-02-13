@@ -59,7 +59,9 @@ def _get_wc_rows(cat_id: str, season_id: str) -> list[dict]:
         return []
 
 
-def _get_wc_rank_map(cat_id: str, top_n: int, season_id: str | None = None) -> dict[str, int]:
+def _get_wc_rank_map(
+    cat_id: str, top_n: int, season_id: str | None = None
+) -> dict[str, int]:
     """Return IBU id -> WC rank mapping for the top N."""
     if top_n <= 0:
         return {}
@@ -82,7 +84,9 @@ def _get_wc_rank_map(cat_id: str, top_n: int, season_id: str | None = None) -> d
     return rank_map
 
 
-def _get_top_n_ibu_ids(cat_id: str, top_n: int, season_id: str | None = None) -> list[str]:
+def _get_top_n_ibu_ids(
+    cat_id: str, top_n: int, season_id: str | None = None
+) -> list[str]:
     """Return IBU ids for the top N WC standings."""
     if top_n <= 0:
         return []
@@ -151,7 +155,9 @@ def _fetch_analytic_map(race_id: str, type_id: str) -> dict[str, str]:
     return times
 
 
-def _fetch_stage_times(race_id: str, prefix: str, suffix: str, count: int) -> dict[int, dict[str, str]]:
+def _fetch_stage_times(
+    race_id: str, prefix: str, suffix: str, count: int
+) -> dict[int, dict[str, str]]:
     """Fetch analytic stage times in parallel."""
     from concurrent.futures import ThreadPoolExecutor
 
@@ -168,7 +174,12 @@ def _fetch_stage_times(race_id: str, prefix: str, suffix: str, count: int) -> di
 
 def _lookup_analytic_time(times: dict[str, str], res: dict) -> str:
     """Return analytic time for a result using multiple identifier keys."""
-    for key in (res.get("IBUId"), res.get("Bib"), res.get("Name"), res.get("ShortName")):
+    for key in (
+        res.get("IBUId"),
+        res.get("Bib"),
+        res.get("Name"),
+        res.get("ShortName"),
+    ):
         if key and str(key) in times:
             return times[str(key)]
     return ""
@@ -246,7 +257,9 @@ def _find_latest_race_with_results_any() -> tuple[str, dict]:
             continue
         comp = payload.get("Competition") or {}
         start_raw = comp.get("StartTime") or start_key
-        start_dt = parse_start_datetime(start_raw if isinstance(start_raw, str) else None)
+        start_dt = parse_start_datetime(
+            start_raw if isinstance(start_raw, str) else None
+        )
         if start_dt and start_dt > now:
             continue
         if discipline in (RELAY_DISCIPLINE, SINGLE_MIXED_RELAY_DISCIPLINE):
@@ -294,7 +307,9 @@ def _find_latest_race_by_discipline(
             continue
         comp = payload.get("Competition") or {}
         start_raw = comp.get("StartTime") or start_key
-        start_dt = parse_start_datetime(start_raw if isinstance(start_raw, str) else None)
+        start_dt = parse_start_datetime(
+            start_raw if isinstance(start_raw, str) else None
+        )
         if start_dt and start_dt > now:
             continue
         comp_cat = str(comp.get("catId") or comp.get("CatId") or race_cat or "").upper()
@@ -312,7 +327,9 @@ def _find_latest_race_by_discipline(
             if _has_completed_results(payload):
                 return race_id, payload
 
-    raise BiathlonError(f"No completed races with results found for discipline {discipline}")
+    raise BiathlonError(
+        f"No completed races with results found for discipline {discipline}"
+    )
 
 
 def _get_discipline(payload: dict) -> str:
@@ -323,6 +340,7 @@ def _get_discipline(payload: dict) -> str:
 
 def _sort_rows(rows: list[dict], key: str, relay: bool) -> list[dict]:
     """Sort rows by a given key."""
+
     def time_key(value: object) -> tuple:
         sec = parse_time_seconds(str(value)) if value not in ("", None, "-") else None
         if sec is None:
@@ -360,7 +378,9 @@ def _sort_rows(rows: list[dict], key: str, relay: bool) -> list[dict]:
     return sorted(rows, key=row_key)
 
 
-def _build_relay_rows(payload: dict, race_id: str, first_n: int, discipline: str) -> list[dict]:
+def _build_relay_rows(
+    payload: dict, race_id: str, first_n: int, discipline: str
+) -> list[dict]:
     """Build relay team rows with leg details."""
     from .relay import _fetch_analytic_times, _fetch_leg_lap_times
 
@@ -448,7 +468,12 @@ def _build_relay_rows(payload: dict, race_id: str, first_n: int, discipline: str
             leg_lap_times = {}
             if leg_data:
                 lookup_keys = []
-                for ident in (leg_data.get("IBUId"), leg_data.get("Bib"), bib, leg_data.get("Name")):
+                for ident in (
+                    leg_data.get("IBUId"),
+                    leg_data.get("Bib"),
+                    bib,
+                    leg_data.get("Name"),
+                ):
                     if ident:
                         lookup_keys.append((str(ident), i))
                         if is_single_mixed and i > 2:
@@ -469,7 +494,12 @@ def _build_relay_rows(payload: dict, race_id: str, first_n: int, discipline: str
             range_times = {}
             if leg_data:
                 lookup_keys = []
-                for ident in (leg_data.get("IBUId"), leg_data.get("Bib"), bib, leg_data.get("Name")):
+                for ident in (
+                    leg_data.get("IBUId"),
+                    leg_data.get("Bib"),
+                    bib,
+                    leg_data.get("Name"),
+                ):
                     if ident:
                         lookup_keys.append((str(ident), i))
                         if is_single_mixed and i > 2:
@@ -490,7 +520,12 @@ def _build_relay_rows(payload: dict, race_id: str, first_n: int, discipline: str
             shooting_times = {}
             if leg_data:
                 lookup_keys = []
-                for ident in (leg_data.get("IBUId"), leg_data.get("Bib"), bib, leg_data.get("Name")):
+                for ident in (
+                    leg_data.get("IBUId"),
+                    leg_data.get("Bib"),
+                    bib,
+                    leg_data.get("Name"),
+                ):
                     if ident:
                         lookup_keys.append((str(ident), i))
                         if is_single_mixed and i > 2:
@@ -517,7 +552,9 @@ def _build_relay_rows(payload: dict, race_id: str, first_n: int, discipline: str
                     leg_prone.append(None)
                     leg_standing.append(None)
 
-                leg_names.append(leg_data.get("ShortName") or leg_data.get("Name") or "-")
+                leg_names.append(
+                    leg_data.get("ShortName") or leg_data.get("Name") or "-"
+                )
                 leg_result = get_first_time(leg_data, ["TotalTime", "Result"]) or "-"
                 leg_results_list.append(leg_result)
                 leg_total_times.append(leg_result)
@@ -555,9 +592,15 @@ def _build_relay_rows(payload: dict, race_id: str, first_n: int, discipline: str
         prev_secs: float | None = None
         for i in range(num_legs):
             curr_text = leg_total_times[i]
-            curr_secs = parse_time_seconds(curr_text) if curr_text not in ("", None, "-") else None
+            curr_secs = (
+                parse_time_seconds(curr_text)
+                if curr_text not in ("", None, "-")
+                else None
+            )
             if i == 0:
-                leg_times.append(format_seconds(curr_secs) if curr_secs is not None else curr_text)
+                leg_times.append(
+                    format_seconds(curr_secs) if curr_secs is not None else curr_text
+                )
             else:
                 if curr_secs is not None and prev_secs is not None:
                     leg_times.append(format_seconds(curr_secs - prev_secs))
@@ -578,7 +621,10 @@ def _build_relay_rows(payload: dict, race_id: str, first_n: int, discipline: str
 
         total_prone = add_relay_shootings(leg_prone)
         total_standing = add_relay_shootings(leg_standing)
-        total_misses = (total_prone[0] + total_standing[0], total_prone[1] + total_standing[1])
+        total_misses = (
+            total_prone[0] + total_standing[0],
+            total_prone[1] + total_standing[1],
+        )
 
         misses_str = format_relay_shooting(*total_misses)
 
@@ -645,12 +691,16 @@ def handle_results(args: argparse.Namespace) -> int:
             print("error: unknown discipline", file=sys.stderr)
             return 1
         if disc_arg in {"mixed-relay", "single-mixed-relay"} and is_men:
-            print("error: --men is not supported for mixed relay races", file=sys.stderr)
+            print(
+                "error: --men is not supported for mixed relay races", file=sys.stderr
+            )
             return 1
         cat_filter = RELAY_MEN_CAT if is_men else RELAY_WOMEN_CAT
         if disc_arg in {"mixed-relay", "single-mixed-relay"}:
             cat_filter = None
-        race_id, payload = _find_latest_race_by_discipline(disc_code, mixed_mode, cat_filter)
+        race_id, payload = _find_latest_race_by_discipline(
+            disc_code, mixed_mode, cat_filter
+        )
     else:
         race_id, payload = _find_latest_race_with_results_any()
 
@@ -658,7 +708,9 @@ def handle_results(args: argparse.Namespace) -> int:
     show_detail = getattr(args, "detail", False)
 
     if discipline in (RELAY_DISCIPLINE, SINGLE_MIXED_RELAY_DISCIPLINE):
-        rows = _build_relay_rows(payload, race_id, getattr(args, "first", 0), discipline)
+        rows = _build_relay_rows(
+            payload, race_id, getattr(args, "first", 0), discipline
+        )
         if not rows:
             print(f"no results found for race {race_id}", file=sys.stderr)
             return 1
@@ -747,18 +799,43 @@ def handle_results(args: argparse.Namespace) -> int:
         print(format_race_header(payload, race_id))
         if show_detail:
             headers = [
-                "Rank", "Team", "Results", "Behind", "Course", "Range", "Shoot", "Penalty",
+                "Rank",
+                "Team",
+                "Results",
+                "Behind",
+                "Course",
+                "Range",
+                "Shoot",
+                "Penalty",
                 "Miss",
-                "Leg", "Biathlete", "LegResult", "LegBehind", "LegCourse",
-                "Lap1", "Lap2", "Lap3",
-                "R1", "R2", "S1", "S2",
-                "Prone", "Stand",
-                "Miss", "LegPenalty",
+                "Leg",
+                "Biathlete",
+                "LegResult",
+                "LegBehind",
+                "LegCourse",
+                "Lap1",
+                "Lap2",
+                "Lap3",
+                "R1",
+                "R2",
+                "S1",
+                "S2",
+                "Prone",
+                "Stand",
+                "Miss",
+                "LegPenalty",
             ]
         else:
             headers = [
-                "Rank", "Team", "Results", "Behind",
-                "Course", "Range", "Shoot", "Penalty", "Miss",
+                "Rank",
+                "Team",
+                "Results",
+                "Behind",
+                "Course",
+                "Range",
+                "Shoot",
+                "Penalty",
+                "Miss",
             ]
         if show_sort_rank:
             headers.insert(0, "Sort")
@@ -799,6 +876,7 @@ def handle_results(args: argparse.Namespace) -> int:
                             "dns": row.get("dns", False),
                         }
                     )
+
             def detail_sort(entry: dict) -> tuple:
                 dns_flag = entry.get("dns", False)
                 val = entry.get(detail_sort_key)
@@ -808,12 +886,33 @@ def handle_results(args: argparse.Namespace) -> int:
                     except (TypeError, ValueError):
                         return (0, 10**9)
                 if detail_sort_key in {"leg_miss", "leg_prone", "leg_standing"}:
-                    shooting = parse_relay_shooting(val) if val not in ("", None, "-") else None
+                    shooting = (
+                        parse_relay_shooting(val)
+                        if val not in ("", None, "-")
+                        else None
+                    )
                     if shooting:
                         return (1, 0, 0) if dns_flag else (0, shooting[0], shooting[1])
                     return (0, 9999, 9999)
-                if detail_sort_key in {"leg_result", "leg_behind", "leg_time", "leg_course", "lap1", "lap2", "lap3", "range1", "range2", "shoot1", "shoot2", "leg_penalty"}:
-                    sec = parse_time_seconds(str(val)) if val not in ("", None, "-") else None
+                if detail_sort_key in {
+                    "leg_result",
+                    "leg_behind",
+                    "leg_time",
+                    "leg_course",
+                    "lap1",
+                    "lap2",
+                    "lap3",
+                    "range1",
+                    "range2",
+                    "shoot1",
+                    "shoot2",
+                    "leg_penalty",
+                }:
+                    sec = (
+                        parse_time_seconds(str(val))
+                        if val not in ("", None, "-")
+                        else None
+                    )
                     if sec is None:
                         return (1, float("inf"))
                     return (1, float("inf")) if dns_flag else (0, sec)
@@ -831,8 +930,12 @@ def handle_results(args: argparse.Namespace) -> int:
                 if None in (leg_time_secs, leg_course_secs, range1_secs, range2_secs):
                     entry["leg_penalty"] = "-"
                 else:
-                    penalty_secs = leg_time_secs - leg_course_secs - range1_secs - range2_secs
-                    entry["leg_penalty"] = format_seconds(penalty_secs) if penalty_secs >= 0 else "-"
+                    penalty_secs = (
+                        leg_time_secs - leg_course_secs - range1_secs - range2_secs
+                    )
+                    entry["leg_penalty"] = (
+                        format_seconds(penalty_secs) if penalty_secs >= 0 else "-"
+                    )
 
             for idx, entry in enumerate(detail_rows, start=1):
                 render_rows.append(
@@ -944,7 +1047,9 @@ def handle_results(args: argparse.Namespace) -> int:
             fetches.append(("range_lap", f"RNG{i}", i))
             fetches.append(("shooting_lap", f"S{i}TM", i))
 
-    def fetch_one(fetch_type: str, type_id: str, idx: int | None) -> tuple[str, str, int | None, dict[str, str]]:
+    def fetch_one(
+        fetch_type: str, type_id: str, idx: int | None
+    ) -> tuple[str, str, int | None, dict[str, str]]:
         return fetch_type, type_id, idx, _fetch_analytic_map(race_id, type_id)
 
     with ThreadPoolExecutor(max_workers=len(fetches)) as executor:
@@ -973,18 +1078,35 @@ def handle_results(args: argparse.Namespace) -> int:
         name = res.get("Name") or res.get("ShortName") or ""
         nat = res.get("Nat") or ""
         result_time = normalize_result_time(res, base_secs)
-        course_time = _lookup_analytic_time(course_times, res) or get_first_time(
-            res, ["TotalCourseTime", "CourseTime", "RunTime"]
-        ) or "-"
-        range_time = _lookup_analytic_time(range_times, res) or get_first_time(
-            res, ["TotalRangeTime", "RangeTime"]
-        ) or "-"
-        shooting_time = _lookup_analytic_time(shooting_times, res) or get_first_time(
-            res, ["TotalShootingTime", "ShootingTime"]
-        ) or "-"
-        ski_time = _lookup_analytic_time(ski_times, res) or get_first_time(res, [
-            "TotalSkiTime", "SkiTime", "SkiTimeTotal", "SKITime", "Ski",
-        ]) or "-"
+        course_time = (
+            _lookup_analytic_time(course_times, res)
+            or get_first_time(res, ["TotalCourseTime", "CourseTime", "RunTime"])
+            or "-"
+        )
+        range_time = (
+            _lookup_analytic_time(range_times, res)
+            or get_first_time(res, ["TotalRangeTime", "RangeTime"])
+            or "-"
+        )
+        shooting_time = (
+            _lookup_analytic_time(shooting_times, res)
+            or get_first_time(res, ["TotalShootingTime", "ShootingTime"])
+            or "-"
+        )
+        ski_time = (
+            _lookup_analytic_time(ski_times, res)
+            or get_first_time(
+                res,
+                [
+                    "TotalSkiTime",
+                    "SkiTime",
+                    "SkiTimeTotal",
+                    "SKITime",
+                    "Ski",
+                ],
+            )
+            or "-"
+        )
 
         misses_list = _parse_shootings(res.get("Shootings") or res.get("ShootingTotal"))
         misses_total, prone_total, standing_total = _shooting_totals(misses_list)
@@ -1040,10 +1162,16 @@ def handle_results(args: argparse.Namespace) -> int:
         }
         if show_detail:
             for lap in range(1, laps + 1):
-                row[f"courselap{lap}"] = _lookup_analytic_time(course_laps.get(lap, {}), res) or "-"
+                row[f"courselap{lap}"] = (
+                    _lookup_analytic_time(course_laps.get(lap, {}), res) or "-"
+                )
             for stage in range(1, stages + 1):
-                row[f"range{stage}"] = _lookup_analytic_time(range_laps.get(stage, {}), res) or "-"
-                row[f"shoot{stage}"] = _lookup_analytic_time(shooting_laps.get(stage, {}), res) or "-"
+                row[f"range{stage}"] = (
+                    _lookup_analytic_time(range_laps.get(stage, {}), res) or "-"
+                )
+                row[f"shoot{stage}"] = (
+                    _lookup_analytic_time(shooting_laps.get(stage, {}), res) or "-"
+                )
         rows.append(row)
 
     country_filter = getattr(args, "country", "").upper()
@@ -1143,37 +1271,74 @@ def handle_results(args: argparse.Namespace) -> int:
     headers: list[str] = []
     if discipline == "PU":
         headers = [
-            "Rank", "Biathlete", "Nat", "Start", "Gain", "Delay",
-            "Results", "Pursuit", "Course", "Range", "Shoot", "Penalty",
+            "Rank",
+            "Biathlete",
+            "Nat",
+            "Start",
+            "Gain",
+            "Delay",
+            "Results",
+            "Pursuit",
+            "Course",
+            "Range",
+            "Shoot",
+            "Penalty",
             "Miss",
         ]
     else:
         headers = [
-            "Rank", "Biathlete", "Nat", "Results",
+            "Rank",
+            "Biathlete",
+            "Nat",
+            "Results",
             "Ski" if discipline in {"IN", "SI"} else "",
-            "Course", "Range", "Shoot", "Penalty", "Miss",
+            "Course",
+            "Range",
+            "Shoot",
+            "Penalty",
+            "Miss",
         ]
         headers = [h for h in headers if h]
 
     if show_detail:
         if discipline == "SP":
             detail_headers = [
-                "Lap1", "Lap2", "Lap3",
-                "R1", "R2", "S1", "S2", "Pr", "St",
+                "Lap1",
+                "Lap2",
+                "Lap3",
+                "R1",
+                "R2",
+                "S1",
+                "S2",
+                "Pr",
+                "St",
             ]
         else:
             detail_headers = [
-                "Lap1", "Lap2", "Lap3",
+                "Lap1",
+                "Lap2",
+                "Lap3",
             ]
             if laps >= 4:
                 detail_headers.append("Lap4")
             if laps >= 5:
                 detail_headers.append("Lap5")
-            detail_headers.extend([
-                "R1", "R2", "R3", "R4",
-                "S1", "S2", "S3", "S4",
-                "Pr1", "Pr2", "St1", "St2",
-            ])
+            detail_headers.extend(
+                [
+                    "R1",
+                    "R2",
+                    "R3",
+                    "R4",
+                    "S1",
+                    "S2",
+                    "S3",
+                    "S4",
+                    "Pr1",
+                    "Pr2",
+                    "St1",
+                    "St2",
+                ]
+            )
         headers.extend(detail_headers)
     if show_sort_rank:
         headers.insert(0, "Sort")
@@ -1209,51 +1374,59 @@ def handle_results(args: argparse.Namespace) -> int:
             ]
             if discipline in {"IN", "SI"}:
                 base.append(row["ski"])
-            base.extend([
-                row["course"],
-                row["range"],
-                row["shooting"],
-                row["penalty"],
-                row["misses"],
-            ])
+            base.extend(
+                [
+                    row["course"],
+                    row["range"],
+                    row["shooting"],
+                    row["penalty"],
+                    row["misses"],
+                ]
+            )
 
         if show_detail:
             if discipline == "SP":
-                base.extend([
-                    row.get("courselap1", "-"),
-                    row.get("courselap2", "-"),
-                    row.get("courselap3", "-"),
-                    row.get("range1", "-"),
-                    row.get("range2", "-"),
-                    row.get("shoot1", "-"),
-                    row.get("shoot2", "-"),
-                    row.get("prone1", "-"),
-                    row.get("standing1", "-"),
-                ])
+                base.extend(
+                    [
+                        row.get("courselap1", "-"),
+                        row.get("courselap2", "-"),
+                        row.get("courselap3", "-"),
+                        row.get("range1", "-"),
+                        row.get("range2", "-"),
+                        row.get("shoot1", "-"),
+                        row.get("shoot2", "-"),
+                        row.get("prone1", "-"),
+                        row.get("standing1", "-"),
+                    ]
+                )
             else:
-                base.extend([
-                    row.get("courselap1", "-"),
-                    row.get("courselap2", "-"),
-                    row.get("courselap3", "-"),
-                ])
+                base.extend(
+                    [
+                        row.get("courselap1", "-"),
+                        row.get("courselap2", "-"),
+                        row.get("courselap3", "-"),
+                    ]
+                )
                 if laps >= 4:
                     base.append(row.get("courselap4", "-"))
                 if laps >= 5:
                     base.append(row.get("courselap5", "-"))
-                base.extend([
-                    row.get("range1", "-"),
-                    row.get("range2", "-"),
-                    row.get("range3", "-"),
-                    row.get("range4", "-"),
-                    row.get("shoot1", "-"),
-                    row.get("shoot2", "-"),
-                    row.get("shoot3", "-"),
-                    row.get("shoot4", "-"),
-                    row.get("prone1", "-"),
-                    row.get("prone2", "-"),
-                    row.get("standing1", "-"),
-                    row.get("standing2", "-"),
-                ])
+                base.extend(
+                    [
+                        row.get("range1", "-"),
+                        row.get("range2", "-"),
+                        row.get("range3", "-"),
+                        row.get("range4", "-"),
+                        row.get("shoot1", "-"),
+                        row.get("shoot2", "-"),
+                        row.get("shoot3", "-"),
+                        row.get("shoot4", "-"),
+                        row.get("prone1", "-"),
+                        row.get("prone2", "-"),
+                        row.get("standing1", "-"),
+                        row.get("standing2", "-"),
+                    ]
+                )
 
         if show_sort_rank:
             base.insert(0, idx)
@@ -1265,7 +1438,9 @@ def handle_results(args: argparse.Namespace) -> int:
             cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
             if cat_id in ("SM", "SW"):
                 wc_rank_map = _get_wc_rank_map(cat_id, 6)
-                row_styles = [rank_style(wc_rank_map.get(row.get("ibu_id"))) for row in rows]
+                row_styles = [
+                    rank_style(wc_rank_map.get(row.get("ibu_id"))) for row in rows
+                ]
         if row_styles is None:
             row_styles = [rank_style(row.get("rank")) for row in rows]
     highlight_headers = None

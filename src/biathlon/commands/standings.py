@@ -69,7 +69,9 @@ def find_cup_id(season_id: str, gender: str, level: int, cup_type: str) -> str:
     )
 
 
-def _get_cup_ids_by_discipline(season_id: str, gender: str, level: int) -> dict[str, str]:
+def _get_cup_ids_by_discipline(
+    season_id: str, gender: str, level: int
+) -> dict[str, str]:
     """Return dict of discipline -> cup_id for a season/gender/level."""
     cat_id = GENDER_TO_CAT.get(gender.lower())
     if not cat_id:
@@ -235,13 +237,23 @@ def handle_standings(args: argparse.Namespace) -> int:
             row.insert(1, athlete["disc_position"])
         render_rows.append(row)
 
-    headers = ["Position", "Name", "Country", "Total", "Sprint", "Pursuit", "Individual", "MassStart"]
+    headers = [
+        "Position",
+        "Name",
+        "Country",
+        "Total",
+        "Sprint",
+        "Pursuit",
+        "Individual",
+        "MassStart",
+    ]
     if sorting_by_discipline:
         disc_label = DISCIPLINE_LABELS.get(sort_col, sort_col)
         headers.insert(1, f"{disc_label}Position")
 
     def make_slight_gold_formatter():
         """Formatter for Rank, Name, Country columns - gold for total leader, light gold for discipline leaders."""
+
         def formatter(cell_str: str, row_idx: int) -> str:
             if not Color.enabled():
                 return cell_str
@@ -252,10 +264,12 @@ def handle_standings(args: argparse.Namespace) -> int:
             if name in discipline_leaders:
                 return Color.rgb(cell_str, Color.LIGHT_GOLD, bold=False)
             return cell_str
+
         return formatter
 
     def make_disc_formatter(disc_key: str):
         """Formatter for discipline columns - gold for total leader, light gold for discipline-only leader."""
+
         def formatter(cell_str: str, row_idx: int) -> str:
             if not Color.enabled():
                 return cell_str
@@ -266,13 +280,16 @@ def handle_standings(args: argparse.Namespace) -> int:
             if name == leaders[disc_key] and name != total_leader:
                 return Color.rgb(cell_str, Color.LIGHT_GOLD, bold=False)
             return cell_str
+
         return formatter
 
     def make_name_formatter():
         """Formatter for Name column - leader markers + light gold for discipline leaders."""
         base = make_slight_gold_formatter()
+
         def formatter(cell_str: str, row_idx: int) -> str:
             return _format_leader_markers(cell_str, row_idx, base)
+
         return formatter
 
     if pretty:
@@ -281,22 +298,41 @@ def handle_standings(args: argparse.Namespace) -> int:
         ]
         if sorting_by_discipline:
             cell_formatters.append(None)  # DisciplinePosition - no special formatting
-        cell_formatters.extend([
-            make_name_formatter(),  # Name
-            make_slight_gold_formatter(),  # Country
-            None,  # Total - no special formatting
-            make_disc_formatter("SP"),
-            make_disc_formatter("PU"),
-            make_disc_formatter("IN"),
-            make_disc_formatter("MS"),
-        ])
+        cell_formatters.extend(
+            [
+                make_name_formatter(),  # Name
+                make_slight_gold_formatter(),  # Country
+                None,  # Total - no special formatting
+                make_disc_formatter("SP"),
+                make_disc_formatter("PU"),
+                make_disc_formatter("IN"),
+                make_disc_formatter("MS"),
+            ]
+        )
     else:
         cell_formatters = None
 
     # Highlight the column header used for sorting
-    sort_header_map = {"total": "Total", "SP": "Sprint", "PU": "Pursuit", "IN": "Individual", "MS": "MassStart"}
+    sort_header_map = {
+        "total": "Total",
+        "SP": "Sprint",
+        "PU": "Pursuit",
+        "IN": "Individual",
+        "MS": "MassStart",
+    }
     sort_header_name = sort_header_map.get(sort_col)
-    highlight_headers = [headers.index(sort_header_name)] if pretty and sort_header_name and sort_header_name in headers else None
+    highlight_headers = (
+        [headers.index(sort_header_name)]
+        if pretty and sort_header_name and sort_header_name in headers
+        else None
+    )
 
-    render_table(headers, render_rows, pretty=pretty, row_styles=row_styles if pretty else None, cell_formatters=cell_formatters, highlight_headers=highlight_headers)
+    render_table(
+        headers,
+        render_rows,
+        pretty=pretty,
+        row_styles=row_styles if pretty else None,
+        cell_formatters=cell_formatters,
+        highlight_headers=highlight_headers,
+    )
     return 0

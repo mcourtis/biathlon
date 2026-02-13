@@ -27,6 +27,7 @@ from ..utils import (
     parse_time_seconds,
 )
 
+
 def handle_athlete_results_scan(args: argparse.Namespace) -> int:
     """Show season race ranks for an athlete (scan Results endpoints)."""
     if not args.id and not args.search:
@@ -51,7 +52,7 @@ def handle_athlete_results_scan(args: argparse.Namespace) -> int:
     levels = [level_arg] if level_arg in {1, 2, 3, 4, 5} else [1, 2, 3, 4, 5]
     for lvl in levels:
         for ev in get_events(season_id, level=lvl):
-            key = ev.get("EventId") or f"{lvl}-{ev.get('Description','')}"
+            key = ev.get("EventId") or f"{lvl}-{ev.get('Description', '')}"
             event_map.setdefault(key, ev)
     events = list(event_map.values())
 
@@ -72,7 +73,12 @@ def handle_athlete_results_scan(args: argparse.Namespace) -> int:
         event_id = event.get("EventId")
         if not event_id:
             continue
-        event_label = event.get("Description") or event.get("ShortDescription") or event.get("Organizer") or ""
+        event_label = (
+            event.get("Description")
+            or event.get("ShortDescription")
+            or event.get("Organizer")
+            or ""
+        )
         location_label = event.get("ShortDescription") or event.get("Organizer") or ""
         for race in sorted(get_races(event_id), key=get_race_start_key):
             race_id = race.get("RaceId") or race.get("Id")
@@ -95,8 +101,17 @@ def handle_athlete_results_scan(args: argparse.Namespace) -> int:
                 continue
             comp = payload.get("Competition") or {}
             sport_evt = payload.get("SportEvt") or {}
-            race_label = comp.get("ShortDescription") or comp.get("Description") or get_race_label(race)
-            start_raw = comp.get("StartTime") or comp.get("StartDate") or race.get("StartTime") or race.get("StartDate")
+            race_label = (
+                comp.get("ShortDescription")
+                or comp.get("Description")
+                or get_race_label(race)
+            )
+            start_raw = (
+                comp.get("StartTime")
+                or comp.get("StartDate")
+                or race.get("StartTime")
+                or race.get("StartDate")
+            )
             race_date = start_raw.split("T", 1)[0] if isinstance(start_raw, str) else ""
             discipline = comp.get("DisciplineId") or race.get("DisciplineId") or ""
 
@@ -114,7 +129,9 @@ def handle_athlete_results_scan(args: argparse.Namespace) -> int:
                         ident = res.get("IBUId") or res.get("Bib") or res.get("Name")
                         if not ident:
                             continue
-                        course_val = get_first_time(res, ["TotalCourseTime", "CourseTime", "RunTime"])
+                        course_val = get_first_time(
+                            res, ["TotalCourseTime", "CourseTime", "RunTime"]
+                        )
                         secs = parse_time_seconds(course_val) if course_val else None
                         if secs is not None:
                             time_map[ident] = secs
@@ -130,9 +147,16 @@ def handle_athlete_results_scan(args: argparse.Namespace) -> int:
                 nat = res.get("Nat") or ""
                 key = ibuid or name.lower()
                 if args.ski:
-                    rank_val = ski_ranks.get(res.get("IBUId") or res.get("Bib") or res.get("Name") or "", "")
+                    rank_val = ski_ranks.get(
+                        res.get("IBUId") or res.get("Bib") or res.get("Name") or "", ""
+                    )
                 else:
-                    rank_val = res.get("Rank") or res.get("ResultOrder") or res.get("Result") or ""
+                    rank_val = (
+                        res.get("Rank")
+                        or res.get("ResultOrder")
+                        or res.get("Result")
+                        or ""
+                    )
                 include = False
                 if args.id and ibuid and ibuid == args.id.lower():
                     include = True
@@ -142,17 +166,26 @@ def handle_athlete_results_scan(args: argparse.Namespace) -> int:
                     matches[key] = rank_val
                     if key not in athlete_map:
                         label = f"{name} ({nat})" if nat else name
-                        athlete_map[key] = {"label": label, "nat": nat, "ibuid": ibuid or ""}
+                        athlete_map[key] = {
+                            "label": label,
+                            "nat": nat,
+                            "ibuid": ibuid or "",
+                        }
             if matches:
-                race_entries.append({
-                    "date": race_date,
-                    "event": event_label or sport_evt.get("ShortDescription") or sport_evt.get("Organizer") or "",
-                    "location": location_label or sport_evt.get("Organizer") or "",
-                    "race": race_label,
-                    "disc": discipline,
-                    "race_id": race_id,
-                    "matches": matches,
-                })
+                race_entries.append(
+                    {
+                        "date": race_date,
+                        "event": event_label
+                        or sport_evt.get("ShortDescription")
+                        or sport_evt.get("Organizer")
+                        or "",
+                        "location": location_label or sport_evt.get("Organizer") or "",
+                        "race": race_label,
+                        "disc": discipline,
+                        "race_id": race_id,
+                        "matches": matches,
+                    }
+                )
 
     if args.id and args.id.lower() not in athlete_map:
         print(f"no results found for athlete id {args.id}", file=sys.stderr)
@@ -162,11 +195,20 @@ def handle_athlete_results_scan(args: argparse.Namespace) -> int:
         return 1
 
     athlete_keys = sorted(athlete_map.keys(), key=lambda k: athlete_map[k]["label"])
-    headers = ["Date", "Event", "Location", "Race", "Discipline", "RaceId"] + [athlete_map[k]["label"] for k in athlete_keys]
+    headers = ["Date", "Event", "Location", "Race", "Discipline", "RaceId"] + [
+        athlete_map[k]["label"] for k in athlete_keys
+    ]
     rows = []
     race_entries.sort(key=lambda r: r.get("date", ""), reverse=True)
     for entry in race_entries:
-        row = [entry["date"], entry["event"], entry["location"], entry["race"], entry["disc"], entry["race_id"]]
+        row = [
+            entry["date"],
+            entry["event"],
+            entry["location"],
+            entry["race"],
+            entry["disc"],
+            entry["race_id"],
+        ]
         for key in athlete_keys:
             row.append(entry["matches"].get(key, ""))
         rows.append(row)
@@ -297,7 +339,9 @@ def handle_athlete_results(args: argparse.Namespace) -> int:
     if args.season and args.season.strip().lower() == "all":
         label = "all"
     else:
-        season_label = season_filter or (results[0].get("Season") or results[0].get("SeasonId") or "")
+        season_label = season_filter or (
+            results[0].get("Season") or results[0].get("SeasonId") or ""
+        )
         label = season_label or "all"
     print(f"# Athlete results — season {label}")
     render_table(headers, rows, pretty=is_pretty_output(args))
@@ -321,8 +365,15 @@ def _find_athletes_by_search(term: str) -> dict[str, dict]:
                 continue
             given = athlete.get("GivenName") or ""
             family = athlete.get("FamilyName") or ""
-            name = athlete.get("Name") or " ".join(part for part in [given, family] if part)
-            nat = athlete.get("Nat") or athlete.get("Nation") or athlete.get("Country") or ""
+            name = athlete.get("Name") or " ".join(
+                part for part in [given, family] if part
+            )
+            nat = (
+                athlete.get("Nat")
+                or athlete.get("Nation")
+                or athlete.get("Country")
+                or ""
+            )
             if not nat and isinstance(athlete.get("NF"), dict):
                 nat = athlete["NF"].get("Nat") or athlete["NF"].get("Country") or ""
             matches.setdefault(ibu_id, {"name": name or f"IBU {ibu_id}", "nat": nat})
@@ -359,8 +410,15 @@ def handle_athlete_id(args: argparse.Namespace) -> int:
                 continue
             given = athlete.get("GivenName") or ""
             family = athlete.get("FamilyName") or ""
-            name = athlete.get("Name") or " ".join(part for part in [given, family] if part)
-            nat = athlete.get("Nat") or athlete.get("Nation") or athlete.get("Country") or ""
+            name = athlete.get("Name") or " ".join(
+                part for part in [given, family] if part
+            )
+            nat = (
+                athlete.get("Nat")
+                or athlete.get("Nation")
+                or athlete.get("Country")
+                or ""
+            )
             if not nat and isinstance(athlete.get("NF"), dict):
                 nat = athlete["NF"].get("Nat") or athlete["NF"].get("Country") or ""
             matches.setdefault(ibu_id, {"name": name or f"IBU {ibu_id}", "nat": nat})
@@ -389,7 +447,9 @@ def handle_athlete_id(args: argparse.Namespace) -> int:
             meta["nat"] = nat
 
     rows = []
-    for ibu_id, meta in sorted(matches.items(), key=lambda item: item[1].get("name", "")):
+    for ibu_id, meta in sorted(
+        matches.items(), key=lambda item: item[1].get("name", "")
+    ):
         name = meta.get("name") or f"IBU {ibu_id}"
         rows.append([name, meta.get("nat", ""), ibu_id])
 
@@ -425,7 +485,11 @@ def handle_athlete_info(args: argparse.Namespace) -> int:
             bio = get_athlete_bio(ibu_id)
         except BiathlonError:
             continue
-        personal = {p.get("Description", "").lower(): p.get("Value") for p in bio.get("Personal", []) if p.get("Description")}
+        personal = {
+            p.get("Description", "").lower(): p.get("Value")
+            for p in bio.get("Personal", [])
+            if p.get("Description")
+        }
         age_val = bio.get("Age") or personal.get("age") or "-"
         if isinstance(age_val, str) and "," in age_val:
             age_val = age_val.split(",", 1)[0].strip()
@@ -436,14 +500,41 @@ def handle_athlete_info(args: argparse.Namespace) -> int:
         functions = bio.get("Functions") or "-"
         name = bio.get("FullName") or meta.get("name") or f"IBU {ibu_id}"
         nat = bio.get("NAT") or meta.get("nat") or ""
-        photo = bio.get("PhotoURI") or f"https://ibu.blob.core.windows.net/docs/athletes/{ibu_id}.png"
-        rows.append([name, nat, gender, age_val, born_in, residence, profession, functions, photo, ibu_id])
+        photo = (
+            bio.get("PhotoURI")
+            or f"https://ibu.blob.core.windows.net/docs/athletes/{ibu_id}.png"
+        )
+        rows.append(
+            [
+                name,
+                nat,
+                gender,
+                age_val,
+                born_in,
+                residence,
+                profession,
+                functions,
+                photo,
+                ibu_id,
+            ]
+        )
 
     if not rows:
         print("no bios found", file=sys.stderr)
         return 1
 
-    headers = ["Name", "Country", "Gender", "Age", "BornIn", "Residence", "Profession", "Functions", "Photo", "IBUId"]
+    headers = [
+        "Name",
+        "Country",
+        "Gender",
+        "Age",
+        "BornIn",
+        "Residence",
+        "Profession",
+        "Functions",
+        "Photo",
+        "IBUId",
+    ]
     print()
     print("# Athlete info")
     render_table(headers, rows, pretty=is_pretty_output(args))

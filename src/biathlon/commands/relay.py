@@ -101,7 +101,9 @@ def _fetch_leg_lap_times(
                 if bib:
                     times.setdefault((bib, leg_idx), {})[f"lap{local_idx}"] = time_str
                 if ibu_id:
-                    times.setdefault((ibu_id, leg_idx), {})[f"lap{local_idx}"] = time_str
+                    times.setdefault((ibu_id, leg_idx), {})[f"lap{local_idx}"] = (
+                        time_str
+                    )
                 if name:
                     times.setdefault((name, leg_idx), {})[f"lap{local_idx}"] = time_str
     return times
@@ -166,7 +168,9 @@ def _find_latest_relay_race(
             continue
         comp = payload.get("Competition") or {}
         start_raw = comp.get("StartTime") or start_key
-        start_dt = parse_start_datetime(start_raw if isinstance(start_raw, str) else None)
+        start_dt = parse_start_datetime(
+            start_raw if isinstance(start_raw, str) else None
+        )
         if start_dt and start_dt > now:
             continue
         if _has_completed_results(payload):
@@ -312,7 +316,12 @@ def handle_relay(args: argparse.Namespace) -> int:
             leg_lap_times = {}
             if leg_data:
                 lookup_keys = []
-                for ident in (leg_data.get("IBUId"), leg_data.get("Bib"), bib, leg_data.get("Name")):
+                for ident in (
+                    leg_data.get("IBUId"),
+                    leg_data.get("Bib"),
+                    bib,
+                    leg_data.get("Name"),
+                ):
                     if ident:
                         lookup_keys.append((str(ident), i))
                 for key in lookup_keys:
@@ -329,7 +338,12 @@ def handle_relay(args: argparse.Namespace) -> int:
             range_times = {}
             if leg_data:
                 lookup_keys = []
-                for ident in (leg_data.get("IBUId"), leg_data.get("Bib"), bib, leg_data.get("Name")):
+                for ident in (
+                    leg_data.get("IBUId"),
+                    leg_data.get("Bib"),
+                    bib,
+                    leg_data.get("Name"),
+                ):
                     if ident:
                         lookup_keys.append((str(ident), i))
                 for key in lookup_keys:
@@ -346,7 +360,12 @@ def handle_relay(args: argparse.Namespace) -> int:
             shooting_times = {}
             if leg_data:
                 lookup_keys = []
-                for ident in (leg_data.get("IBUId"), leg_data.get("Bib"), bib, leg_data.get("Name")):
+                for ident in (
+                    leg_data.get("IBUId"),
+                    leg_data.get("Bib"),
+                    bib,
+                    leg_data.get("Name"),
+                ):
                     if ident:
                         lookup_keys.append((str(ident), i))
                 for key in lookup_keys:
@@ -369,7 +388,9 @@ def handle_relay(args: argparse.Namespace) -> int:
                     leg_prone.append(None)
                     leg_standing.append(None)
 
-                leg_names.append(leg_data.get("ShortName") or leg_data.get("Name") or "-")
+                leg_names.append(
+                    leg_data.get("ShortName") or leg_data.get("Name") or "-"
+                )
                 leg_result = get_first_time(leg_data, ["TotalTime", "Result"]) or "-"
                 leg_results.append(leg_result)
                 leg_total_times.append(leg_result)
@@ -402,9 +423,15 @@ def handle_relay(args: argparse.Namespace) -> int:
         prev_secs: float | None = None
         for i in range(num_legs):
             curr_text = leg_total_times[i]
-            curr_secs = parse_time_seconds(curr_text) if curr_text not in ("", None, "-") else None
+            curr_secs = (
+                parse_time_seconds(curr_text)
+                if curr_text not in ("", None, "-")
+                else None
+            )
             if i == 0:
-                leg_times.append(format_seconds(curr_secs) if curr_secs is not None else curr_text)
+                leg_times.append(
+                    format_seconds(curr_secs) if curr_secs is not None else curr_text
+                )
             else:
                 if curr_secs is not None and prev_secs is not None:
                     leg_times.append(format_seconds(curr_secs - prev_secs))
@@ -428,7 +455,10 @@ def handle_relay(args: argparse.Namespace) -> int:
         # Sum prone and standing totals
         total_prone = add_relay_shootings(leg_prone)
         total_standing = add_relay_shootings(leg_standing)
-        total_misses = (total_prone[0] + total_standing[0], total_prone[1] + total_standing[1])
+        total_misses = (
+            total_prone[0] + total_standing[0],
+            total_prone[1] + total_standing[1],
+        )
 
         prone_str = format_relay_shooting(*total_prone)
         standing_str = format_relay_shooting(*total_standing)
@@ -570,15 +600,33 @@ def handle_relay(args: argparse.Namespace) -> int:
         if show_detail:
             detail_row_key = detail_col_map.get(sort_col, "")
             if not detail_row_key:
-                print(f"error: sort must be one of {', '.join(detail_sort_cols)}", file=sys.stderr)
+                print(
+                    f"error: sort must be one of {', '.join(detail_sort_cols)}",
+                    file=sys.stderr,
+                )
                 return 1
-            detail_sort_header = detail_sort_headers.get(sort_col, sort_col.capitalize())
+            detail_sort_header = detail_sort_headers.get(
+                sort_col, sort_col.capitalize()
+            )
             show_sort_rank = True
         else:
             row_key = col_map.get(sort_col)
             if not row_key:
-                valid_cols = ["result", "behind", "course", "range", "shoot", "penalty", "prone", "stand", "misses"]
-                print(f"error: sort must be one of {', '.join(valid_cols)}", file=sys.stderr)
+                valid_cols = [
+                    "result",
+                    "behind",
+                    "course",
+                    "range",
+                    "shoot",
+                    "penalty",
+                    "prone",
+                    "stand",
+                    "misses",
+                ]
+                print(
+                    f"error: sort must be one of {', '.join(valid_cols)}",
+                    file=sys.stderr,
+                )
                 return 1
 
             # Determine sort rank header name
@@ -600,19 +648,29 @@ def handle_relay(args: argparse.Namespace) -> int:
                 # Sort by shooting (P+S format), by penalties first, then spares
                 def sort_key(r: dict) -> tuple:
                     val = r.get(row_key, "-")
-                    shooting = parse_relay_shooting(val) if val not in ("", None, "-") else None
+                    shooting = (
+                        parse_relay_shooting(val)
+                        if val not in ("", None, "-")
+                        else None
+                    )
                     if shooting:
                         return (0, shooting[0], shooting[1])  # penalties, then spares
                     return (1, 9999, 9999)
+
                 rows = sorted(rows, key=sort_key)
             else:
                 # Sort by time column
                 def sort_key(r: dict) -> tuple:
                     val = r.get(row_key)
-                    sec = parse_time_seconds(str(val)) if val not in ("", None, "-") else None
+                    sec = (
+                        parse_time_seconds(str(val))
+                        if val not in ("", None, "-")
+                        else None
+                    )
                     if sec is None:
                         return (1, float("inf"))
                     return (0, sec)
+
                 rows = sorted(rows, key=sort_key)
 
             # Assign sort rank
@@ -631,32 +689,88 @@ def handle_relay(args: argparse.Namespace) -> int:
     if show_detail:
         if show_sort_rank:
             headers = [
-                "Rank", "FinalRank", "Team", "Result", "Behind", "Misses",
-                "Course", "Range", "Shoot",
-                "Leg", "Biathlete", "LegResult", "LegBehind", "LegTime",
-                "Lap1", "Lap2", "Lap3",
-                "Range1", "Range2", "Shoot1", "Shoot2",
-                "Prone", "Stand", "Miss",
+                "Rank",
+                "FinalRank",
+                "Team",
+                "Result",
+                "Behind",
+                "Misses",
+                "Course",
+                "Range",
+                "Shoot",
+                "Leg",
+                "Biathlete",
+                "LegResult",
+                "LegBehind",
+                "LegTime",
+                "Lap1",
+                "Lap2",
+                "Lap3",
+                "Range1",
+                "Range2",
+                "Shoot1",
+                "Shoot2",
+                "Prone",
+                "Stand",
+                "Miss",
             ]
         else:
             headers = [
-                "Rank", "Team", "Result", "Behind", "Misses",
-                "Course", "Range", "Shoot",
-                "Leg", "Biathlete", "LegResult", "LegBehind", "LegTime",
-                "Lap1", "Lap2", "Lap3",
-                "Range1", "Range2", "Shoot1", "Shoot2",
-                "Prone", "Stand", "Miss",
+                "Rank",
+                "Team",
+                "Result",
+                "Behind",
+                "Misses",
+                "Course",
+                "Range",
+                "Shoot",
+                "Leg",
+                "Biathlete",
+                "LegResult",
+                "LegBehind",
+                "LegTime",
+                "Lap1",
+                "Lap2",
+                "Lap3",
+                "Range1",
+                "Range2",
+                "Shoot1",
+                "Shoot2",
+                "Prone",
+                "Stand",
+                "Miss",
             ]
     else:
         if show_sort_rank:
             headers = [
-                "Rank", "FinalRank", "Team", "Country", "Result", "Behind",
-                "Course", "Range", "Shooting", "Penalty", "Prone", "Standing", "Misses",
+                "Rank",
+                "FinalRank",
+                "Team",
+                "Country",
+                "Result",
+                "Behind",
+                "Course",
+                "Range",
+                "Shooting",
+                "Penalty",
+                "Prone",
+                "Standing",
+                "Misses",
             ]
         else:
             headers = [
-                "Rank", "Team", "Country", "Result", "Behind",
-                "Course", "Range", "Shooting", "Penalty", "Prone", "Standing", "Misses",
+                "Rank",
+                "Team",
+                "Country",
+                "Result",
+                "Behind",
+                "Course",
+                "Range",
+                "Shooting",
+                "Penalty",
+                "Prone",
+                "Standing",
+                "Misses",
             ]
 
     # Find index of sorted column header for highlighting
@@ -728,12 +842,20 @@ def handle_relay(args: argparse.Namespace) -> int:
             def detail_sort_key(entry: dict) -> tuple:
                 val = entry.get(detail_row_key)
                 if detail_row_key in shooting_keys:
-                    shooting = parse_relay_shooting(val) if val not in ("", None, "-") else None
+                    shooting = (
+                        parse_relay_shooting(val)
+                        if val not in ("", None, "-")
+                        else None
+                    )
                     if shooting:
                         return (0, shooting[0], shooting[1])
                     return (1, 9999, 9999)
                 if detail_row_key in time_keys:
-                    sec = parse_time_seconds(str(val)) if val not in ("", None, "-") else None
+                    sec = (
+                        parse_time_seconds(str(val))
+                        if val not in ("", None, "-")
+                        else None
+                    )
                     if sec is None:
                         return (1, float("inf"))
                     return (0, sec)

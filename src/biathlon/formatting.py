@@ -18,12 +18,12 @@ class Color:
     OCEAN_BLUE = (79, 193, 255)
     SECTION_TITLE = (255, 170, 0)
     ACCURACY_BANDS = [
-        (0.0, 60.0, (176, 0, 32), (176, 0, 32)),       # #B00020
-        (60.0, 75.0, (176, 0, 32), (230, 81, 0)),       # #E65100
-        (75.0, 85.0, (230, 81, 0), (255, 214, 0)),      # #FFD600
-        (85.0, 92.0, (255, 214, 0), (174, 234, 0)),     # #AEEA00
-        (92.0, 97.0, (174, 234, 0), (0, 200, 83)),      # #00C853
-        (97.0, 100.0, (0, 200, 83), (0, 230, 118)),     # #00E676
+        (0.0, 60.0, (176, 0, 32), (176, 0, 32)),  # #B00020
+        (60.0, 75.0, (176, 0, 32), (230, 81, 0)),  # #E65100
+        (75.0, 85.0, (230, 81, 0), (255, 214, 0)),  # #FFD600
+        (85.0, 92.0, (255, 214, 0), (174, 234, 0)),  # #AEEA00
+        (92.0, 97.0, (174, 234, 0), (0, 200, 83)),  # #00C853
+        (97.0, 100.0, (0, 200, 83), (0, 230, 118)),  # #00E676
     ]
     COLOR_PREFIX = "\033[38;2;"
     COLOR_SUFFIX = "m"
@@ -79,7 +79,9 @@ class Color:
             return text
         r, g, b = color
         prefix = f"{cls.BOLD}" if bold else ""
-        return f"{prefix}{cls.COLOR_PREFIX}{r};{g};{b}{cls.COLOR_SUFFIX}{text}{cls.RESET}"
+        return (
+            f"{prefix}{cls.COLOR_PREFIX}{r};{g};{b}{cls.COLOR_SUFFIX}{text}{cls.RESET}"
+        )
 
     @classmethod
     def silver(cls, text: str) -> str:
@@ -154,12 +156,16 @@ class Color:
     @classmethod
     def clean_race_pct(cls, text: str, pct: float) -> str:
         """Apply color based on clean race percentage (0.0 to 1.0)."""
-        return cls._apply_bands(text, max(0.0, min(100.0, pct * 100.0)), cls.CLEAN_RACE_PCT_BANDS)
+        return cls._apply_bands(
+            text, max(0.0, min(100.0, pct * 100.0)), cls.CLEAN_RACE_PCT_BANDS
+        )
 
     @classmethod
     def clean_stage_pct(cls, text: str, pct: float) -> str:
         """Apply color based on clean stage percentage (0.0 to 1.0)."""
-        return cls._apply_bands(text, max(0.0, min(100.0, pct * 100.0)), cls.CLEAN_STAGE_PCT_BANDS)
+        return cls._apply_bands(
+            text, max(0.0, min(100.0, pct * 100.0)), cls.CLEAN_STAGE_PCT_BANDS
+        )
 
     @classmethod
     def shoot_time(cls, text: str, seconds: float) -> str:
@@ -232,7 +238,9 @@ class Color:
         return cls.rgb(text, cls.RELATIVE_BANDS[-1][3])
 
     @staticmethod
-    def _interp_color(low: tuple[int, int, int], high: tuple[int, int, int], t: float) -> tuple[int, int, int]:
+    def _interp_color(
+        low: tuple[int, int, int], high: tuple[int, int, int], t: float
+    ) -> tuple[int, int, int]:
         t = max(0.0, min(1.0, t))
         return (
             int(low[0] + (high[0] - low[0]) * t),
@@ -435,7 +443,9 @@ def render_table(
             raw_line = "".join(group_line).rstrip()
             # Apply bold to the group labels
             for start_col, end_col, label in group_headers:
-                raw_line = raw_line.replace(label, f"{Color.BOLD}{label}{Color.RESET}", 1)
+                raw_line = raw_line.replace(
+                    label, f"{Color.BOLD}{label}{Color.RESET}", 1
+                )
             print(raw_line)
         header_parts = [fmt_header(i, h) for i, h in enumerate(headers)]
         print(_join(header_parts))

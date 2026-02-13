@@ -36,7 +36,13 @@ def format_event_row(event: dict, race_count: int = 0) -> list[str]:
     event_id = event.get("EventId", "")
     label = event.get("Description") or ""
     short = event.get("ShortDescription") or event.get("Organizer") or ""
-    country = event.get("Nat") or event.get("Nation") or event.get("CountryId") or event.get("Country") or ""
+    country = (
+        event.get("Nat")
+        or event.get("Nation")
+        or event.get("CountryId")
+        or event.get("Country")
+        or ""
+    )
     level = event.get("Level") or ""
 
     start = event.get("StartDate") or event.get("FirstCompetitionDate") or ""
@@ -45,7 +51,17 @@ def format_event_row(event: dict, race_count: int = 0) -> list[str]:
     end = event.get("EndDate") or ""
     end_date = end.split("T", 1)[0] if isinstance(end, str) else ""
 
-    return [season_id, format_level(level), label, short, country, start_date, end_date, race_count, event_id]
+    return [
+        season_id,
+        format_level(level),
+        label,
+        short,
+        country,
+        start_date,
+        end_date,
+        race_count,
+        event_id,
+    ]
 
 
 def compute_event_styles(events: list[dict]) -> list[str]:
@@ -137,7 +153,11 @@ def handle_events(args: argparse.Namespace) -> int:
             for ev in events
             if (
                 (end := parse_date(ev.get("EndDate")))
-                or (end := parse_date(ev.get("StartDate") or ev.get("FirstCompetitionDate")))
+                or (
+                    end := parse_date(
+                        ev.get("StartDate") or ev.get("FirstCompetitionDate")
+                    )
+                )
             )
             and end < today
         ]
@@ -148,7 +168,11 @@ def handle_events(args: argparse.Namespace) -> int:
             for ev in events
             if (
                 (end := parse_date(ev.get("EndDate")))
-                or (end := parse_date(ev.get("StartDate") or ev.get("FirstCompetitionDate")))
+                or (
+                    end := parse_date(
+                        ev.get("StartDate") or ev.get("FirstCompetitionDate")
+                    )
+                )
             )
             and end >= today
         ]
@@ -162,7 +186,13 @@ def handle_events(args: argparse.Namespace) -> int:
 
     def event_sorter(event: dict) -> tuple:
         label = (event.get("ShortDescription") or event.get("Organizer") or "").lower()
-        country = (event.get("Nat") or event.get("Nation") or event.get("CountryId") or event.get("Country") or "").lower()
+        country = (
+            event.get("Nat")
+            or event.get("Nation")
+            or event.get("CountryId")
+            or event.get("Country")
+            or ""
+        ).lower()
         start = event.get("StartDate") or event.get("FirstCompetitionDate") or ""
         if sort_key == "event":
             return (label, start, country)
@@ -177,20 +207,33 @@ def handle_events(args: argparse.Namespace) -> int:
         events = [
             evt
             for evt in events
-            if needle in (evt.get("ShortDescription") or evt.get("Organizer") or "").lower()
+            if needle
+            in (evt.get("ShortDescription") or evt.get("Organizer") or "").lower()
             or needle in (evt.get("Description") or "").lower()
         ]
 
     # Auto-enable --races when -d/--discipline is used
     if args.races or args.discipline:
-        return _handle_events_with_races(events, args, pretty, date_only, date_with_time)
+        return _handle_events_with_races(
+            events, args, pretty, date_only, date_with_time
+        )
 
     rows = []
     for event in events:
         event_id = event.get("EventId")
         race_count = len(get_races(event_id)) if event_id else 0
         rows.append(format_event_row(event, race_count))
-    headers = ["Season", "Level", "Event", "Location", "Country", "StartDate", "EndDate", "Races", "EventId"]
+    headers = [
+        "Season",
+        "Level",
+        "Event",
+        "Location",
+        "Country",
+        "StartDate",
+        "EndDate",
+        "Races",
+        "EventId",
+    ]
     row_styles = compute_event_styles(events) if pretty else None
     render_table(headers, rows, pretty=pretty, row_styles=row_styles)
     return 0
@@ -199,9 +242,20 @@ def handle_events(args: argparse.Namespace) -> int:
 def _handle_events_summary(events: list[dict], pretty: bool, date_only) -> int:
     """Handle --summary flag for events command."""
     headers = [
-        "Season", "Level", "Event", "Location", "Country", "StartDate",
-        "Races", "Individual", "Sprint", "Pursuit", "MassStart",
-        "Relay", "MixedRelay", "SingleMixedRelay",
+        "Season",
+        "Level",
+        "Event",
+        "Location",
+        "Country",
+        "StartDate",
+        "Races",
+        "Individual",
+        "Sprint",
+        "Pursuit",
+        "MassStart",
+        "Relay",
+        "MixedRelay",
+        "SingleMixedRelay",
     ]
     rows: list[list[str]] = []
 
@@ -223,7 +277,12 @@ def _handle_events_summary(events: list[dict], pretty: bool, date_only) -> int:
         }
 
         for race in race_list:
-            name = (race.get("RaceName") or race.get("ShortDescription") or race.get("Description") or "").lower()
+            name = (
+                race.get("RaceName")
+                or race.get("ShortDescription")
+                or race.get("Description")
+                or ""
+            ).lower()
             disc = (race.get("DisciplineId") or "").upper()
             gender_tag = ""
             if "women" in name or "women's" in name:
@@ -256,29 +315,39 @@ def _handle_events_summary(events: list[dict], pretty: bool, date_only) -> int:
                 return "W+M"
             return "+".join(sorted(tags))
 
-        rows.append([
-            event.get("SeasonId", ""),
-            format_level(event.get("Level")),
-            event.get("Description") or "",
-            event.get("ShortDescription") or event.get("Organizer") or "",
-            event.get("Nat") or event.get("Nation") or event.get("CountryId") or event.get("Country") or "",
-            date_only(event.get("StartDate") or event.get("FirstCompetitionDate") or ""),
-            race_count,
-            mark(flags["individual"]),
-            mark(flags["sprint"]),
-            mark(flags["pursuit"]),
-            mark(flags["mass"]),
-            mark(flags["relay"]),
-            mark(flags["mixed_relay"], mixed=True),
-            mark(flags["single_mixed"], mixed=True),
-        ])
+        rows.append(
+            [
+                event.get("SeasonId", ""),
+                format_level(event.get("Level")),
+                event.get("Description") or "",
+                event.get("ShortDescription") or event.get("Organizer") or "",
+                event.get("Nat")
+                or event.get("Nation")
+                or event.get("CountryId")
+                or event.get("Country")
+                or "",
+                date_only(
+                    event.get("StartDate") or event.get("FirstCompetitionDate") or ""
+                ),
+                race_count,
+                mark(flags["individual"]),
+                mark(flags["sprint"]),
+                mark(flags["pursuit"]),
+                mark(flags["mass"]),
+                mark(flags["relay"]),
+                mark(flags["mixed_relay"], mixed=True),
+                mark(flags["single_mixed"], mixed=True),
+            ]
+        )
 
     row_styles = compute_event_styles(level1_events) if pretty else None
     render_table(headers, rows, pretty=pretty, row_styles=row_styles)
     return 0
 
 
-def _handle_events_with_races(events: list[dict], args, pretty: bool, date_only, date_with_time) -> int:
+def _handle_events_with_races(
+    events: list[dict], args, pretty: bool, date_only, date_with_time
+) -> int:
     """Handle --races flag for events command."""
     type_filter = None
     if args.discipline:
@@ -293,15 +362,30 @@ def _handle_events_with_races(events: list[dict], args, pretty: bool, date_only,
         type_filter = type_map.get(args.discipline)
 
     headers = [
-        "Season", "Level", "Event", "Location", "Country", "EventStart",
-        "Races", "Race", "Date", "Discipline", "RaceId", "EventId",
+        "Season",
+        "Level",
+        "Event",
+        "Location",
+        "Country",
+        "EventStart",
+        "Races",
+        "Race",
+        "Date",
+        "Discipline",
+        "RaceId",
+        "EventId",
     ]
     rows = []
     row_styles = []
 
     def parse_race_datetime(race: dict) -> datetime.datetime | None:
         """Parse race start time as a datetime object."""
-        raw = race.get("StartTime") or race.get("StartDate") or race.get("FirstStart") or ""
+        raw = (
+            race.get("StartTime")
+            or race.get("StartDate")
+            or race.get("FirstStart")
+            or ""
+        )
         if not isinstance(raw, str) or "T" not in raw:
             return None
         try:
@@ -320,24 +404,47 @@ def _handle_events_with_races(events: list[dict], args, pretty: bool, date_only,
         event_id = event.get("EventId")
         event_label = event.get("Description") or ""
         short_label = event.get("ShortDescription") or event.get("Organizer") or ""
-        country = event.get("Nat") or event.get("Nation") or event.get("CountryId") or event.get("Country") or ""
+        country = (
+            event.get("Nat")
+            or event.get("Nation")
+            or event.get("CountryId")
+            or event.get("Country")
+            or ""
+        )
         level = format_level(event.get("Level"))
-        event_start = date_only(event.get("StartDate") or event.get("FirstCompetitionDate") or "")
+        event_start = date_only(
+            event.get("StartDate") or event.get("FirstCompetitionDate") or ""
+        )
         race_list = get_races(event_id) if event_id else []
         race_count = len(race_list)
 
         if not race_list:
-            rows.append([
-                event.get("SeasonId", ""), level, event_label, short_label, country,
-                event_start, race_count, "", "", "", "", event_id or "",
-            ])
+            rows.append(
+                [
+                    event.get("SeasonId", ""),
+                    level,
+                    event_label,
+                    short_label,
+                    country,
+                    event_start,
+                    race_count,
+                    "",
+                    "",
+                    "",
+                    "",
+                    event_id or "",
+                ]
+            )
             row_styles.append("dim")
             continue
 
         for race in race_list:
             race_label = get_race_label(race)
             race_start = date_with_time(
-                race.get("StartTime") or race.get("StartDate") or race.get("FirstStart") or ""
+                race.get("StartTime")
+                or race.get("StartDate")
+                or race.get("FirstStart")
+                or ""
             )
             disc_id = race.get("DisciplineId") or ""
             if type_filter and str(disc_id).upper() not in type_filter:
@@ -355,12 +462,25 @@ def _handle_events_with_races(events: list[dict], args, pretty: bool, date_only,
                     race_style = "highlight"
                     found_next_race = True
 
-            rows.append([
-                event.get("SeasonId", ""), level, event_label, short_label, country,
-                event_start, race_count, race_label, race_start,
-                disc_id, race.get("RaceId") or race.get("Id") or "", event_id or "",
-            ])
+            rows.append(
+                [
+                    event.get("SeasonId", ""),
+                    level,
+                    event_label,
+                    short_label,
+                    country,
+                    event_start,
+                    race_count,
+                    race_label,
+                    race_start,
+                    disc_id,
+                    race.get("RaceId") or race.get("Id") or "",
+                    event_id or "",
+                ]
+            )
             row_styles.append(race_style)
 
-    render_table(headers, rows, pretty=pretty, row_styles=row_styles if pretty else None)
+    render_table(
+        headers, rows, pretty=pretty, row_styles=row_styles if pretty else None
+    )
     return 0
