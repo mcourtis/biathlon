@@ -1,6 +1,6 @@
 # Biathlon CLI
 
-A CLI to explore data from the IBU biathlon results API at https://biathlonresults.com.
+A CLI to explore data from the IBU biathlon results API at [biathlonresults.com].
 
 No external dependencies - pure Python standard library.
 
@@ -96,20 +96,12 @@ Show men sprint standings for season 2425:
 biathlon standings --season 2425 --men --sort sprint
 ```
 
-Show relay results:
+Show athlete information:
 
 ```bash
-biathlon relay
-biathlon relay --men
-biathlon relay --mixed
-```
-
-Show biathlete information:
-
-```bash
-biathlon biathlete info --search "boe johannes"
-biathlon biathlete id --search "boe"
-biathlon biathlete results --id BTFRA12305199301
+biathlon athlete info --search "boe johannes"
+biathlon athlete id --search "boe"
+biathlon athlete results --id BTFRA12305199301
 ```
 
 Show medal standings:
@@ -182,3 +174,5 @@ source <(biathlon --completion zsh)
 ## License
 
 MIT
+
+[biathlonresults.com]: https://biathlonresults.com
