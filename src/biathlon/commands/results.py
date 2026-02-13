@@ -43,7 +43,7 @@ from ..utils import (
 )
 from ._common import _row_ibu_id
 from .relay import _has_completed_results as _has_completed_relay_results
-from .scores import find_cup_id
+from .standings import find_cup_id
 
 
 def _get_wc_rows(cat_id: str, season_id: str) -> list[dict]:

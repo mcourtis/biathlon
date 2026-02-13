@@ -9,6 +9,11 @@ from ..api import BiathlonError, get_cups, get_cup_results, get_current_season_i
 from ..constants import GENDER_TO_CAT
 from ..formatting import Color, is_pretty_output, render_table
 from ..utils import parse_time_seconds
+from ._common import (
+    DISCIPLINE_LEADER_MARKER,
+    GENERAL_LEADER_MARKER,
+    _format_leader_markers,
+)
 
 
 SCORE_TYPE_TO_DISCIPLINE = {
@@ -98,7 +103,7 @@ def _find_leaders(athlete_list: list[dict]) -> dict:
     return leaders
 
 
-def handle_scores(args: argparse.Namespace) -> int:
+def handle_standings(args: argparse.Namespace) -> int:
     """List standings for a cup with discipline breakdown."""
     season_id = args.season or get_current_season_id()
     gender = "men" if args.men else "women"
@@ -188,9 +193,15 @@ def handle_scores(args: argparse.Namespace) -> int:
 
     # Find athletes who lead any discipline but not total (for slight gold)
     discipline_leaders = set()
+    # Build name -> list of led disciplines (in fixed order)
+    athlete_led_disciplines: dict[str, list[str]] = {}
     for disc in DISCIPLINES:
-        if leaders[disc] and leaders[disc] != total_leader:
-            discipline_leaders.add(leaders[disc])
+        if leaders[disc]:
+            athlete_led_disciplines.setdefault(leaders[disc], []).append(disc)
+            if leaders[disc] != total_leader:
+                discipline_leaders.add(leaders[disc])
+
+    pretty = is_pretty_output(args)
 
     # Build render rows
     render_rows = []
@@ -202,6 +213,15 @@ def handle_scores(args: argparse.Namespace) -> int:
             row_styles.append("gold")
         else:
             row_styles.append("")
+        # Append leader marker placeholders to name
+        if pretty:
+            markers = []
+            if name == total_leader:
+                markers.append(GENERAL_LEADER_MARKER)
+            for _disc in athlete_led_disciplines.get(name, []):
+                markers.append(DISCIPLINE_LEADER_MARKER)
+            if markers:
+                name = name + " " + " ".join(markers)
         row = [
             athlete["position"],
             name,
@@ -220,32 +240,40 @@ def handle_scores(args: argparse.Namespace) -> int:
     if sorting_by_discipline:
         disc_label = DISCIPLINE_LABELS.get(sort_col, sort_col)
         headers.insert(1, f"{disc_label}Position")
-    pretty = is_pretty_output(args)
 
     def make_slight_gold_formatter():
-        """Formatter for Rank, Name, Country columns - light gold for discipline leaders."""
+        """Formatter for Rank, Name, Country columns - gold for total leader, light gold for discipline leaders."""
         def formatter(cell_str: str, row_idx: int) -> str:
             if not Color.enabled():
                 return cell_str
             athlete = athlete_list[row_idx]
             name = athlete["name"]
-            # If this athlete leads any discipline but NOT total, use light gold
+            if name == total_leader:
+                return Color.gold(cell_str)
             if name in discipline_leaders:
                 return Color.rgb(cell_str, Color.LIGHT_GOLD, bold=False)
             return cell_str
         return formatter
 
     def make_disc_formatter(disc_key: str):
-        """Formatter for discipline columns - light gold for discipline leader."""
+        """Formatter for discipline columns - gold for total leader, light gold for discipline-only leader."""
         def formatter(cell_str: str, row_idx: int) -> str:
             if not Color.enabled():
                 return cell_str
             athlete = athlete_list[row_idx]
             name = athlete["name"]
-            # If this athlete leads this discipline but is NOT the total leader, use light gold
+            if name == leaders[disc_key] and name == total_leader:
+                return Color.gold(cell_str)
             if name == leaders[disc_key] and name != total_leader:
                 return Color.rgb(cell_str, Color.LIGHT_GOLD, bold=False)
             return cell_str
+        return formatter
+
+    def make_name_formatter():
+        """Formatter for Name column - leader markers + light gold for discipline leaders."""
+        base = make_slight_gold_formatter()
+        def formatter(cell_str: str, row_idx: int) -> str:
+            return _format_leader_markers(cell_str, row_idx, base)
         return formatter
 
     if pretty:
@@ -255,7 +283,7 @@ def handle_scores(args: argparse.Namespace) -> int:
         if sorting_by_discipline:
             cell_formatters.append(None)  # DisciplinePosition - no special formatting
         cell_formatters.extend([
-            make_slight_gold_formatter(),  # Name
+            make_name_formatter(),  # Name
             make_slight_gold_formatter(),  # Country
             None,  # Total - no special formatting
             make_disc_formatter("SP"),
@@ -266,5 +294,10 @@ def handle_scores(args: argparse.Namespace) -> int:
     else:
         cell_formatters = None
 
-    render_table(headers, render_rows, pretty=pretty, row_styles=row_styles if pretty else None, cell_formatters=cell_formatters)
+    # Highlight the column header used for sorting
+    sort_header_map = {"total": "Total", "SP": "Sprint", "PU": "Pursuit", "IN": "Individual", "MS": "MassStart"}
+    sort_header_name = sort_header_map.get(sort_col)
+    highlight_headers = [headers.index(sort_header_name)] if pretty and sort_header_name and sort_header_name in headers else None
+
+    render_table(headers, render_rows, pretty=pretty, row_styles=row_styles if pretty else None, cell_formatters=cell_formatters, highlight_headers=highlight_headers)
     return 0

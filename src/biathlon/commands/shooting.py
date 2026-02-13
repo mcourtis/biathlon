@@ -26,7 +26,7 @@ from ._common import (
     _prefetch_analytic_maps,
 )
 from .results import _has_completed_results
-from .scores import find_cup_id
+from .standings import find_cup_id
 
 
 def accumulate_accuracy_by_athlete(

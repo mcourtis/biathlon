@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
+from typing import Any, Callable
 
 from ..api import BiathlonError, get_analytic_results
 from ..constants import EVENT_TYPE_OWG, EVENT_TYPE_WC, EVENT_TYPE_WCH, RELAY_DISCIPLINES
@@ -16,6 +16,37 @@ from ..utils import get_first_time
 GENERAL_LEADER_MARKER = "\u25CB"  # placeholder for yellow circle
 DISCIPLINE_LEADER_MARKER = "\u25CC"  # placeholder for red circle
 LEADER_MARKER_DOT = "\u25CF"
+
+
+def _format_leader_markers(
+    cell_str: str,
+    row_idx: int,
+    base_formatter: Callable[[str, int], str] | None = None,
+) -> str:
+    """Replace leader marker placeholders with colored dots.
+
+    Extracts trailing GENERAL_LEADER_MARKER / DISCIPLINE_LEADER_MARKER tokens
+    from *cell_str*, applies *base_formatter* to the remaining text, then
+    appends gold/red filled dots.
+    """
+    text = cell_str.rstrip()
+    pad_len = len(cell_str) - len(text)
+    tokens = text.split()
+    markers = []
+    while tokens and tokens[-1] in {GENERAL_LEADER_MARKER, DISCIPLINE_LEADER_MARKER}:
+        markers.insert(0, tokens.pop())
+    base = " ".join(tokens)
+    if base_formatter:
+        base = base_formatter(base, row_idx)
+    if markers:
+        colored = []
+        for marker in markers:
+            if marker == GENERAL_LEADER_MARKER:
+                colored.append(Color.gold(LEADER_MARKER_DOT))
+            else:
+                colored.append(Color.red(LEADER_MARKER_DOT))
+        base = f"{base} {' '.join(colored)}" if base else " ".join(colored)
+    return f"{base}{' ' * pad_len}"
 
 
 def _row_ibu_id(row: dict) -> str:

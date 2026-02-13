@@ -41,7 +41,7 @@ from .commands import (
     handle_events,
     handle_form,
     handle_results,
-    handle_scores,
+    handle_standings,
     handle_seasons,
     handle_shooting,
 )
@@ -464,7 +464,7 @@ def build_parser() -> argparse.ArgumentParser:
     standings_parser.add_argument("--sort", default="total", choices=["total", "sprint", "pursuit", "individual", "massstart"], help="Sort by column")
     standings_parser.add_argument("--limit", type=int, default=25, help="Limit output rows (default: 25, 0 for all)")
     add_output_flag(standings_parser)
-    standings_parser.set_defaults(func=handle_scores)
+    standings_parser.set_defaults(func=handle_standings)
 
     # --- ceremony ---
     ceremony_parser = subparsers.add_parser("ceremony", help="Show medal standing", formatter_class=CompactOptionalFormatter, add_help=False)

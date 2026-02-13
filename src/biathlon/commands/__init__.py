@@ -15,7 +15,7 @@ from .cumulate import (
     handle_cumulate_cleansheet,
     handle_cumulate_remontada,
 )
-from .scores import handle_scores
+from .standings import handle_standings
 from .ceremony import handle_ceremony
 from .athlete import handle_athlete_results, handle_athlete_results_scan, handle_athlete_info, handle_athlete_id
 from .shooting import handle_shooting
@@ -39,7 +39,7 @@ __all__ = [
     "handle_cumulate_penalty",
     "handle_cumulate_cleansheet",
     "handle_cumulate_remontada",
-    "handle_scores",
+    "handle_standings",
     "handle_ceremony",
     "handle_athlete_results",
     "handle_athlete_results_scan",

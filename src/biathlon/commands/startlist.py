@@ -36,6 +36,7 @@ from ._common import (
     DISCIPLINE_LEADER_MARKER,
     GENERAL_LEADER_MARKER,
     LEADER_MARKER_DOT,
+    _format_leader_markers,
     _format_section_title,
     _max_workers,
     _ordinal,
@@ -120,31 +121,6 @@ def _leader_marker_suffix(
     if not markers:
         return ""
     return " " + " ".join(markers)
-
-
-def _format_leader_markers(
-    cell_str: str,
-    row_idx: int,
-    base_formatter: Callable[[str, int], str] | None = None,
-) -> str:
-    text = cell_str.rstrip()
-    pad_len = len(cell_str) - len(text)
-    tokens = text.split()
-    markers = []
-    while tokens and tokens[-1] in {GENERAL_LEADER_MARKER, DISCIPLINE_LEADER_MARKER}:
-        markers.insert(0, tokens.pop())
-    base = " ".join(tokens)
-    if base_formatter:
-        base = base_formatter(base, row_idx)
-    if markers:
-        colored = []
-        for marker in markers:
-            if marker == GENERAL_LEADER_MARKER:
-                colored.append(Color.gold(LEADER_MARKER_DOT))
-            else:
-                colored.append(Color.red(LEADER_MARKER_DOT))
-        base = f"{base} {' '.join(colored)}" if base else " ".join(colored)
-    return f"{base}{' ' * pad_len}"
 
 
 def _event_levels(use_major: bool) -> tuple[int, ...]:
