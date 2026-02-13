@@ -27,7 +27,6 @@ from ..utils import (
     parse_time_seconds,
 )
 
-
 def handle_athlete_results_scan(args: argparse.Namespace) -> int:
     """Show season race ranks for an athlete (scan Results endpoints)."""
     if not args.id and not args.search:
@@ -207,7 +206,7 @@ def _level_matches(result: dict, level_filter: str) -> bool:
     if not level_filter:
         return True
     level = str(result.get("Level") or "").strip().upper()
-    allowed = {l.strip() for l in level_filter.upper().split(",")}
+    allowed = {lvl.strip() for lvl in level_filter.upper().split(",")}
     return level in allowed
 
 
@@ -406,10 +405,6 @@ def handle_athlete_info(args: argparse.Namespace) -> int:
     if not args.id and not args.search:
         print("error: provide --id or --search", file=sys.stderr)
         return 1
-
-    season_id = args.season or get_current_season_id()
-    level_arg = getattr(args, "level", 0)
-    levels = [level_arg] if level_arg in {1, 2, 3, 4, 5} else [1, 2, 3, 4, 5]
 
     requested: dict[str, dict] = {}
     if args.id:

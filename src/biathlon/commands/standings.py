@@ -8,7 +8,6 @@ import sys
 from ..api import BiathlonError, get_cups, get_cup_results, get_current_season_id
 from ..constants import GENDER_TO_CAT
 from ..formatting import Color, is_pretty_output, render_table
-from ..utils import parse_time_seconds
 from ._common import (
     DISCIPLINE_LEADER_MARKER,
     GENERAL_LEADER_MARKER,

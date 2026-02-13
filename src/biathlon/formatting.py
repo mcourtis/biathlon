@@ -426,7 +426,6 @@ def render_table(
                 span_start = col_positions[start_col][0]
                 span_end = col_positions[end_col - 1][1]
                 span_width = span_end - span_start
-                bold_label = f"{Color.BOLD}{label}{Color.RESET}"
                 # Center the label within the span
                 pad = span_width - len(label)
                 left_pad = pad // 2

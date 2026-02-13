@@ -31,11 +31,10 @@ from ..constants import (
     RELAY_DISCIPLINES,
 )
 from ..formatting import Color, is_pretty_output, render_table
-from ..utils import format_race_header, get_race_start_key, parse_start_datetime, parse_time_seconds
+from ..utils import format_race_header, parse_start_datetime, parse_time_seconds
 from ._common import (
     DISCIPLINE_LEADER_MARKER,
     GENERAL_LEADER_MARKER,
-    LEADER_MARKER_DOT,
     _format_leader_markers,
     _format_section_title,
     _max_workers,
@@ -2778,7 +2777,6 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
     Olympic individual races render Olympic history sections instead.
     """
     entries = ctx["entries"]
-    age_cache = ctx["age_cache"]
     race_disc = ctx["race_disc"]
     is_relay = ctx["is_relay"]
     discipline_set = ctx["discipline_set"]
@@ -2792,7 +2790,6 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
     startlist_ids = ctx["startlist_ids"]
     prefetched_results = ctx["prefetched_results"]
     is_mixed = ctx.get("is_mixed", False)
-    gender_cache = ctx.get("gender_cache", {})
     pretty = is_pretty_output(args)
     milestone_disc_label = (
         "Individual" if race_disc in INDIVIDUAL_EQUIVALENT_DISCIPLINES else race_disc

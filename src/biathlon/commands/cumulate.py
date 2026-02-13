@@ -29,9 +29,7 @@ from ..utils import (
     extract_results,
     get_first_time,
     get_race_start_key,
-    is_dns,
     parse_relay_shootings,
-    parse_relay_shooting,
     parse_time_seconds,
     result_seconds,
 )

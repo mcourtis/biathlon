@@ -580,8 +580,6 @@ def _build_relay_rows(payload: dict, race_id: str, first_n: int, discipline: str
         total_standing = add_relay_shootings(leg_standing)
         total_misses = (total_prone[0] + total_standing[0], total_prone[1] + total_standing[1])
 
-        prone_str = format_relay_shooting(*total_prone)
-        standing_str = format_relay_shooting(*total_standing)
         misses_str = format_relay_shooting(*total_misses)
 
         row = {
@@ -971,7 +969,6 @@ def handle_results(args: argparse.Namespace) -> int:
 
     rows = []
     for res in results:
-        ident = str(res.get("IBUId") or res.get("Bib") or res.get("Name") or "")
         rank = res.get("Rank") or res.get("ResultOrder") or ""
         name = res.get("Name") or res.get("ShortName") or ""
         nat = res.get("Nat") or ""

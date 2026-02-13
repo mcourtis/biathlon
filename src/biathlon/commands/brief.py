@@ -20,7 +20,7 @@ from ..formatting import is_pretty_output, Color, render_table
 from ..utils import format_race_header, parse_date
 from .events import compute_event_styles, format_level
 
-from ._common import _format_section_title, _max_workers, _parse_rank, _row_ibu_id, detect_event_type, is_relay_discipline
+from ._common import _format_section_title, _max_workers, _row_ibu_id, detect_event_type, is_relay_discipline
 from .post_race import handle_post_race
 from .results import _get_wc_rows
 from .startlist import (

@@ -563,7 +563,6 @@ def handle_relay(args: argparse.Namespace) -> int:
     # Handle --sort
     sort_col = getattr(args, "sort", "").lower()
     show_sort_rank = False
-    sort_rank_header = "Rank"
     sort_col_map: dict[str, str] = {}
     detail_row_key = ""
     detail_sort_header = ""
@@ -574,7 +573,6 @@ def handle_relay(args: argparse.Namespace) -> int:
                 print(f"error: sort must be one of {', '.join(detail_sort_cols)}", file=sys.stderr)
                 return 1
             detail_sort_header = detail_sort_headers.get(sort_col, sort_col.capitalize())
-            sort_rank_header = f"{detail_sort_header}Rank"
             show_sort_rank = True
         else:
             row_key = col_map.get(sort_col)
@@ -597,9 +595,6 @@ def handle_relay(args: argparse.Namespace) -> int:
                 "shooting": "Shoot",
                 "standing": "Stand",
             }
-            sort_header = sort_col_map.get(sort_col, sort_col.capitalize())
-            sort_rank_header = f"{sort_header}Rank"
-
             # Sort by the specified column
             if row_key in ("prone", "standing", "misses"):
                 # Sort by shooting (P+S format), by penalties first, then spares
