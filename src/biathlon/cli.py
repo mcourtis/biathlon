@@ -9,16 +9,6 @@ from collections.abc import Iterable
 from importlib.metadata import version, PackageNotFoundError
 
 from .api import BiathlonError
-
-
-def get_version() -> str:
-    """Get package version."""
-    try:
-        return version("biathlon")
-    except PackageNotFoundError:
-        return "dev"
-
-
 from .commands import (
     handle_athlete_id,
     handle_athlete_info,
@@ -45,6 +35,14 @@ from .commands import (
     handle_seasons,
     handle_shooting,
 )
+
+
+def get_version() -> str:
+    """Get package version."""
+    try:
+        return version("biathlon")
+    except PackageNotFoundError:
+        return "dev"
 
 
 class CompactOptionalFormatter(argparse.RawTextHelpFormatter):
