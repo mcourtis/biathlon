@@ -207,7 +207,8 @@ def _level_matches(result: dict, level_filter: str) -> bool:
     if not level_filter:
         return True
     level = str(result.get("Level") or "").strip().upper()
-    return level == level_filter
+    allowed = {l.strip() for l in level_filter.upper().split(",")}
+    return level in allowed
 
 
 def handle_athlete_results(args: argparse.Namespace) -> int:

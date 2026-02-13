@@ -513,7 +513,7 @@ def build_parser() -> argparse.ArgumentParser:
     athlete_results = athlete_sub.add_parser("results", help="Season race ranks (AllResults)", formatter_class=CompactOptionalFormatter, add_help=False)
     athlete_results.add_argument("--id", default="", help="Athlete IBU id")
     athlete_results.add_argument("--season", default="", help="Season id or label (e.g., 2526 or 25/26)")
-    athlete_results.add_argument("--level", default="WC", help="Level filter (default: WC, use 'all' for all levels)")
+    athlete_results.add_argument("--level", default="WC,OWG,WCH", help="Level filter (default: WC,OWG,WCH — use 'all' for all levels)")
     athlete_results.add_argument("--course", action="store_true", help="Use course time rank")
     add_output_flag(athlete_results)
     athlete_results.set_defaults(func=handle_athlete_results)
