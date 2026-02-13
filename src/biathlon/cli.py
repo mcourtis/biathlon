@@ -103,13 +103,13 @@ _biathlon_completion() {
     cur="${COMP_WORDS[COMP_CWORD]}"
     prev="${COMP_WORDS[COMP_CWORD-1]}"
 
-    commands="seasons events results cumulate standings ceremony biathlete shooting brief form"
+    commands="seasons events results cumulate standings ceremony athlete shooting brief form"
 
     case "${COMP_WORDS[1]}" in
         cumulate)
             subcommands="results ski pursuit course range shooting miss penalty remontada cleansheet"
             ;;
-        biathlete)
+        athlete)
             subcommands="info results"
             ;;
         brief)
@@ -144,7 +144,7 @@ _biathlon() {
         'cumulate:Cumulative statistics'
         'standings:Cup standings'
         'ceremony:Medal ranking'
-        'biathlete:Biathlete information'
+        'athlete:Athlete information'
         'shooting:Shooting accuracy'
         'brief:Race analysis (event, season, startlist, postrace)'
         'form:Show recent athlete form (course time ranks)'
@@ -163,7 +163,7 @@ _biathlon() {
                 cumulate)
                     _values 'subcommand' results ski pursuit course range shooting miss penalty remontada cleansheet
                     ;;
-                biathlete)
+                athlete)
                     _values 'subcommand' info results id
                     ;;
                 brief)
@@ -501,14 +501,14 @@ def build_parser() -> argparse.ArgumentParser:
     add_output_flag(shooting_parser)
     shooting_parser.set_defaults(func=handle_shooting)
 
-    # --- biathlete ---
-    biathlete_parser = subparsers.add_parser("biathlete", help="Show biathlete information", formatter_class=CompactOptionalFormatter, add_help=False)
-    biathlete_parser.add_argument("--id", default="", help="Athlete IBU id (comma-separated)")
-    biathlete_parser.add_argument("--search", default="", help="Search by name")
-    biathlete_parser.add_argument("--season", default="", help="Season id")
-    add_output_flag(biathlete_parser)
-    biathlete_parser.set_defaults(func=handle_athlete_info, athlete_command=None)
-    athlete_sub = biathlete_parser.add_subparsers(dest="athlete_command", title="subcommands", metavar="")
+    # --- athlete ---
+    athlete_parser = subparsers.add_parser("athlete", help="Show athlete information", formatter_class=CompactOptionalFormatter, add_help=False)
+    athlete_parser.add_argument("--id", default="", help="Athlete IBU id (comma-separated)")
+    athlete_parser.add_argument("--search", default="", help="Search by name")
+    athlete_parser.add_argument("--season", default="", help="Season id")
+    add_output_flag(athlete_parser)
+    athlete_parser.set_defaults(func=handle_athlete_info, athlete_command=None)
+    athlete_sub = athlete_parser.add_subparsers(dest="athlete_command", title="subcommands", metavar="")
 
     athlete_results = athlete_sub.add_parser("results", help="Season race ranks (AllResults)", formatter_class=CompactOptionalFormatter, add_help=False)
     athlete_results.add_argument("--id", default="", help="Athlete IBU id")
@@ -726,14 +726,14 @@ def _require_subcommand(args: argparse.Namespace) -> bool:
             file=sys.stderr,
         )
         return True
-    if args.command == "biathlete" and getattr(args, "athlete_command", None) is None:
+    if args.command == "athlete" and getattr(args, "athlete_command", None) is None:
         print(
-            "\nbiathlon biathlete: [ERROR]: the following arguments are required: <subcommand>\n\n"
-            "Usage: biathlon biathlete <subcommand> [parameters]\n\n"
-            "Example: biathlon biathlete info --search \"Boe\"\n\n"
+            "\nbiathlon athlete: [ERROR]: the following arguments are required: <subcommand>\n\n"
+            "Usage: biathlon athlete <subcommand> [parameters]\n\n"
+            "Example: biathlon athlete info --search \"Boe\"\n\n"
             "To see help text, you can run:\n"
-            "  biathlon biathlete help\n"
-            "  biathlon biathlete <subcommand> help\n",
+            "  biathlon athlete help\n"
+            "  biathlon athlete <subcommand> help\n",
             file=sys.stderr,
         )
         return True

@@ -305,27 +305,36 @@ def handle_athlete_results(args: argparse.Namespace) -> int:
     return 0
 
 
-def _find_athletes_by_search(season_id: str, levels: list[int], term: str) -> dict[str, dict]:
+def _find_athletes_by_search(term: str) -> dict[str, dict]:
     matches: dict[str, dict] = {}
-    for lvl in levels:
-        for event in get_events(season_id, level=lvl):
-            event_id = event.get("EventId")
-            if not event_id:
+    search_term = term.strip()
+    tokens = [tok for tok in search_term.split() if tok]
+    family_name = tokens[-1] if tokens else search_term
+    given_name = " ".join(tokens[:-1]) if len(tokens) > 1 else ""
+
+    def add_matches(athletes: list[dict]) -> None:
+        for athlete in athletes:
+            if not isinstance(athlete, dict):
                 continue
-            for race in get_races(event_id):
-                race_id = race.get("RaceId") or race.get("Id")
-                if not race_id:
-                    continue
-                try:
-                    payload = get_race_results(race_id)
-                except BiathlonError:
-                    continue
-                for res in extract_results(payload):
-                    name = res.get("Name") or res.get("ShortName") or ""
-                    if term.lower() in name.lower():
-                        ident = res.get("IBUId")
-                        if ident:
-                            matches.setdefault(ident, {"name": name, "nat": res.get("Nat") or ""})
+            ibu_id = athlete.get("IBUId") or athlete.get("IbuId") or ""
+            if not ibu_id:
+                continue
+            given = athlete.get("GivenName") or ""
+            family = athlete.get("FamilyName") or ""
+            name = athlete.get("Name") or " ".join(part for part in [given, family] if part)
+            nat = athlete.get("Nat") or athlete.get("Nation") or athlete.get("Country") or ""
+            if not nat and isinstance(athlete.get("NF"), dict):
+                nat = athlete["NF"].get("Nat") or athlete["NF"].get("Country") or ""
+            matches.setdefault(ibu_id, {"name": name or f"IBU {ibu_id}", "nat": nat})
+
+    try:
+        add_matches(get_athletes(family_name, given_name))
+        if search_term and not given_name:
+            add_matches(get_athletes(search_term, ""))
+            add_matches(get_athletes("", search_term))
+    except BiathlonError:
+        pass
+
     return matches
 
 
@@ -408,7 +417,7 @@ def handle_athlete_info(args: argparse.Namespace) -> int:
             if ibu:
                 requested[ibu] = {}
     if args.search:
-        requested.update(_find_athletes_by_search(season_id, levels, args.search))
+        requested.update(_find_athletes_by_search(args.search))
 
     if not requested:
         print("no athletes matched the provided criteria", file=sys.stderr)
@@ -427,16 +436,18 @@ def handle_athlete_info(args: argparse.Namespace) -> int:
         born_in = personal.get("born in", "-")
         residence = personal.get("residence", "-")
         profession = personal.get("profession", "-")
+        gender = bio.get("GenderId") or "-"
+        functions = bio.get("Functions") or "-"
         name = bio.get("FullName") or meta.get("name") or f"IBU {ibu_id}"
         nat = bio.get("NAT") or meta.get("nat") or ""
         photo = bio.get("PhotoURI") or f"https://ibu.blob.core.windows.net/docs/athletes/{ibu_id}.png"
-        rows.append([name, nat, age_val, born_in, residence, profession, photo, ibu_id])
+        rows.append([name, nat, gender, age_val, born_in, residence, profession, functions, photo, ibu_id])
 
     if not rows:
         print("no bios found", file=sys.stderr)
         return 1
 
-    headers = ["Name", "Country", "Age", "BornIn", "Residence", "Profession", "Photo", "IBUId"]
+    headers = ["Name", "Country", "Gender", "Age", "BornIn", "Residence", "Profession", "Functions", "Photo", "IBUId"]
     print()
     print("# Athlete info")
     render_table(headers, rows, pretty=is_pretty_output(args))
