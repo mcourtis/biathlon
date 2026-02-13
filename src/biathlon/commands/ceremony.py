@@ -36,7 +36,7 @@ def accumulate_medal_counts(race_ids: list[str], by_athlete: bool, gender_filter
             if gender_filter == "men" and cat not in {"SM", ""}:
                 continue
         total_used += 1
-        top = results[:5]
+        top = results[:6]
         for idx, res in enumerate(top):
             nat = res.get("Nat") or ""
             if by_athlete:
@@ -44,21 +44,21 @@ def accumulate_medal_counts(race_ids: list[str], by_athlete: bool, gender_filter
                 label = key
                 counts.setdefault(key, {
                     "label": label, "country": nat,
-                    "first": 0, "second": 0, "third": 0, "fourth": 0, "fifth": 0,
+                    "first": 0, "second": 0, "third": 0, "fourth": 0, "fifth": 0, "sixth": 0,
                 })
             else:
                 key = nat
                 label = nat
                 counts.setdefault(key, {
                     "label": label, "country": "",
-                    "first": 0, "second": 0, "third": 0, "fourth": 0, "fifth": 0,
+                    "first": 0, "second": 0, "third": 0, "fourth": 0, "fifth": 0, "sixth": 0,
                 })
-            slot = ["first", "second", "third", "fourth", "fifth"][idx]
+            slot = ["first", "second", "third", "fourth", "fifth", "sixth"][idx]
             counts[key][slot] += 1
 
     rows = list(counts.values())
     rows.sort(key=lambda row: (
-        -row["first"], -row["second"], -row["third"], -row["fourth"], -row["fifth"], row["label"]
+        -row["first"], -row["second"], -row["third"], -row["fourth"], -row["fifth"], -row["sixth"], row["label"]
     ))
     return rows, total_used
 
@@ -131,14 +131,14 @@ def handle_ceremony(args: argparse.Namespace) -> int:
         if country_filter or search_filter:
             season_ids = [str(season.get("SeasonId")) for season in get_seasons()]
             if search_filter and country_filter:
-                scope_label = f"'{args.search}' in {args.country}"
+                scope_label = f"World Cup '{args.search}' in {args.country}"
             elif search_filter:
-                scope_label = f"'{args.search}'"
+                scope_label = f"World Cup '{args.search}'"
             else:
-                scope_label = f"country {args.country}"
+                scope_label = f"World Cup in {args.country}"
         else:
             season_ids = [season_id]
-            scope_label = f"season {season_id}"
+            scope_label = f"World Cup season {season_id}"
         events: list[dict] = []
         for sid in season_ids:
             events.extend(get_events(sid, level=1))
@@ -176,22 +176,30 @@ def handle_ceremony(args: argparse.Namespace) -> int:
     headers = ["Rank", "Country" if not by_athlete else "Name"]
     if by_athlete:
         headers.append("Nat")
-    headers += ["Gold", "Silver", "Bronze", "Fourth", "Fifth", "Total"]
+    headers += ["Gold", "Silver", "Bronze", "Podium", "Fourth", "Fifth", "Sixth", "Flowers", "Total"]
 
     render_rows = []
     for idx, row in enumerate(rows, start=1):
         base = [idx, row["label"]]
         if by_athlete:
             base.append(row["country"])
-        counts = [row["first"], row["second"], row["third"], row["fourth"], row["fifth"]]
-        base.extend(counts + [sum(counts)])
+        podium = row["first"] + row["second"] + row["third"]
+        flowers = row["fourth"] + row["fifth"] + row["sixth"]
+        base.extend([
+            row["first"], row["second"], row["third"], podium,
+            row["fourth"], row["fifth"], row["sixth"], flowers,
+            podium + flowers,
+        ])
         render_rows.append(base)
 
     pretty = is_pretty_output(args)
     row_styles = [rank_style(idx + 1) for idx in range(len(render_rows))] if pretty else None
 
+    gender_label = "men" if gender_filter == "men" else "women" if gender_filter == "women" else "men+women"
+    group_label = "by athlete" if by_athlete else "by country"
+
     print()
-    print(f"# Medal ranking — {scope_label}")
+    print(f"# Medal ranking — {scope_label} — {gender_label}, {group_label} ({used_races} races)")
     render_table(headers, render_rows, pretty=pretty, row_styles=row_styles)
     print()
     return 0

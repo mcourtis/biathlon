@@ -467,16 +467,16 @@ def build_parser() -> argparse.ArgumentParser:
     standings_parser.set_defaults(func=handle_standings)
 
     # --- ceremony ---
-    ceremony_parser = subparsers.add_parser("ceremony", help="Show medal standing", formatter_class=CompactOptionalFormatter, add_help=False)
-    ceremony_parser.add_argument("--athlete", action="store_true", help="Rank by athlete")
+    ceremony_parser = subparsers.add_parser("ceremony", help="Show medal standing (default: men+women, World Cup, current season)", formatter_class=CompactOptionalFormatter, add_help=False)
+    ceremony_parser.add_argument("--athlete", action="store_true", help="Rank by athlete (default: by country)")
     ceremony_parser.add_argument("--race", default="", help="Race id")
     ceremony_parser.add_argument("--event", default="", help="Event id")
     gender_group = ceremony_parser.add_mutually_exclusive_group()
-    gender_group.add_argument("--men", action="store_true", help="Show men")
-    gender_group.add_argument("--women", action="store_true", help="Show women")
+    gender_group.add_argument("--men", action="store_true", help="Show men only (default: men+women)")
+    gender_group.add_argument("--women", action="store_true", help="Show women only (default: men+women)")
     ceremony_parser.add_argument("--country", default="", help="Filter by host country (where event is held)")
     ceremony_parser.add_argument("--search", default="", help="Filter events by name (e.g., 'annecy', 'holmenkollen')")
-    ceremony_parser.add_argument("--season", default="", help="Season id")
+    ceremony_parser.add_argument("--season", default="", help="Season id (default: current season)")
     add_output_flag(ceremony_parser)
     ceremony_parser.set_defaults(func=handle_ceremony)
 
