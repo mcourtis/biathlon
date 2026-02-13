@@ -12,6 +12,7 @@ from .cumulate import (
     handle_cumulate_shooting,
     handle_cumulate_miss,
     handle_cumulate_penalty,
+    handle_cumulate_cleansheet,
     handle_cumulate_remontada,
 )
 from .scores import handle_scores
@@ -21,7 +22,7 @@ from .shooting import handle_shooting
 from .relay import handle_relay
 from .startlist import handle_startlist
 from .post_race import handle_post_race
-from .brief import handle_brief_event, handle_brief_startlist, handle_brief_post_race
+from .brief import handle_brief_event, handle_brief_startlist, handle_brief_post_race, handle_brief_season
 from .form import handle_form
 
 __all__ = [
@@ -36,6 +37,7 @@ __all__ = [
     "handle_cumulate_shooting",
     "handle_cumulate_miss",
     "handle_cumulate_penalty",
+    "handle_cumulate_cleansheet",
     "handle_cumulate_remontada",
     "handle_scores",
     "handle_ceremony",
@@ -48,6 +50,7 @@ __all__ = [
     "handle_startlist",
     "handle_post_race",
     "handle_brief_event",
+    "handle_brief_season",
     "handle_brief_startlist",
     "handle_brief_post_race",
     "handle_form",

@@ -25,6 +25,7 @@ from .commands import (
     handle_athlete_results,
     handle_brief_event,
     handle_brief_post_race,
+    handle_brief_season,
     handle_brief_startlist,
     handle_ceremony,
     handle_cumulate_results,
@@ -35,6 +36,7 @@ from .commands import (
     handle_cumulate_shooting,
     handle_cumulate_miss,
     handle_cumulate_penalty,
+    handle_cumulate_cleansheet,
     handle_cumulate_remontada,
     handle_events,
     handle_form,
@@ -105,13 +107,13 @@ _biathlon_completion() {
 
     case "${COMP_WORDS[1]}" in
         cumulate)
-            subcommands="results ski pursuit course range shooting miss penalty remontada"
+            subcommands="results ski pursuit course range shooting miss penalty remontada cleansheet"
             ;;
         biathlete)
             subcommands="info results"
             ;;
         brief)
-            subcommands="event startlist post-race"
+            subcommands="event season startlist postrace"
             ;;
         *)
             subcommands=""
@@ -123,7 +125,7 @@ _biathlon_completion() {
     elif [[ ${COMP_CWORD} -eq 2 && -n "${subcommands}" ]]; then
         COMPREPLY=( $(compgen -W "${subcommands}" -- ${cur}) )
     elif [[ ${cur} == -* ]]; then
-        local opts="--help --tsv --men --season --race --event"
+        local opts="--help --tsv --men --season --race --event --level"
         COMPREPLY=( $(compgen -W "${opts}" -- ${cur}) )
     fi
 }
@@ -144,7 +146,7 @@ _biathlon() {
         'ceremony:Medal ranking'
         'biathlete:Biathlete information'
         'shooting:Shooting accuracy'
-        'brief:Race analysis (event, startlist, post-race)'
+        'brief:Race analysis (event, season, startlist, postrace)'
         'form:Show recent athlete form (course time ranks)'
     )
 
@@ -159,13 +161,13 @@ _biathlon() {
         args)
             case $words[2] in
                 cumulate)
-                    _values 'subcommand' results ski pursuit course range shooting miss penalty remontada
+                    _values 'subcommand' results ski pursuit course range shooting miss penalty remontada cleansheet
                     ;;
                 biathlete)
                     _values 'subcommand' info results id
                     ;;
                 brief)
-                    _values 'subcommand' event startlist post-race
+                    _values 'subcommand' event season startlist postrace
                     ;;
             esac
             ;;
@@ -433,6 +435,27 @@ def build_parser() -> argparse.ArgumentParser:
     add_cumulate_args(cumulate_remontada, allow_discipline_event=False)
     cumulate_remontada.set_defaults(func=handle_cumulate_remontada)
 
+    cumulate_cleansheet = cumulate_sub.add_parser(
+        "cleansheet", help="Cumulated clean shooting stages (5/5)", formatter_class=CompactOptionalFormatter, add_help=False
+    )
+    cumulate_help["cleansheet"] = "Cumulated clean shooting stages (5/5)"
+    add_cumulate_args(cumulate_cleansheet, allow_discipline_event=True)
+    cumulate_cleansheet.add_argument(
+        "--sort",
+        default="cleansheets",
+        choices=["cleansheets", "percentage", "time"],
+        help="Sort by column (default: cleansheets)",
+    )
+    cumulate_cleansheet.add_argument(
+        "--min",
+        type=int,
+        default=66,
+        dest="min_pct",
+        metavar="PCT",
+        help="Minimum race participation percentage (0-100, default: 50)",
+    )
+    cumulate_cleansheet.set_defaults(func=handle_cumulate_cleansheet)
+
     # --- standings ---
     standings_parser = subparsers.add_parser("standings", help="Show standings (world cup, IBU Cup, etc.)", formatter_class=CompactOptionalFormatter, add_help=False)
     standings_parser.add_argument("--season", default="", help="Season id")
@@ -471,7 +494,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     shooting_parser.add_argument("--all-races", action="store_true", help="Only athletes who started every race")
     shooting_parser.add_argument("--sort", default="", help="Sort order")
-    shooting_parser.add_argument("--min-race", type=int, default=0, help="Minimum races")
+    shooting_parser.add_argument("--min", type=int, default=50, dest="min_pct", help="Minimum race participation %% (default: 50)")
     shooting_parser.add_argument("--top", type=int, default=0, help="Restrict to top N athletes in WC standings")
     shooting_parser.add_argument("--limit", type=int, default=25, help="Limit output rows (default: 25, 0 for all)")
     shooting_parser.add_argument("--debug-races", action="store_true", help="Debug: print races considered")
@@ -513,7 +536,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --- brief ---
     brief_parser = subparsers.add_parser(
         "brief",
-        help="Race analysis (event, startlist, post-race)",
+        help="Race analysis (event, season, startlist, postrace)",
         formatter_class=CompactOptionalFormatter,
         add_help=False,
     )
@@ -546,6 +569,19 @@ def build_parser() -> argparse.ArgumentParser:
     add_output_flag(brief_event)
     brief_event.set_defaults(func=handle_brief_event)
 
+    # brief season
+    brief_season = brief_sub.add_parser(
+        "season",
+        help="Season summary",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
+    brief_help["season"] = "Season summary (events and race counts)"
+    brief_season.add_argument("--season", default="", help="Season id (default: current season)")
+    brief_season.add_argument("--level", default="1", help="Event level (default: 1)")
+    add_output_flag(brief_season)
+    brief_season.set_defaults(func=handle_brief_season)
+
     # brief startlist
     brief_startlist = brief_sub.add_parser(
         "startlist",
@@ -559,14 +595,14 @@ def build_parser() -> argparse.ArgumentParser:
     add_output_flag(brief_startlist)
     brief_startlist.set_defaults(func=handle_brief_startlist)
 
-    # brief post-race
+    # brief postrace
     brief_post_race = brief_sub.add_parser(
-        "post-race",
+        "postrace",
         help="Post-race analysis (after a race)",
         formatter_class=CompactOptionalFormatter,
         add_help=False,
     )
-    brief_help["post-race"] = "Post-race analysis (after a race)"
+    brief_help["postrace"] = "Post-race analysis (after a race)"
     brief_post_race.add_argument("--race", default="", help="Race id (default: latest completed race)")
     brief_post_race.add_argument("--major", action="store_true", help="Use WC+WCH+OWG milestones")
     add_output_flag(brief_post_race)
@@ -581,6 +617,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     form_parser._optionals.title = "optional parameters"
     form_parser.add_argument("--men", action="store_true", help="Show men (default: women)")
+    form_parser.add_argument("--startlist", nargs="?", const="", default=None, help="Filter to athletes from a race startlist (auto-detects gender). Without a race id, discovers available startlists.")
     form_parser.add_argument("--races", type=int, default=5, help="Number of recent races for current form (default: 5)")
     form_parser.add_argument(
         "--event",
@@ -591,6 +628,9 @@ def build_parser() -> argparse.ArgumentParser:
     )
     form_parser.add_argument("--limit", type=int, default=25, help="Limit output rows (default: 25, 0 for all)")
     form_parser.add_argument("--top", type=int, default=0, help="Filter to top N in WC standings")
+    form_parser.add_argument("--shoot", action="store_true", help="Show shooting accuracy instead of course time ranks")
+    form_parser.add_argument("--min", type=int, default=50, dest="min_pct", metavar="PCT", help="Minimum race participation percentage (0-100, default: 50)")
+    form_parser.add_argument("--season", action="store_true", help="Calculate form based on all season races")
     form_parser.add_argument(
         "--remove",
         action="append",

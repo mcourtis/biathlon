@@ -19,7 +19,7 @@ class TestDisciplineConstants:
         assert isinstance(INDIVIDUAL_DISCIPLINES, set)
 
     def test_individual_disciplines_content(self):
-        assert INDIVIDUAL_DISCIPLINES == {"SP", "PU", "IN", "MS"}
+        assert INDIVIDUAL_DISCIPLINES == {"SP", "PU", "IN", "MS", "SI"}
 
     def test_relay_not_in_individual(self):
         assert "RL" not in INDIVIDUAL_DISCIPLINES

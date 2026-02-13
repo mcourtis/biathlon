@@ -41,17 +41,9 @@ from ..utils import (
     parse_start_datetime,
     parse_time_seconds,
 )
+from ._common import _row_ibu_id
 from .relay import _has_completed_results as _has_completed_relay_results
 from .scores import find_cup_id
-
-
-def _row_ibu_id(row: dict) -> str:
-    """Return the IBU id from a standings row."""
-    for key in ("IBUId", "IbuId", "ibuId"):
-        val = row.get(key)
-        if val:
-            return str(val)
-    return ""
 
 
 def _get_wc_rows(cat_id: str, season_id: str) -> list[dict]:
@@ -1014,6 +1006,8 @@ def handle_results(args: argparse.Namespace) -> int:
 
         if discipline == "IN":
             penalty = format_seconds(misses_total * 60) if misses_list else "-"
+        elif discipline == "SI":
+            penalty = format_seconds(misses_total * 45) if misses_list else "-"
         else:
             base_time = pursuit_time if discipline == "PU" else result_time
             result_secs = parse_time_seconds(base_time)
@@ -1159,7 +1153,7 @@ def handle_results(args: argparse.Namespace) -> int:
     else:
         headers = [
             "Rank", "Biathlete", "Nat", "Results",
-            "Ski" if discipline == "IN" else "",
+            "Ski" if discipline in {"IN", "SI"} else "",
             "Course", "Range", "Shoot", "Penalty", "Miss",
         ]
         headers = [h for h in headers if h]
@@ -1216,7 +1210,7 @@ def handle_results(args: argparse.Namespace) -> int:
                 row["country"],
                 row["result"],
             ]
-            if discipline == "IN":
+            if discipline in {"IN", "SI"}:
                 base.append(row["ski"])
             base.extend([
                 row["course"],

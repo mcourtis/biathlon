@@ -119,6 +119,40 @@ biathlon ceremony
 biathlon ceremony --athlete
 ```
 
+Cumulate season statistics:
+
+```bash
+biathlon cumulate results
+biathlon cumulate remontada --men
+biathlon cumulate cleansheet
+biathlon cumulate cleansheet --sort percentage
+```
+
+Shooting accuracy:
+
+```bash
+biathlon shooting
+biathlon shooting --men
+```
+
+Athlete form (course time or shooting across recent races):
+
+```bash
+biathlon form
+biathlon form --men --shoot
+biathlon form --startlist
+biathlon form --season --top 10
+```
+
+Event/race briefs (venue history, startlist analysis, post-race recap):
+
+```bash
+biathlon brief event
+biathlon brief season
+biathlon brief startlist
+biathlon brief postrace
+```
+
 Run without installing:
 
 ```bash

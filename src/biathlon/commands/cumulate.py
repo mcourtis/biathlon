@@ -35,80 +35,19 @@ from ..utils import (
     parse_time_seconds,
     result_seconds,
 )
+from ._common import (
+    _fetch_leg_lap_times,
+    _lookup_analytic_time,
+    _max_workers,
+    _parse_shootings,
+    _prefetch_analytic_maps,
+    is_relay_discipline,
+)
 from .results import _get_top_n_ibu_ids
 
 MAX_FETCH_WORKERS = 8
 
 
-def _fetch_analytic_map(race_id: str, type_id: str) -> dict[str, str]:
-    """Fetch analytic times keyed by IBUId/Bib/Name."""
-    try:
-        analytic = get_analytic_results(race_id, type_id)
-    except BiathlonError:
-        return {}
-    times: dict[str, str] = {}
-    for res in analytic.get("Results", []):
-        if res.get("IsTeam"):
-            continue
-        ident = res.get("IBUId") or res.get("Bib") or res.get("Name")
-        if not ident:
-            continue
-        times[str(ident)] = get_first_time(res, ["TotalTime", "Result"]) or "-"
-    return times
-
-
-def _lookup_analytic_time(times: dict[str, str], res: dict) -> str:
-    """Return analytic time for a result using multiple identifier keys."""
-    for key in (res.get("IBUId"), res.get("Bib"), res.get("Name"), res.get("ShortName")):
-        if key and str(key) in times:
-            return times[str(key)]
-    return ""
-
-
-def _prefetch_analytic_maps(
-    requests: list[tuple[str, str]],
-) -> dict[tuple[str, str], dict[str, str]]:
-    """Fetch multiple analytic maps in parallel.
-
-    Args:
-        requests: List of (race_id, type_id) tuples to fetch.
-
-    Returns:
-        Dict mapping (race_id, type_id) to the analytic map result.
-    """
-    if not requests:
-        return {}
-    results: dict[tuple[str, str], dict[str, str]] = {}
-    if len(requests) == 1:
-        race_id, type_id = requests[0]
-        results[(race_id, type_id)] = _fetch_analytic_map(race_id, type_id)
-        return results
-    with ThreadPoolExecutor(max_workers=_max_workers(len(requests))) as executor:
-        futures = {
-            executor.submit(_fetch_analytic_map, race_id, type_id): (race_id, type_id)
-            for race_id, type_id in requests
-        }
-        for future in as_completed(futures):
-            key = futures[future]
-            try:
-                results[key] = future.result()
-            except Exception:
-                results[key] = {}
-    return results
-
-
-def _parse_shootings(value: str | None) -> list[int]:
-    """Parse shootings string like '0+1+0+2' into list of ints."""
-    if not value:
-        return []
-    parts = [p.strip() for p in str(value).split("+") if p.strip()]
-    misses: list[int] = []
-    for part in parts:
-        try:
-            misses.append(int(part))
-        except ValueError:
-            misses.append(0)
-    return misses
 
 
 def _stage_counts(shootings: str | None) -> tuple[int, int, int, int, int]:
@@ -150,7 +89,7 @@ def _race_list(season_id: str, event_id: str | None) -> list[dict]:
     if len(event_ids) == 1:
         races.extend(get_races(event_ids[0]))
         return races
-    with ThreadPoolExecutor(max_workers=_max_workers(len(event_ids))) as executor:
+    with ThreadPoolExecutor(max_workers=_max_workers(len(event_ids), cap=8)) as executor:
         futures = {executor.submit(get_races, ev_id): ev_id for ev_id in event_ids}
         for future in as_completed(futures):
             races.extend(future.result())
@@ -176,11 +115,6 @@ def _discipline_filter(discipline: str) -> tuple[set[str], str | None, bool]:
     if discipline == "single-mixed-relay":
         return {SINGLE_MIXED_RELAY_DISCIPLINE}, RELAY_MIXED_CAT, True
     raise BiathlonError(f"unknown discipline {discipline}")
-
-
-def _max_workers(total: int) -> int:
-    """Return a capped worker count for concurrent fetches."""
-    return min(MAX_FETCH_WORKERS, max(1, total))
 
 
 def _race_cat_allows(
@@ -434,7 +368,7 @@ def _collect_races(
         except BiathlonError:
             pass
     else:
-        with ThreadPoolExecutor(max_workers=_max_workers(len(candidates))) as executor:
+        with ThreadPoolExecutor(max_workers=_max_workers(len(candidates), cap=8)) as executor:
             futures = {executor.submit(get_race_results, race_id): race_id for race_id, _ in candidates}
             for future in as_completed(futures):
                 race_id = futures[future]
@@ -459,7 +393,7 @@ def _collect_races(
 def _is_relay(payload: dict) -> bool:
     """Return True if payload is a relay discipline."""
     discipline = str((payload.get("Competition") or {}).get("DisciplineId") or "").upper()
-    return discipline in {RELAY_DISCIPLINE, SINGLE_MIXED_RELAY_DISCIPLINE}
+    return is_relay_discipline(discipline)
 
 
 def _race_results(payload: dict) -> list[dict]:
@@ -472,47 +406,6 @@ def _race_results(payload: dict) -> list[dict]:
 def _relay_leg_results(payload: dict) -> list[dict]:
     """Return non-team relay leg results from a payload."""
     return [r for r in (payload.get("Results") or []) if not r.get("IsTeam")]
-
-
-def _fetch_leg_lap_times(
-    race_id: str,
-    lap_prefix: str,
-    lap_suffix: str,
-    laps: int,
-    laps_per_leg: int,
-) -> dict[tuple[str, int], dict[str, str]]:
-    """Fetch analytic lap times keyed by (Bib/IBUId/Name, Leg) -> {lapN: time_str}."""
-    times: dict[tuple[str, int], dict[str, str]] = {}
-    for idx in range(1, laps + 1):
-        type_id = f"{lap_prefix}{idx}{lap_suffix}"
-        try:
-            analytic = get_analytic_results(race_id, type_id)
-        except BiathlonError:
-            continue
-        for res in analytic.get("Results", []):
-            if res.get("IsTeam"):
-                continue
-            bib = str(res.get("Bib") or "")
-            ibu_id = str(res.get("IBUId") or "")
-            name = str(res.get("Name") or "")
-            leg = res.get("Leg")
-            if leg is None:
-                leg_idx = (idx - 1) // laps_per_leg + 1
-                local_idx = (idx - 1) % laps_per_leg + 1
-            else:
-                leg_idx = int(leg)
-                local_idx = idx - (leg_idx - 1) * laps_per_leg
-                if local_idx < 1 or local_idx > laps_per_leg:
-                    local_idx = (idx - 1) % laps_per_leg + 1
-            time_str = get_first_time(res, ["TotalTime", "Result"])
-            if time_str:
-                if bib:
-                    times.setdefault((bib, leg_idx), {})[f"lap{local_idx}"] = time_str
-                if ibu_id:
-                    times.setdefault((ibu_id, leg_idx), {})[f"lap{local_idx}"] = time_str
-                if name:
-                    times.setdefault((name, leg_idx), {})[f"lap{local_idx}"] = time_str
-    return times
 
 
 def _fetch_leg_total_times(race_id: str, type_id: str) -> dict[tuple[str, int], float]:
@@ -832,7 +725,7 @@ def handle_cumulate_course(args: argparse.Namespace) -> int:
     # Prefetch relay course times in parallel
     prefetched_relay_course: dict[str, dict[tuple[str, int], float]] = {}
     if relay_race_ids:
-        with ThreadPoolExecutor(max_workers=_max_workers(len(relay_race_ids))) as executor:
+        with ThreadPoolExecutor(max_workers=_max_workers(len(relay_race_ids), cap=8)) as executor:
             futures = {
                 executor.submit(_fetch_leg_total_times, rid, "CRST"): rid
                 for rid in relay_race_ids
@@ -965,7 +858,7 @@ def _cumulate_range_or_shooting(args: argparse.Namespace, kind: str) -> int:
         if relay_race_ids:
             lap_prefix = "RNG" if kind == "range" else "S"
             lap_suffix = "" if kind == "range" else "TM"
-            with ThreadPoolExecutor(max_workers=_max_workers(len(relay_race_ids))) as executor:
+            with ThreadPoolExecutor(max_workers=_max_workers(len(relay_race_ids), cap=8)) as executor:
                 futures = {
                     executor.submit(_fetch_leg_lap_times, rid, lap_prefix, lap_suffix, 8, 2): rid
                     for rid in relay_race_ids
@@ -1259,7 +1152,7 @@ def handle_cumulate_penalty(args: argparse.Namespace) -> int:
     if include_relay:
         relay_race_ids = [rid for rid, p in payloads if _is_relay(p)]
         if relay_race_ids:
-            with ThreadPoolExecutor(max_workers=_max_workers(len(relay_race_ids) * 2)) as executor:
+            with ThreadPoolExecutor(max_workers=_max_workers(len(relay_race_ids) * 2, cap=8)) as executor:
                 lap_futures = {
                     executor.submit(_fetch_leg_lap_times, rid, "RNG", "", 8, 2): ("laps", rid)
                     for rid in relay_race_ids
@@ -1453,6 +1346,409 @@ def handle_cumulate_penalty(args: argparse.Namespace) -> int:
     headers = ["Rank", "Biathlete", "Country", "Races", "Total Penalty Time"]
     row_styles = [rank_style(r["row"][0]) for r in rows] if is_pretty_output(args) else None
     render_table(headers, [r["row"] for r in rows], pretty=is_pretty_output(args), row_styles=row_styles)
+    return 0
+
+
+def handle_cumulate_cleansheet(args: argparse.Namespace) -> int:
+    """Cumulate clean shooting stages (5/5)."""
+    try:
+        payloads, season_id = _collect_races(args, allow_discipline=True)
+    except BiathlonError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    if not payloads:
+        print("no races found for the requested scope", file=sys.stderr)
+        return 1
+
+    include_relay = bool(getattr(args, "include_relay", False))
+
+    # Prefetch per-stage shooting and range time analytics for non-relay races
+    analytic_requests: list[tuple[str, str]] = []
+    for race_id, payload in payloads:
+        if _is_relay(payload):
+            continue
+        disc = str((payload.get("Competition") or {}).get("DisciplineId") or "").upper()
+        stages = 2 if disc == "SP" else 4
+        for s in range(1, stages + 1):
+            analytic_requests.append((race_id, f"S{s}TM"))
+            analytic_requests.append((race_id, f"RNG{s}"))
+    prefetched_analytic = _prefetch_analytic_maps(analytic_requests)
+
+    # Prefetch relay shooting and range lap times
+    prefetched_relay_laps: dict[str, dict[tuple[str, int], dict[str, str]]] = {}
+    prefetched_relay_range_laps: dict[str, dict[tuple[str, int], dict[str, str]]] = {}
+    if include_relay:
+        relay_race_ids = [rid for rid, p in payloads if _is_relay(p)]
+        if relay_race_ids:
+            with ThreadPoolExecutor(max_workers=_max_workers(len(relay_race_ids) * 2, cap=8)) as executor:
+                shoot_futures = {
+                    executor.submit(_fetch_leg_lap_times, rid, "S", "TM", 8, 2): ("shoot", rid)
+                    for rid in relay_race_ids
+                }
+                range_futures = {
+                    executor.submit(_fetch_leg_lap_times, rid, "RNG", "", 8, 2): ("range", rid)
+                    for rid in relay_race_ids
+                }
+                all_futures = {**shoot_futures, **range_futures}
+                for future in as_completed(all_futures):
+                    kind, rid = all_futures[future]
+                    try:
+                        if kind == "shoot":
+                            prefetched_relay_laps[rid] = future.result()
+                        else:
+                            prefetched_relay_range_laps[rid] = future.result()
+                    except Exception:
+                        if kind == "shoot":
+                            prefetched_relay_laps[rid] = {}
+                        else:
+                            prefetched_relay_range_laps[rid] = {}
+
+    # Pre-fetch top IBU IDs once for filtering
+    top_ibu_ids = _get_top_ibu_ids_set(payloads, args.top, season_id)
+
+    entries: dict[str, dict] = {}
+    total_races = 0
+    for race_id, payload in payloads:
+        is_relay = _is_relay(payload)
+        if is_relay and not include_relay:
+            continue
+        if is_relay and include_relay:
+            results = _relay_leg_results(payload)
+        else:
+            results = _race_results(payload)
+        if not results:
+            continue
+        cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
+        if not is_relay:
+            results = _apply_top_filter(results, args.top, cat_id, season_id, top_ibu_ids)
+        if not results:
+            continue
+        relay_laps = prefetched_relay_laps.get(race_id, {}) if is_relay and include_relay else {}
+        relay_range_laps = prefetched_relay_range_laps.get(race_id, {}) if is_relay and include_relay else {}
+        race_has_data = False
+        for res in results:
+            ident = res.get("IBUId") or res.get("Name") or res.get("ShortName") or ""
+            if not ident:
+                continue
+            name = res.get("Name") or res.get("ShortName") or ""
+            nat = res.get("Nat") or ""
+            entry = _aggregate_entries(entries, str(ident), name, nat)
+            if is_relay:
+                shootings = res.get("Shootings") or res.get("ShootingTotal")
+                stages = parse_relay_shootings(shootings) if shootings else None
+                if not stages:
+                    continue
+                prone, standing = stages
+                prone_pen, prone_spare = prone
+                stand_pen, stand_spare = standing
+                prone_clean = prone_pen == 0 and prone_spare == 0
+                stand_clean = stand_pen == 0 and stand_spare == 0
+                clean_count = int(prone_clean) + int(stand_clean)
+                entry.setdefault("cleansheets", 0)
+                entry.setdefault("clean_races", 0)
+                entry.setdefault("total_stages", 0)
+                entry.setdefault("clean_stage_shoot_secs", 0.0)
+                entry.setdefault("clean_stage_shoot_count", 0)
+                entry.setdefault("clean_stage_range_secs", 0.0)
+                entry.setdefault("clean_stage_range_count", 0)
+                entry.setdefault("clean_race_shoot_secs", 0.0)
+                entry.setdefault("clean_race_shoot_stages", 0)
+                entry.setdefault("clean_race_range_secs", 0.0)
+                entry.setdefault("clean_race_range_stages", 0)
+                entry["cleansheets"] += clean_count
+                entry["total_stages"] += 2
+                entry["races"] += 1
+                if prone_clean and stand_clean:
+                    entry["clean_races"] += 1
+                # Accumulate per-stage clean shooting and range times
+                leg = res.get("Leg")
+                lap_times: dict[str, str] = {}
+                range_lap_times: dict[str, str] = {}
+                if isinstance(leg, int):
+                    for key in (res.get("Bib"), res.get("IBUId"), res.get("Name"), res.get("ShortName")):
+                        if key is None:
+                            continue
+                        lap_times = relay_laps.get((str(key), leg), {})
+                        if lap_times:
+                            break
+                    for key in (res.get("Bib"), res.get("IBUId"), res.get("Name"), res.get("ShortName")):
+                        if key is None:
+                            continue
+                        range_lap_times = relay_range_laps.get((str(key), leg), {})
+                        if range_lap_times:
+                            break
+                race_shoot_sum = 0.0
+                race_shoot_ok = True
+                race_range_sum = 0.0
+                race_range_ok = True
+                if prone_clean:
+                    s1 = parse_time_seconds(lap_times.get("lap1"))
+                    if s1 is None:
+                        s1_val = get_first_time(res, ["S1", "ShootingTime1"])
+                        s1 = parse_time_seconds(s1_val) if s1_val else None
+                    if s1 is not None:
+                        entry["clean_stage_shoot_secs"] += s1
+                        entry["clean_stage_shoot_count"] += 1
+                        race_shoot_sum += s1
+                    else:
+                        race_shoot_ok = False
+                    r1 = parse_time_seconds(range_lap_times.get("lap1"))
+                    if r1 is None:
+                        r1_val = get_first_time(res, ["R1", "RangeTime1"])
+                        r1 = parse_time_seconds(r1_val) if r1_val else None
+                    if r1 is not None:
+                        entry["clean_stage_range_secs"] += r1
+                        entry["clean_stage_range_count"] += 1
+                        race_range_sum += r1
+                    else:
+                        race_range_ok = False
+                if stand_clean:
+                    s2 = parse_time_seconds(lap_times.get("lap2"))
+                    if s2 is None:
+                        s2_val = get_first_time(res, ["S2", "ShootingTime2"])
+                        s2 = parse_time_seconds(s2_val) if s2_val else None
+                    if s2 is not None:
+                        entry["clean_stage_shoot_secs"] += s2
+                        entry["clean_stage_shoot_count"] += 1
+                        race_shoot_sum += s2
+                    else:
+                        race_shoot_ok = False
+                    r2 = parse_time_seconds(range_lap_times.get("lap2"))
+                    if r2 is None:
+                        r2_val = get_first_time(res, ["R2", "RangeTime2"])
+                        r2 = parse_time_seconds(r2_val) if r2_val else None
+                    if r2 is not None:
+                        entry["clean_stage_range_secs"] += r2
+                        entry["clean_stage_range_count"] += 1
+                        race_range_sum += r2
+                    else:
+                        race_range_ok = False
+                if prone_clean and stand_clean:
+                    if race_shoot_ok:
+                        entry["clean_race_shoot_secs"] += race_shoot_sum
+                        entry["clean_race_shoot_stages"] += 2
+                    if race_range_ok:
+                        entry["clean_race_range_secs"] += race_range_sum
+                        entry["clean_race_range_stages"] += 2
+                race_has_data = True
+            else:
+                misses = _parse_shootings(res.get("Shootings") or res.get("ShootingTotal"))
+                if not misses:
+                    continue
+                clean_count = sum(1 for m in misses if m == 0)
+                entry.setdefault("cleansheets", 0)
+                entry.setdefault("clean_races", 0)
+                entry.setdefault("total_stages", 0)
+                entry.setdefault("clean_stage_shoot_secs", 0.0)
+                entry.setdefault("clean_stage_shoot_count", 0)
+                entry.setdefault("clean_stage_range_secs", 0.0)
+                entry.setdefault("clean_stage_range_count", 0)
+                entry.setdefault("clean_race_shoot_secs", 0.0)
+                entry.setdefault("clean_race_shoot_stages", 0)
+                entry.setdefault("clean_race_range_secs", 0.0)
+                entry.setdefault("clean_race_range_stages", 0)
+                n_stages = len(misses)
+                entry["cleansheets"] += clean_count
+                entry["total_stages"] += n_stages
+                entry["races"] += 1
+                fully_clean = all(m == 0 for m in misses)
+                if fully_clean:
+                    entry["clean_races"] += 1
+                race_shoot_sum = 0.0
+                race_shoot_ok = True
+                race_range_sum = 0.0
+                race_range_ok = True
+                for stage_i, miss_count in enumerate(misses):
+                    if miss_count == 0:
+                        stage_times = prefetched_analytic.get((race_id, f"S{stage_i + 1}TM"), {})
+                        stage_val = _lookup_analytic_time(stage_times, res)
+                        stage_secs = parse_time_seconds(stage_val) if stage_val else None
+                        if stage_secs is not None:
+                            entry["clean_stage_shoot_secs"] += stage_secs
+                            entry["clean_stage_shoot_count"] += 1
+                            race_shoot_sum += stage_secs
+                        else:
+                            race_shoot_ok = False
+                        range_times = prefetched_analytic.get((race_id, f"RNG{stage_i + 1}"), {})
+                        range_val = _lookup_analytic_time(range_times, res)
+                        range_secs = parse_time_seconds(range_val) if range_val else None
+                        if range_secs is not None:
+                            entry["clean_stage_range_secs"] += range_secs
+                            entry["clean_stage_range_count"] += 1
+                            race_range_sum += range_secs
+                        else:
+                            race_range_ok = False
+                if fully_clean:
+                    if race_shoot_ok:
+                        entry["clean_race_shoot_secs"] += race_shoot_sum
+                        entry["clean_race_shoot_stages"] += n_stages
+                    if race_range_ok:
+                        entry["clean_race_range_secs"] += race_range_sum
+                        entry["clean_race_range_stages"] += n_stages
+                race_has_data = True
+        if race_has_data:
+            total_races += 1
+
+    if not entries:
+        print("no shooting data found for the requested scope", file=sys.stderr)
+        return 1
+
+    min_pct = getattr(args, "min_pct", 0)
+    min_races = 0
+    if min_pct > 0 and total_races > 0:
+        min_races = max(1, round(total_races * min_pct / 100))
+
+    rows = []
+    for entry in entries.values():
+        if min_races and entry["races"] < min_races:
+            continue
+        races = entry["races"]
+        clean_races = entry.get("clean_races", 0)
+        cleansheets = entry.get("cleansheets", 0)
+        total_stages = entry.get("total_stages", 0)
+        stage_clean_pct = format_pct(cleansheets, total_stages) if total_stages else "-"
+        race_clean_pct = format_pct(clean_races, races) if races else "-"
+        # Stage-level averages (across all individual clean stages)
+        clean_stage_shoot_count = entry.get("clean_stage_shoot_count", 0)
+        avg_stage_shoot = format_seconds(entry["clean_stage_shoot_secs"] / clean_stage_shoot_count) if clean_stage_shoot_count > 0 else "-"
+        clean_stage_range_count = entry.get("clean_stage_range_count", 0)
+        avg_stage_range = format_seconds(entry["clean_stage_range_secs"] / clean_stage_range_count) if clean_stage_range_count > 0 else "-"
+        # Race-level averages (total time / n_stages, so normalized per stage)
+        cr_shoot_stages = entry.get("clean_race_shoot_stages", 0)
+        avg_race_shoot = format_seconds(entry["clean_race_shoot_secs"] / cr_shoot_stages) if cr_shoot_stages > 0 else "-"
+        cr_range_stages = entry.get("clean_race_range_stages", 0)
+        avg_race_range = format_seconds(entry["clean_race_range_secs"] / cr_range_stages) if cr_range_stages > 0 else "-"
+        stage_clean_ratio = cleansheets / total_stages if total_stages else 0.0
+        race_clean_ratio = clean_races / races if races else 0.0
+        avg_stage_shoot_secs = entry["clean_stage_shoot_secs"] / clean_stage_shoot_count if clean_stage_shoot_count > 0 else float("inf")
+        avg_stage_range_secs = entry["clean_stage_range_secs"] / clean_stage_range_count if clean_stage_range_count > 0 else float("inf")
+        avg_race_shoot_secs = entry["clean_race_shoot_secs"] / cr_shoot_stages if cr_shoot_stages > 0 else float("inf")
+        avg_race_range_secs = entry["clean_race_range_secs"] / cr_range_stages if cr_range_stages > 0 else float("inf")
+        rows.append({
+            "sort_cleansheets": (-cleansheets, -stage_clean_ratio),
+            "sort_percentage": (-stage_clean_ratio, -cleansheets),
+            "sort_time": (avg_stage_shoot_secs,),
+            "stage_clean_ratio": stage_clean_ratio,
+            "race_clean_ratio": race_clean_ratio,
+            "avg_stage_shoot_secs": avg_stage_shoot_secs,
+            "avg_stage_range_secs": avg_stage_range_secs,
+            "avg_race_shoot_secs": avg_race_shoot_secs,
+            "avg_race_range_secs": avg_race_range_secs,
+            "row": [
+                0,
+                entry["name"],
+                entry["nat"],
+                races,
+                total_stages,
+                cleansheets,
+                stage_clean_pct,
+                avg_stage_shoot,
+                avg_stage_range,
+                clean_races,
+                race_clean_pct,
+                avg_race_shoot,
+                avg_race_range,
+            ],
+        })
+    sort_key = f"sort_{getattr(args, 'sort', 'cleansheets')}"
+    rows.sort(key=lambda r: (r[sort_key], r["row"][1]))
+    for idx, row in enumerate(rows, start=1):
+        row["row"][0] = idx
+    rows = _apply_limit(rows, args.limit)
+    headers = [
+        "Rank",
+        "Biathlete",
+        "Country",
+        "Races",
+        "Stages",
+        "Clean Stages",
+        "Stage %",
+        "Avg Stage Shoot",
+        "Avg Stage Range",
+        "Clean Races",
+        "Race %",
+        "Avg Race Shoot",
+        "Avg Race Range",
+    ]
+    render_rows = [r["row"] for r in rows]
+    pretty = is_pretty_output(args)
+    row_styles = [rank_style(r[0]) for r in render_rows] if pretty else None
+    # Column separators before the stage and race sections
+    column_separators = {5, 9} if pretty else None
+    # Highlight the header used for sorting
+    sort_header_map = {
+        "sort_cleansheets": "Clean Stages",
+        "sort_percentage": "Stage %",
+        "sort_time": "Avg Stage Shoot",
+    }
+    highlight_headers = None
+    if pretty:
+        sort_col = sort_header_map.get(sort_key)
+        if sort_col and sort_col in headers:
+            highlight_headers = [headers.index(sort_col)]
+
+    # Build relative color-scale cell formatters
+    cell_formatters = None
+    if pretty and rows:
+        cell_formatters = [None] * len(headers)
+
+        def _make_higher_better(values: list[float]):
+            lo, hi = min(values), max(values)
+
+            def fmt(cell_str: str, row_idx: int) -> str:
+                if row_idx >= len(values):
+                    return cell_str
+                t = (values[row_idx] - lo) / (hi - lo) if hi > lo else 1.0
+                return Color.relative(cell_str, t)
+
+            return fmt if hi > lo else None
+
+        def _make_lower_better(key: str):
+            finite = [r[key] for r in rows if r[key] != float("inf")]
+            if not finite:
+                return None
+            lo, hi = min(finite), max(finite)
+            if hi <= lo:
+                return None
+
+            def fmt(cell_str: str, row_idx: int) -> str:
+                if row_idx >= len(rows):
+                    return cell_str
+                val = rows[row_idx][key]
+                if val == float("inf"):
+                    return cell_str
+                return Color.relative(cell_str, 1.0 - (val - lo) / (hi - lo))
+
+            return fmt
+
+        # Stage section
+        cell_formatters[headers.index("Clean Stages")] = _make_higher_better(
+            [float(r["row"][headers.index("Clean Stages")]) for r in rows]
+        )
+        cell_formatters[headers.index("Stage %")] = _make_higher_better(
+            [r["stage_clean_ratio"] for r in rows]
+        )
+        cell_formatters[headers.index("Avg Stage Shoot")] = _make_lower_better("avg_stage_shoot_secs")
+        cell_formatters[headers.index("Avg Stage Range")] = _make_lower_better("avg_stage_range_secs")
+        # Race section
+        cell_formatters[headers.index("Clean Races")] = _make_higher_better(
+            [float(r["row"][headers.index("Clean Races")]) for r in rows]
+        )
+        cell_formatters[headers.index("Race %")] = _make_higher_better(
+            [r["race_clean_ratio"] for r in rows]
+        )
+        cell_formatters[headers.index("Avg Race Shoot")] = _make_lower_better("avg_race_shoot_secs")
+        cell_formatters[headers.index("Avg Race Range")] = _make_lower_better("avg_race_range_secs")
+
+    render_table(
+        headers,
+        render_rows,
+        pretty=pretty,
+        row_styles=row_styles,
+        cell_formatters=cell_formatters,
+        column_separators=column_separators,
+        highlight_headers=highlight_headers,
+    )
     return 0
 
 

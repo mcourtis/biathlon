@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import os
+import re
 import sys
+import unicodedata
 from collections.abc import Callable
 
 
@@ -135,6 +137,100 @@ class Color:
                 return cls.rgb(text, color)
         return cls.rgb(text, cls.ACCURACY_BANDS[-1][3])
 
+    @classmethod
+    def _apply_bands(cls, text: str, value: float, bands: list) -> str:
+        """Apply color from a band list based on raw value."""
+        if not cls.enabled():
+            return text
+        for low, high, low_color, high_color in bands:
+            if value <= high:
+                if high == low:
+                    return cls.rgb(text, high_color)
+                t = (value - low) / (high - low)
+                color = cls._interp_color(low_color, high_color, t)
+                return cls.rgb(text, color)
+        return cls.rgb(text, bands[-1][3])
+
+    @classmethod
+    def clean_race_pct(cls, text: str, pct: float) -> str:
+        """Apply color based on clean race percentage (0.0 to 1.0)."""
+        return cls._apply_bands(text, max(0.0, min(100.0, pct * 100.0)), cls.CLEAN_RACE_PCT_BANDS)
+
+    @classmethod
+    def clean_stage_pct(cls, text: str, pct: float) -> str:
+        """Apply color based on clean stage percentage (0.0 to 1.0)."""
+        return cls._apply_bands(text, max(0.0, min(100.0, pct * 100.0)), cls.CLEAN_STAGE_PCT_BANDS)
+
+    @classmethod
+    def shoot_time(cls, text: str, seconds: float) -> str:
+        """Apply color based on avg stage shoot time in seconds (lower is better)."""
+        return cls._apply_bands(text, seconds, cls.SHOOT_TIME_BANDS)
+
+    @classmethod
+    def range_time(cls, text: str, seconds: float) -> str:
+        """Apply color based on avg stage range time in seconds (lower is better)."""
+        return cls._apply_bands(text, seconds, cls.RANGE_TIME_BANDS)
+
+    # Clean race % bands – tuned for skewed-low distribution (median ~0-8%)
+    CLEAN_RACE_PCT_BANDS = [
+        (0.0, 5.0, (176, 0, 32), (176, 0, 32)),
+        (5.0, 15.0, (176, 0, 32), (230, 81, 0)),
+        (15.0, 30.0, (230, 81, 0), (255, 214, 0)),
+        (30.0, 45.0, (255, 214, 0), (174, 234, 0)),
+        (45.0, 65.0, (174, 234, 0), (0, 200, 83)),
+        (65.0, 100.0, (0, 200, 83), (0, 230, 118)),
+    ]
+
+    # Clean stage % bands – median ~37%, spread 0-100%
+    CLEAN_STAGE_PCT_BANDS = [
+        (0.0, 20.0, (176, 0, 32), (176, 0, 32)),
+        (20.0, 35.0, (176, 0, 32), (230, 81, 0)),
+        (35.0, 50.0, (230, 81, 0), (255, 214, 0)),
+        (50.0, 60.0, (255, 214, 0), (174, 234, 0)),
+        (60.0, 75.0, (174, 234, 0), (0, 200, 83)),
+        (75.0, 100.0, (0, 200, 83), (0, 230, 118)),
+    ]
+
+    # Avg stage shoot time bands (seconds, lower = better) – typical 24-37s
+    SHOOT_TIME_BANDS = [
+        (0.0, 24.0, (0, 230, 118), (0, 230, 118)),
+        (24.0, 27.0, (0, 200, 83), (174, 234, 0)),
+        (27.0, 30.0, (174, 234, 0), (255, 214, 0)),
+        (30.0, 33.0, (255, 214, 0), (230, 81, 0)),
+        (33.0, 37.0, (230, 81, 0), (176, 0, 32)),
+        (37.0, 999.0, (176, 0, 32), (176, 0, 32)),
+    ]
+
+    # Avg stage range time bands (seconds, lower = better) – typical 44-62s
+    RANGE_TIME_BANDS = [
+        (0.0, 44.0, (0, 230, 118), (0, 230, 118)),
+        (44.0, 48.0, (0, 200, 83), (174, 234, 0)),
+        (48.0, 52.0, (174, 234, 0), (255, 214, 0)),
+        (52.0, 56.0, (255, 214, 0), (230, 81, 0)),
+        (56.0, 62.0, (230, 81, 0), (176, 0, 32)),
+        (62.0, 999.0, (176, 0, 32), (176, 0, 32)),
+    ]
+
+    RELATIVE_BANDS = [
+        (0.0, 25.0, (176, 0, 32), (230, 81, 0)),
+        (25.0, 50.0, (230, 81, 0), (255, 214, 0)),
+        (50.0, 75.0, (255, 214, 0), (174, 234, 0)),
+        (75.0, 100.0, (174, 234, 0), (0, 230, 118)),
+    ]
+
+    @classmethod
+    def relative(cls, text: str, t: float) -> str:
+        """Apply color based on a relative 0.0-1.0 scale spread evenly across the range."""
+        if not cls.enabled():
+            return text
+        percent = max(0.0, min(100.0, t * 100.0))
+        for low, high, low_color, high_color in cls.RELATIVE_BANDS:
+            if percent <= high:
+                frac = (percent - low) / (high - low) if high > low else 1.0
+                color = cls._interp_color(low_color, high_color, frac)
+                return cls.rgb(text, color)
+        return cls.rgb(text, cls.RELATIVE_BANDS[-1][3])
+
     @staticmethod
     def _interp_color(low: tuple[int, int, int], high: tuple[int, int, int], t: float) -> tuple[int, int, int]:
         t = max(0.0, min(1.0, t))
@@ -145,14 +241,62 @@ class Color:
         )
 
 
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
+_ZERO_WIDTH_CODEPOINTS = {0xFE0E, 0xFE0F}
+
+
+def _strip_ansi(text: str) -> str:
+    return _ANSI_RE.sub("", text)
+
+
+def _display_width(text: str) -> int:
+    width = 0
+    stripped = _strip_ansi(text)
+    idx = 0
+    while idx < len(stripped):
+        ch = stripped[idx]
+        code = ord(ch)
+        if code in _ZERO_WIDTH_CODEPOINTS:
+            idx += 1
+            continue
+        if unicodedata.combining(ch):
+            idx += 1
+            continue
+        if unicodedata.category(ch) in {"Mn", "Cf"}:
+            idx += 1
+            continue
+        if unicodedata.east_asian_width(ch) in {"W", "F"}:
+            width += 2
+        else:
+            width += 1
+        idx += 1
+    return width
+
+
+def _pad_cell(text: str, width: int, alignment: str = "left") -> str:
+    pad_len = width - _display_width(text)
+    if pad_len <= 0:
+        return text
+    if alignment == "right":
+        return f"{' ' * pad_len}{text}"
+    if alignment == "center":
+        left = pad_len // 2
+        right = pad_len - left
+        return f"{' ' * left}{text}{' ' * right}"
+    return f"{text}{' ' * pad_len}"
+
+
 def render_table(
     headers: list[str],
     rows: list[list[str]],
     pretty: bool,
     row_styles: list[str] | None = None,
     cell_formatters: list[Callable] | None = None,
+    alignments: list[str] | None = None,
     highlight_headers: list[int] | None = None,
     highlight_header_styles: dict[int, str] | None = None,
+    show_headers: bool = True,
+    column_separators: set[int] | None = None,
 ) -> None:
     """Render tabular data either aligned (pretty) or TSV.
 
@@ -162,19 +306,18 @@ def render_table(
         pretty: If True, align columns; otherwise output TSV.
         row_styles: Optional list of style names per row ("dim", "highlight", or "").
         cell_formatters: Optional list of functions (one per column) to format cell values.
-                        Each function takes (value, row_index) and returns formatted string.
+            Each function takes (value, row_index) and returns formatted string.
+        alignments: Optional list of alignment directives ("left", "right", "center") per column.
         highlight_headers: Optional list of column indices to highlight in the header row.
+        show_headers: If False, skip printing the header row (default True).
+        column_separators: Optional set of column indices before which a vertical separator is drawn.
     """
     if not pretty:
-        print("\t".join(headers))
+        if show_headers:
+            print("\t".join(headers))
         for row in rows:
             print("\t".join(str(cell) for cell in row))
         return
-
-    widths = [
-        max(len(str(headers[idx])), max((len(str(row[idx])) for row in rows), default=0))
-        for idx in range(len(headers))
-    ]
 
     def apply_row_style(text: str, style: str) -> str:
         if style == "dim":
@@ -189,17 +332,21 @@ def render_table(
             return Color.bronze(text)
         if style == "flowers":
             return Color.flowers(text)
+        if style == "red":
+            return Color.red(text)
         if style == "other":
             return Color.other(text)
         return text
 
-    def fmt_row(row: list[str], row_idx: int) -> str:
+    formatted_rows: list[list[str]] = []
+    for row_idx, row in enumerate(rows):
         style = ""
         if row_styles and row_idx < len(row_styles):
             style = row_styles[row_idx]
-        parts = []
+
+        formatted_row = []
         for col_idx, cell in enumerate(row):
-            cell_str = str(cell).ljust(widths[col_idx])
+            cell_str = str(cell)
             has_formatter = (
                 cell_formatters
                 and col_idx < len(cell_formatters)
@@ -209,11 +356,43 @@ def render_table(
                 cell_str = cell_formatters[col_idx](cell_str, row_idx)
             elif style:
                 cell_str = apply_row_style(cell_str, style)
-            parts.append(cell_str)
-        return "  ".join(parts)
+            formatted_row.append(cell_str)
+        formatted_rows.append(formatted_row)
+
+    widths = [
+        max(
+            _display_width(str(headers[idx])),
+            max((_display_width(row[idx]) for row in formatted_rows), default=0),
+        )
+        for idx in range(len(headers))
+    ]
+
+    sep = column_separators or set()
+
+    def _join(parts: list[str]) -> str:
+        if not sep:
+            return "  ".join(parts)
+        pieces = []
+        for i, part in enumerate(parts):
+            if i > 0:
+                pieces.append(" | " if i in sep else "  ")
+            pieces.append(part)
+        return "".join(pieces)
+
+    def fmt_row(row_idx: int) -> str:
+        parts = []
+        for col_idx, cell_str in enumerate(formatted_rows[row_idx]):
+            alignment = "left"
+            if alignments and col_idx < len(alignments) and alignments[col_idx]:
+                alignment = alignments[col_idx]
+            parts.append(_pad_cell(cell_str, widths[col_idx], alignment))
+        return _join(parts)
 
     def fmt_header(idx: int, h: str) -> str:
-        text = str(h).ljust(widths[idx])
+        alignment = "left"
+        if alignments and idx < len(alignments) and alignments[idx]:
+            alignment = alignments[idx]
+        text = _pad_cell(str(h), widths[idx], alignment)
         if highlight_header_styles and idx in highlight_header_styles:
             style = highlight_header_styles[idx]
             if style == "highlight":
@@ -222,11 +401,22 @@ def render_table(
                 return Color.highlight_soft(text)
         if highlight_headers and idx in highlight_headers:
             return Color.highlight(text)
-        return text
+        # Bold headers by default
+        return f"{Color.BOLD}{text}{Color.RESET}"
 
-    print("  ".join(fmt_header(i, h) for i, h in enumerate(headers)))
-    for idx, row in enumerate(rows):
-        print(fmt_row(row, idx))
+    if show_headers:
+        header_parts = [fmt_header(i, h) for i, h in enumerate(headers)]
+        print(_join(header_parts))
+        if sep:
+            dash_parts = ["-" * widths[i] for i in range(len(headers))]
+            pieces = []
+            for i, part in enumerate(dash_parts):
+                if i > 0:
+                    pieces.append("-+-" if i in sep else "--")
+                pieces.append(part)
+            print("".join(pieces))
+    for idx in range(len(rows)):
+        print(fmt_row(idx))
 
 
 def format_seconds(seconds: float | None) -> str:

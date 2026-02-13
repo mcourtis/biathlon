@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..api import BiathlonError, get_cup_results, get_current_season_id, get_events, get_race_results, get_races
 from ..constants import (
@@ -16,13 +17,24 @@ from ..constants import (
     RELAY_WOMEN_CAT,
     SINGLE_MIXED_RELAY_DISCIPLINE,
 )
-from ..formatting import Color, format_pct, is_pretty_output, rank_style, render_table
-from ..utils import extract_results, parse_relay_shootings
+from ..formatting import Color, format_pct, format_seconds, is_pretty_output, rank_style, render_table
+from ..utils import extract_results, get_first_time, parse_relay_shootings, parse_time_seconds
+from ._common import (
+    _fetch_leg_lap_times,
+    _lookup_analytic_time,
+    _max_workers,
+    _prefetch_analytic_maps,
+)
 from .results import _has_completed_results
 from .scores import find_cup_id
 
 
-def accumulate_accuracy_by_athlete(results: list[dict]) -> dict[str, dict]:
+def accumulate_accuracy_by_athlete(
+    results: list[dict],
+    prefetched_analytic: dict[tuple[str, str], dict[str, str]] | None = None,
+    relay_shoot_laps: dict[str, dict[tuple[str, int], dict[str, str]]] | None = None,
+    relay_range_laps: dict[str, dict[tuple[str, int], dict[str, str]]] | None = None,
+) -> dict[str, dict]:
     """Aggregate shooting accuracy stats per athlete."""
     stats: dict[str, dict] = {}
     name_to_id: dict[str, str] = {}
@@ -81,6 +93,10 @@ def accumulate_accuracy_by_athlete(results: list[dict]) -> dict[str, dict]:
             stand_misses = stand_pen + stand_spare
             shots = prone_shots + stand_shots
             total_misses = prone_misses + stand_misses
+            prone_clean = prone_pen == 0 and prone_spare == 0
+            stand_clean = stand_pen == 0 and stand_spare == 0
+            n_clean_stages = int(prone_clean) + int(stand_clean)
+            n_stages = 2
         else:
             # Individual race format: "0+1+0+1" (misses per stage, 5 shots each)
             parts = [p.strip() for p in shootings.split("+") if p.strip()]
@@ -105,12 +121,17 @@ def accumulate_accuracy_by_athlete(results: list[dict]) -> dict[str, dict]:
                 else:
                     stand_shots += 5
                     stand_misses += miss_val
+            n_stages = len(misses_list)
+            n_clean_stages = sum(1 for m in misses_list if m == 0)
         entry = stats.setdefault(ident, {
             "name": res.get("Name") or res.get("ShortName") or "",
             "nat": res.get("Nat") or "",
             "races": 0, "race_ids": set(), "individual_race_ids": set(), "shots": 0, "misses": 0,
             "prone_shots": 0, "prone_misses": 0,
             "standing_shots": 0, "standing_misses": 0,
+            "total_stages": 0, "clean_stages": 0, "clean_races": 0,
+            "stage_shoot_secs": 0.0, "stage_shoot_count": 0,
+            "stage_range_secs": 0.0, "stage_range_count": 0,
         })
         if race_id:
             entry["race_ids"].add(race_id)
@@ -125,6 +146,73 @@ def accumulate_accuracy_by_athlete(results: list[dict]) -> dict[str, dict]:
         entry["prone_misses"] += prone_misses
         entry["standing_shots"] += stand_shots
         entry["standing_misses"] += stand_misses
+        entry["total_stages"] += n_stages
+        entry["clean_stages"] += n_clean_stages
+        if n_clean_stages == n_stages:
+            entry["clean_races"] += 1
+
+        # Accumulate per-stage shooting and range times (all stages)
+        if is_relay and relay_shoot_laps is not None:
+            lap_times: dict[str, str] = {}
+            range_lap_times: dict[str, str] = {}
+            leg = res.get("Leg")
+            if isinstance(leg, int):
+                rlaps = relay_shoot_laps.get(race_id, {})
+                for key in (res.get("Bib"), res.get("IBUId"), res.get("Name"), res.get("ShortName")):
+                    if key is None:
+                        continue
+                    lap_times = rlaps.get((str(key), leg), {})
+                    if lap_times:
+                        break
+                rrlaps = (relay_range_laps or {}).get(race_id, {})
+                for key in (res.get("Bib"), res.get("IBUId"), res.get("Name"), res.get("ShortName")):
+                    if key is None:
+                        continue
+                    range_lap_times = rrlaps.get((str(key), leg), {})
+                    if range_lap_times:
+                        break
+            s1 = parse_time_seconds(lap_times.get("lap1"))
+            if s1 is None:
+                s1_val = get_first_time(res, ["S1", "ShootingTime1"])
+                s1 = parse_time_seconds(s1_val) if s1_val else None
+            if s1 is not None:
+                entry["stage_shoot_secs"] += s1
+                entry["stage_shoot_count"] += 1
+            r1 = parse_time_seconds(range_lap_times.get("lap1"))
+            if r1 is None:
+                r1_val = get_first_time(res, ["R1", "RangeTime1"])
+                r1 = parse_time_seconds(r1_val) if r1_val else None
+            if r1 is not None:
+                entry["stage_range_secs"] += r1
+                entry["stage_range_count"] += 1
+            s2 = parse_time_seconds(lap_times.get("lap2"))
+            if s2 is None:
+                s2_val = get_first_time(res, ["S2", "ShootingTime2"])
+                s2 = parse_time_seconds(s2_val) if s2_val else None
+            if s2 is not None:
+                entry["stage_shoot_secs"] += s2
+                entry["stage_shoot_count"] += 1
+            r2 = parse_time_seconds(range_lap_times.get("lap2"))
+            if r2 is None:
+                r2_val = get_first_time(res, ["R2", "RangeTime2"])
+                r2 = parse_time_seconds(r2_val) if r2_val else None
+            if r2 is not None:
+                entry["stage_range_secs"] += r2
+                entry["stage_range_count"] += 1
+        elif not is_relay and prefetched_analytic is not None:
+            for stage_i in range(n_stages):
+                stage_times = prefetched_analytic.get((race_id, f"S{stage_i + 1}TM"), {})
+                stage_val = _lookup_analytic_time(stage_times, res)
+                stage_secs = parse_time_seconds(stage_val) if stage_val else None
+                if stage_secs is not None:
+                    entry["stage_shoot_secs"] += stage_secs
+                    entry["stage_shoot_count"] += 1
+                range_times = prefetched_analytic.get((race_id, f"RNG{stage_i + 1}"), {})
+                range_val = _lookup_analytic_time(range_times, res)
+                range_secs = parse_time_seconds(range_val) if range_val else None
+                if range_secs is not None:
+                    entry["stage_range_secs"] += range_secs
+                    entry["stage_range_count"] += 1
     return stats
 
 
@@ -242,12 +330,70 @@ def handle_shooting(args: argparse.Namespace) -> int:
         return 1
 
     total_races = len(race_ids)
+    total_individual_races = sum(
+        1 for m in race_meta
+        if m.get("discipline") not in {RELAY_DISCIPLINE, SINGLE_MIXED_RELAY_DISCIPLINE}
+    )
     if args.all_races and total_races == 0:
         label = "no races found for the requested scope" if args.include_relay else "no non-relay races found for the requested scope"
         print(label, file=sys.stderr)
         return 1
 
-    stats = accumulate_accuracy_by_athlete(results_to_process)
+    # Build race-to-discipline mapping and prefetch per-stage analytics
+    race_disciplines: dict[str, str] = {}
+    for res in results_to_process:
+        rid = res.get("_race_id") or ""
+        disc = res.get("_discipline") or ""
+        if rid and disc:
+            race_disciplines[rid] = disc
+
+    analytic_requests: list[tuple[str, str]] = []
+    for rid, disc in race_disciplines.items():
+        if disc in {RELAY_DISCIPLINE, SINGLE_MIXED_RELAY_DISCIPLINE}:
+            continue
+        stages = 2 if disc == "SP" else 4
+        for s in range(1, stages + 1):
+            analytic_requests.append((rid, f"S{s}TM"))
+            analytic_requests.append((rid, f"RNG{s}"))
+    prefetched_analytic = _prefetch_analytic_maps(analytic_requests)
+
+    # Prefetch relay shooting and range lap times
+    prefetched_relay_shoot: dict[str, dict[tuple[str, int], dict[str, str]]] = {}
+    prefetched_relay_range: dict[str, dict[tuple[str, int], dict[str, str]]] = {}
+    relay_race_ids = [
+        rid for rid, disc in race_disciplines.items()
+        if disc in {RELAY_DISCIPLINE, SINGLE_MIXED_RELAY_DISCIPLINE}
+    ]
+    if relay_race_ids:
+        with ThreadPoolExecutor(max_workers=_max_workers(len(relay_race_ids) * 2, cap=8)) as executor:
+            shoot_futures = {
+                executor.submit(_fetch_leg_lap_times, rid, "S", "TM", 8, 2): ("shoot", rid)
+                for rid in relay_race_ids
+            }
+            range_futures = {
+                executor.submit(_fetch_leg_lap_times, rid, "RNG", "", 8, 2): ("range", rid)
+                for rid in relay_race_ids
+            }
+            all_futures = {**shoot_futures, **range_futures}
+            for future in as_completed(all_futures):
+                kind, rid = all_futures[future]
+                try:
+                    if kind == "shoot":
+                        prefetched_relay_shoot[rid] = future.result()
+                    else:
+                        prefetched_relay_range[rid] = future.result()
+                except Exception:
+                    if kind == "shoot":
+                        prefetched_relay_shoot[rid] = {}
+                    else:
+                        prefetched_relay_range[rid] = {}
+
+    stats = accumulate_accuracy_by_athlete(
+        results_to_process,
+        prefetched_analytic=prefetched_analytic,
+        relay_shoot_laps=prefetched_relay_shoot or None,
+        relay_range_laps=prefetched_relay_range or None,
+    )
     if not stats:
         print("no shooting data found for the requested scope", file=sys.stderr)
         return 1
@@ -268,6 +414,13 @@ def handle_shooting(args: argparse.Namespace) -> int:
         prone_hits = entry["prone_shots"] - entry["prone_misses"]
         standing_hits = entry["standing_shots"] - entry["standing_misses"]
         acc = hits / shots if shots else -1
+        total_stages = entry["total_stages"]
+        clean_stages = entry["clean_stages"]
+        stage_pct = clean_stages / total_stages if total_stages else 0.0
+        s_shoot_cnt = entry["stage_shoot_count"]
+        avg_stage_shoot_secs = entry["stage_shoot_secs"] / s_shoot_cnt if s_shoot_cnt > 0 else float("inf")
+        s_range_cnt = entry["stage_range_count"]
+        avg_stage_range_secs = entry["stage_range_secs"] / s_range_cnt if s_range_cnt > 0 else float("inf")
         rows.append({
             "name": entry["name"], "nat": entry["nat"],
             "races": entry["races"], "shots": shots, "hits": hits,
@@ -276,13 +429,21 @@ def handle_shooting(args: argparse.Namespace) -> int:
             "standing_shots": entry["standing_shots"], "standing_hits": standing_hits,
             "wc_position": cup_rankings.get(entry["name"], "-"),
             "individual_races": len(entry.get("individual_race_ids", set())),
+            "total_stages": total_stages, "clean_stages": clean_stages,
+            "clean_races": entry.get("clean_races", 0),
+            "races_pct": entry.get("clean_races", 0) / entry["races"] if entry["races"] else 0.0,
+            "stage_pct": stage_pct,
+            "avg_stage_shoot_secs": avg_stage_shoot_secs,
+            "avg_stage_range_secs": avg_stage_range_secs,
         })
 
     must_start_all = args.all_races or bool(args.event)
     if must_start_all:
         rows = [row for row in rows if row["races"] == total_races]
-    if args.min_race and args.min_race > 0:
-        rows = [row for row in rows if row["individual_races"] >= args.min_race]
+    min_pct = getattr(args, "min_pct", 0)
+    if min_pct > 0 and total_individual_races > 0:
+        min_races = max(1, round(total_individual_races * min_pct / 100))
+        rows = [row for row in rows if row["individual_races"] >= min_races]
 
     # Filter to top N athletes in WC standings (reuse already-fetched data)
     if args.top and args.top > 0 and cup_rows:
@@ -350,11 +511,13 @@ def handle_shooting(args: argparse.Namespace) -> int:
         base_rank += 1
 
     headers = [
-        "Rank", "Name", "Country", "WCRank", "Races", "Shots", "Misses",
+        "Rank", "Name", "Nat", "WCRank", "Races", "Stages", "Shots", "Misses",
         "ProneMisses", "StandingMisses", "Accuracy", "ProneAccuracy", "StandingAccuracy",
+        "Clean Races %", "Clean Stage %", "Avg Stage Shoot", "Avg Stage Range",
     ]
     render_rows = []
     accuracy_values: list[tuple[float, float, float]] = []
+    stage_extra: list[dict] = []
     position = 1
     for row in rows:
         if row["shots"] == 0:
@@ -363,16 +526,28 @@ def handle_shooting(args: argparse.Namespace) -> int:
         prone_acc = row["prone_hits"] / row["prone_shots"] if row["prone_shots"] else 0
         standing_acc = row["standing_hits"] / row["standing_shots"] if row["standing_shots"] else 0
         rank_val = base_rank_map.get(row_key(row), position)
+        avg_shoot = format_seconds(row["avg_stage_shoot_secs"]) if row["avg_stage_shoot_secs"] != float("inf") else "-"
+        avg_range = format_seconds(row["avg_stage_range_secs"]) if row["avg_stage_range_secs"] != float("inf") else "-"
         render_rows.append([
             rank_val, row["name"], row["nat"], row.get("wc_position", "-"),
-            row["races"], row["shots"], row["misses"],
+            row["races"], row["total_stages"], row["shots"], row["misses"],
             row["prone_shots"] - row["prone_hits"],
             row["standing_shots"] - row["standing_hits"],
             format_pct(row["hits"], row["shots"]),
             format_pct(row["prone_hits"], row["prone_shots"]),
             format_pct(row["standing_hits"], row["standing_shots"]),
+            format_pct(row["clean_races"], row["races"]),
+            format_pct(row["clean_stages"], row["total_stages"]),
+            avg_shoot,
+            avg_range,
         ])
         accuracy_values.append((acc, prone_acc, standing_acc))
+        stage_extra.append({
+            "races_pct": row["races_pct"],
+            "stage_pct": row["stage_pct"],
+            "avg_stage_shoot_secs": row["avg_stage_shoot_secs"],
+            "avg_stage_range_secs": row["avg_stage_range_secs"],
+        })
         position += 1
 
     pretty = is_pretty_output(args)
@@ -400,19 +575,22 @@ def handle_shooting(args: argparse.Namespace) -> int:
             return Color.dim(cell_str)
 
         cell_formatters = [rank_formatter] * len(headers)
-        for label in ("Accuracy", "ProneAccuracy", "StandingAccuracy"):
+        for label in ("Accuracy", "ProneAccuracy", "StandingAccuracy",
+                       "Clean Races %", "Clean Stage %", "Avg Stage Shoot", "Avg Stage Range"):
             if label in headers:
                 cell_formatters[headers.index(label)] = None
 
     # Create cell formatters for accuracy columns using fixed thresholds.
     if pretty and accuracy_values:
         accuracy_values_display = accuracy_values
+        stage_extra_display = stage_extra
 
         # Apply display limit after computing the scale.
         limit_n = getattr(args, "limit", 25) or 0
         if limit_n > 0:
             render_rows = render_rows[:limit_n]
             accuracy_values_display = accuracy_values_display[:limit_n]
+            stage_extra_display = stage_extra_display[:limit_n]
 
         def make_acc_formatter(acc_idx: int):
             def formatter(cell_str: str, row_idx: int) -> str:
@@ -430,6 +608,42 @@ def handle_shooting(args: argparse.Namespace) -> int:
             cell_formatters[headers.index("ProneAccuracy")] = make_acc_formatter(1)
         if "StandingAccuracy" in headers:
             cell_formatters[headers.index("StandingAccuracy")] = make_acc_formatter(2)
+
+        # Fixed-threshold color-scale formatters for clean/timing columns
+        def _clean_race_pct_fmt(cell_str: str, row_idx: int) -> str:
+            if row_idx >= len(stage_extra_display):
+                return cell_str
+            return Color.clean_race_pct(cell_str, stage_extra_display[row_idx]["races_pct"])
+
+        def _clean_stage_pct_fmt(cell_str: str, row_idx: int) -> str:
+            if row_idx >= len(stage_extra_display):
+                return cell_str
+            return Color.clean_stage_pct(cell_str, stage_extra_display[row_idx]["stage_pct"])
+
+        def _shoot_time_fmt(cell_str: str, row_idx: int) -> str:
+            if row_idx >= len(stage_extra_display):
+                return cell_str
+            val = stage_extra_display[row_idx]["avg_stage_shoot_secs"]
+            if val == float("inf"):
+                return cell_str
+            return Color.shoot_time(cell_str, val)
+
+        def _range_time_fmt(cell_str: str, row_idx: int) -> str:
+            if row_idx >= len(stage_extra_display):
+                return cell_str
+            val = stage_extra_display[row_idx]["avg_stage_range_secs"]
+            if val == float("inf"):
+                return cell_str
+            return Color.range_time(cell_str, val)
+
+        if "Clean Races %" in headers:
+            cell_formatters[headers.index("Clean Races %")] = _clean_race_pct_fmt
+        if "Clean Stage %" in headers:
+            cell_formatters[headers.index("Clean Stage %")] = _clean_stage_pct_fmt
+        if "Avg Stage Shoot" in headers:
+            cell_formatters[headers.index("Avg Stage Shoot")] = _shoot_time_fmt
+        if "Avg Stage Range" in headers:
+            cell_formatters[headers.index("Avg Stage Range")] = _range_time_fmt
     else:
         # Apply display limit when accuracy colors are not used.
         limit_n = getattr(args, "limit", 25) or 0
@@ -439,6 +653,7 @@ def handle_shooting(args: argparse.Namespace) -> int:
     print()
     print(f"# Shooting accuracy — {current_gender} — {scope_label or (f'season {season_id}' if not args.race else args.race)}")
     highlight_headers = None
+    column_separators = {headers.index("Clean Races %")} if pretty and "Clean Races %" in headers else None
     if pretty:
         highlight_set = set()
         if not show_sort_rank:
@@ -449,7 +664,7 @@ def handle_shooting(args: argparse.Namespace) -> int:
             "shots": "Shots",
             "races": "Races",
             "name": "Name",
-            "country": "Country",
+            "country": "Nat",
             "prone_misses": "ProneMisses",
             "standing_misses": "StandingMisses",
             "prone_accuracy": "ProneAccuracy",
@@ -465,6 +680,7 @@ def handle_shooting(args: argparse.Namespace) -> int:
         pretty=pretty,
         cell_formatters=cell_formatters,
         highlight_headers=highlight_headers,
+        column_separators=column_separators,
     )
     print()
     return 0
