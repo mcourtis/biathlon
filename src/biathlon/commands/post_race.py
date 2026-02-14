@@ -17,6 +17,9 @@ from ..api import (
     get_race_results,
 )
 from ..constants import (
+    CATEGORY_DISPLAY_NAMES,
+    DISCIPLINE_NAMES,
+    EVENT_TYPE_OWG,
     EVENT_TYPE_WC,
     INDIVIDUAL_DISCIPLINES,
     RELAY_DISCIPLINE,
@@ -43,7 +46,13 @@ from ._common import (
     is_relay_discipline as _is_relay_discipline,
 )
 from .results import _find_recent_completed_races, _has_completed_results
-from .startlist import _get_cup_ids_for_race, _get_wc_points
+from .startlist import (
+    _get_all_olympic_medals,
+    _get_cup_ids_for_race,
+    _get_past_olympic_individual_podiums,
+    _get_past_olympic_relay_podiums,
+    _get_wc_points,
+)
 
 
 MAJOR_LEVELS = {"WC", "WCH", "OWG"}
@@ -534,6 +543,312 @@ def _fetch_lap_times(race_id: str, discipline: str) -> list[dict]:
             )
     lap_rows.sort(key=lambda row: row["secs"])
     return lap_rows[:TOP_N]
+
+
+def _render_olympic_medal_sections(
+    args: argparse.Namespace,
+    sec: int,
+    discipline: str,
+    cat_id: str,
+    is_relay: bool,
+    participating_ids: set[str],
+    gold_ids: set[str],
+    silver_ids: set[str],
+    bronze_ids: set[str],
+) -> int:
+    """Render Olympic/WCH medal table sections after the main postrace output.
+
+    Returns the updated section counter.
+    """
+    pretty = is_pretty_output(args)
+    disc_name = DISCIPLINE_NAMES.get(discipline, discipline)
+    cat_name = CATEGORY_DISPLAY_NAMES.get(cat_id, cat_id)
+
+    # Fetch podiums and all-medals in parallel
+    podiums: list[dict] = []
+    all_country_medals: list[dict] = []
+    all_athlete_stats: dict[str, dict] = {}
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        if is_relay:
+            podiums_future = executor.submit(
+                _get_past_olympic_relay_podiums, discipline, cat_id
+            )
+        else:
+            podiums_future = executor.submit(
+                _get_past_olympic_individual_podiums, discipline, cat_id
+            )
+        medals_future = executor.submit(_get_all_olympic_medals, cat_id)
+        podiums = podiums_future.result()
+        all_country_medals, all_athlete_stats = medals_future.result()
+
+    # Section: Country medal table (discipline-specific)
+    sec += 1
+    medal_counts: dict[str, dict[str, int]] = {}
+    for p in podiums:
+        if is_relay:
+            # Relay podiums: parse country from display string "Name (NAT)"
+            for medal_type in ("gold", "silver", "bronze"):
+                country = p.get(medal_type, "")
+                if country and " (" in country:
+                    country = country.split(" (")[0]
+                if country:
+                    if country not in medal_counts:
+                        medal_counts[country] = {"gold": 0, "silver": 0, "bronze": 0}
+                    medal_counts[country][medal_type] += 1
+        else:
+            # Individual podiums: use gold_nat/silver_nat/bronze_nat keys
+            for medal_type, key in [
+                ("gold", "gold_nat"),
+                ("silver", "silver_nat"),
+                ("bronze", "bronze_nat"),
+            ]:
+                nat = p.get(key) or ""
+                if not nat:
+                    continue
+                if nat not in medal_counts:
+                    medal_counts[nat] = {"gold": 0, "silver": 0, "bronze": 0}
+                medal_counts[nat][medal_type] += 1
+
+    if not medal_counts:
+        print(
+            _format_section_title(
+                f"{sec}. Country medal table ({cat_name} {disc_name}): none", args
+            )
+        )
+        print()
+    else:
+        sorted_countries = sorted(
+            medal_counts.items(),
+            key=lambda x: (x[1]["gold"], x[1]["silver"], x[1]["bronze"]),
+            reverse=True,
+        )
+        print(
+            _format_section_title(
+                f"{sec}. Country medal table ({cat_name} {disc_name}):", args
+            )
+        )
+        medal_rows = []
+        for idx, (country, counts) in enumerate(sorted_countries, 1):
+            total = counts["gold"] + counts["silver"] + counts["bronze"]
+            medal_rows.append(
+                [
+                    str(idx),
+                    country,
+                    str(counts["gold"]),
+                    str(counts["silver"]),
+                    str(counts["bronze"]),
+                    str(total),
+                ]
+            )
+        render_table(
+            [
+                "#",
+                "Country",
+                Color.gold("Gold"),
+                Color.silver("Silver"),
+                Color.bronze("Bronze"),
+                "Total",
+            ],
+            medal_rows,
+            pretty=pretty,
+        )
+        print()
+
+    # Section: Country medal table (all Olympic disciplines)
+    sec += 1
+    if not all_country_medals:
+        print(
+            _format_section_title(
+                f"{sec}. Country medal table (all Olympic disciplines): none", args
+            )
+        )
+        print()
+    else:
+        all_country_counts: dict[str, dict[str, int]] = {}
+        for m in all_country_medals:
+            for medal_type in ("gold", "silver", "bronze"):
+                nat = m.get(medal_type, "")
+                if not nat:
+                    continue
+                if nat not in all_country_counts:
+                    all_country_counts[nat] = {"gold": 0, "silver": 0, "bronze": 0}
+                all_country_counts[nat][medal_type] += 1
+
+        sorted_all_countries = sorted(
+            all_country_counts.items(),
+            key=lambda x: (x[1]["gold"], x[1]["silver"], x[1]["bronze"]),
+            reverse=True,
+        )
+
+        print(
+            _format_section_title(
+                f"{sec}. Country medal table (all Olympic disciplines):", args
+            )
+        )
+        all_country_rows = []
+        for idx, (country, counts) in enumerate(sorted_all_countries, 1):
+            total = counts["gold"] + counts["silver"] + counts["bronze"]
+            all_country_rows.append(
+                [
+                    str(idx),
+                    country,
+                    str(counts["gold"]),
+                    str(counts["silver"]),
+                    str(counts["bronze"]),
+                    str(total),
+                ]
+            )
+        render_table(
+            [
+                "#",
+                "Country",
+                Color.gold("Gold"),
+                Color.silver("Silver"),
+                Color.bronze("Bronze"),
+                "Total",
+            ],
+            all_country_rows,
+            pretty=pretty,
+        )
+        print()
+
+    # Section: Athlete medal table (all Olympic disciplines)
+    sec += 1
+    race_medalist_ids = gold_ids | silver_ids | bronze_ids
+
+    def _medal_sort_key(x: tuple[str, dict]) -> tuple:
+        s = x[1]
+        return (
+            -s["gold"],
+            -s.get("gold_ind", 0),
+            -s.get("gold_relay", 0),
+            -s["silver"],
+            -s.get("silver_ind", 0),
+            -s.get("silver_relay", 0),
+            -s["bronze"],
+            -s.get("bronze_ind", 0),
+            -s.get("bronze_relay", 0),
+            -(s["gold"] + s["silver"] + s["bronze"]),
+            -(s.get("gold_ind", 0) + s.get("silver_ind", 0) + s.get("bronze_ind", 0)),
+            -(
+                s.get("gold_relay", 0)
+                + s.get("silver_relay", 0)
+                + s.get("bronze_relay", 0)
+            ),
+            s["races"],
+        )
+
+    # Sort ALL medalists to get correct ranks, then filter display list
+    all_medalists = [
+        (key, stats)
+        for key, stats in all_athlete_stats.items()
+        if stats["gold"] > 0 or stats["silver"] > 0 or stats["bronze"] > 0
+    ]
+    all_medalists.sort(key=_medal_sort_key)
+    # Build ranked list: keep gold medalists + race medalists + participants with any medal
+    medalists = [
+        (rank, key, stats)
+        for rank, (key, stats) in enumerate(all_medalists, 1)
+        if stats["gold"] > 0 or key in race_medalist_ids or key in participating_ids
+    ]
+
+    if not medalists:
+        print(
+            _format_section_title(
+                f"{sec}. Athlete medal table (all Olympic disciplines): none", args
+            )
+        )
+        print()
+    else:
+        print(
+            _format_section_title(
+                f"{sec}. Athlete medal table (all Olympic disciplines):", args
+            )
+        )
+        all_rows = []
+        all_row_styles = []
+        for rank, key, stats in medalists:
+            gold = stats["gold"]
+            silver = stats["silver"]
+            bronze = stats["bronze"]
+            total = gold + silver + bronze
+            races = stats["races"]
+            gold_ind = stats.get("gold_ind", 0)
+            silver_ind = stats.get("silver_ind", 0)
+            bronze_ind = stats.get("bronze_ind", 0)
+            total_ind = gold_ind + silver_ind + bronze_ind
+            races_ind = stats.get("races_ind", 0)
+            gold_relay = stats.get("gold_relay", 0)
+            silver_relay = stats.get("silver_relay", 0)
+            bronze_relay = stats.get("bronze_relay", 0)
+            total_relay = gold_relay + silver_relay + bronze_relay
+            races_relay = stats.get("races_relay", 0)
+            all_rows.append(
+                [
+                    str(rank),
+                    stats["name"],
+                    stats["nat"],
+                    stats["gender"],
+                    str(gold),
+                    str(silver),
+                    str(bronze),
+                    str(total),
+                    str(races),
+                    str(gold_ind),
+                    str(silver_ind),
+                    str(bronze_ind),
+                    str(total_ind),
+                    str(races_ind),
+                    str(gold_relay),
+                    str(silver_relay),
+                    str(bronze_relay),
+                    str(total_relay),
+                    str(races_relay),
+                ]
+            )
+            # Row styling: gold/silver/bronze for race medalists, highlight for participants
+            if key in gold_ids:
+                all_row_styles.append("gold")
+            elif key in silver_ids:
+                all_row_styles.append("silver")
+            elif key in bronze_ids:
+                all_row_styles.append("bronze")
+            elif key in participating_ids:
+                all_row_styles.append("highlight")
+            else:
+                all_row_styles.append("dim")
+        render_table(
+            [
+                "#",
+                "Athlete",
+                "Nat",
+                "Gender",
+                Color.gold("Gold"),
+                Color.silver("Silver"),
+                Color.bronze("Bronze"),
+                "Total",
+                "Races",
+                Color.gold("Gold"),
+                Color.silver("Silver"),
+                Color.bronze("Bronze"),
+                "Total",
+                "Races",
+                Color.gold("Gold"),
+                Color.silver("Silver"),
+                Color.bronze("Bronze"),
+                "Total",
+                "Races",
+            ],
+            all_rows,
+            pretty=pretty,
+            row_styles=all_row_styles,
+            column_separators={4, 9, 14},
+            group_headers=[(4, 9, "All"), (9, 14, "Individual"), (14, 19, "Relay")],
+        )
+        print()
+
+    return sec
 
 
 def handle_post_race(args: argparse.Namespace) -> int:
@@ -1292,5 +1607,35 @@ def handle_post_race(args: argparse.Namespace) -> int:
             _format_section_title(f"{sec}. Top 6 fastest shooters (0 miss): none", args)
         )
         print()
+
+    # Olympic medal tables
+    if event_type == EVENT_TYPE_OWG:
+        # Build rank-specific ID sets for medal row styling
+        gold_ids: set[str] = set()
+        silver_ids: set[str] = set()
+        bronze_ids: set[str] = set()
+        for entry in flower_entries:
+            ibu_id = entry.get("ibu_id", "")
+            if not ibu_id:
+                continue
+            rank_val = entry["rank"]
+            if rank_val == 1:
+                gold_ids.add(ibu_id)
+            elif rank_val == 2:
+                silver_ids.add(ibu_id)
+            elif rank_val == 3:
+                bronze_ids.add(ibu_id)
+
+        sec = _render_olympic_medal_sections(
+            args,
+            sec,
+            discipline,
+            cat_id or str(comp.get("catId") or comp.get("CatId") or "").upper(),
+            is_relay,
+            participating_ids,
+            gold_ids,
+            silver_ids,
+            bronze_ids,
+        )
 
     return 0
