@@ -270,7 +270,7 @@ def _make_name_formatter(
     def _formatter(cell_str: str, row_idx: int) -> str:
         text = cell_str.strip()
         tokens = text.split()
-        markers = []
+        markers: list[str] = []
         while tokens and tokens[-1] in {
             GENERAL_LEADER_MARKER,
             DISCIPLINE_LEADER_MARKER,
@@ -358,12 +358,12 @@ def _build_standings_rows(
     for entry in entries:
         rows_out.append(
             [
-                entry["rank"],
-                entry["name"],
-                entry["nat"],
+                str(entry["rank"]),
+                str(entry["name"]),
+                str(entry["nat"]),
                 _format_race_points(entry["race_points"]),
                 _format_points(entry["total_points"]),
-                entry["change"],
+                str(entry["change"]),
             ]
         )
         row_styles.append("" if entry["participated"] else "dim")
@@ -814,7 +814,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
     level_set = MAJOR_LEVELS if use_major else {"WC"}
 
     race_milestones = []
-    top_milestones: list[list[str]] = []
+    top_milestones: list[list] = []
     race_milestone_ids: set[str] = set()
     processed_ids: set[str] = set()
     all_results_cache: dict[str, list[dict]] = {}
@@ -1074,7 +1074,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 print(athlete_header)
             # Convert milestone numbers to ordinal, only show Milestone and Type
             # Track which rows have multiples of 5 for highlighting
-            display_rows = [[_ordinal(row[0]), row[1]] for row in group_rows]
+            display_rows = [[_ordinal(int(row[0])), row[1]] for row in group_rows]
             row_styles = [
                 "highlight" if row[0] == 1 or row[0] % 5 == 0 else ""
                 for row in group_rows
@@ -1106,12 +1106,12 @@ def handle_post_race(args: argparse.Namespace) -> int:
         if is_relay:
             headers.insert(3, "Leg")
         rows = []
-        for row in lap_rows:
-            ibu_id = name_nat_to_id.get((row["name"], row["nat"]), "")
-            name = decorate_any(row["name"], row["nat"], ibu_id)
-            data = [row["time"], name, row["nat"], row["lap"]]
+        for lap_row in lap_rows:
+            ibu_id = name_nat_to_id.get((lap_row["name"], lap_row["nat"]), "")
+            name = decorate_any(lap_row["name"], lap_row["nat"], ibu_id)
+            data = [lap_row["time"], name, lap_row["nat"], lap_row["lap"]]
             if is_relay:
-                data.insert(3, row["leg"] or "-")
+                data.insert(3, lap_row["leg"] or "-")
             rows.append(data)
         cell_formatters = [None, name_formatter_plain, None, None]
         if is_relay:
@@ -1152,10 +1152,11 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 if leg_secs <= 0:
                     prev_secs = total_secs
                     continue
-                entry = entry_by_leg.get((bib, leg))
-                if not entry:
+                entry_or_none = entry_by_leg.get((bib, leg))
+                if not entry_or_none:
                     prev_secs = total_secs
                     continue
+                entry = entry_or_none
                 leg_times.append(
                     [
                         leg_secs,
@@ -1203,11 +1204,11 @@ def handle_post_race(args: argparse.Namespace) -> int:
         }
         leg_course_rows = []
         for (bib, leg), secs in crst_times.items():
-            entry = leg_info.get((bib, leg))
-            if not entry:
+            leg_entry = leg_info.get((bib, leg))
+            if not leg_entry:
                 continue
             leg_course_rows.append(
-                [secs, entry["name"], entry["nat"], leg, format_seconds(secs)]
+                [secs, leg_entry["name"], leg_entry["nat"], leg, format_seconds(secs)]
             )
         leg_course_rows.sort(key=lambda row: row[0])
         leg_course_rows = leg_course_rows[:TOP_N]
@@ -1247,17 +1248,17 @@ def handle_post_race(args: argparse.Namespace) -> int:
     zero_miss_rows = []
     for stage_idx, times in stage_times.items():
         for key, secs in times.items():
-            entry = key_to_entry.get(key)
-            if not entry:
+            matched_entry = key_to_entry.get(key)
+            if not matched_entry:
                 continue
-            misses = _stage_miss_for_index(
+            stage_misses = _stage_miss_for_index(
                 stage_misses_map.get(key, []), stage_idx, discipline
             )
-            if misses is None or misses != 0:
+            if stage_misses is None or stage_misses != 0:
                 continue
-            stage_label = _stage_label(stage_idx, discipline, entry.get("leg"))
+            stage_label = _stage_label(stage_idx, discipline, matched_entry.get("leg"))
             zero_miss_rows.append(
-                [secs, entry["name"], entry["nat"], format_seconds(secs), stage_label]
+                [secs, matched_entry["name"], matched_entry["nat"], format_seconds(secs), stage_label]
             )
     zero_miss_rows.sort(key=lambda row: row[0])
     zero_miss_rows = zero_miss_rows[:TOP_N]
