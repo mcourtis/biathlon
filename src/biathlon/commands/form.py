@@ -416,7 +416,6 @@ def _extract_startlist_ibu_ids(payload: dict) -> tuple[set[str], str]:
 def _fetch_form_data(
     args: argparse.Namespace,
     gender_cat: str,
-    force_fetch_course_times: bool = False,
 ) -> FormData | None:
     """Fetch all form data (events, races, payloads, course times).
 
@@ -584,41 +583,38 @@ def _fetch_form_data(
     ]
     relay_race_ids = [rid for rid in all_completed_race_ids if race_is_relay.get(rid)]
 
-    shoot_mode = getattr(args, "shoot", False)
-
-    # Fetch course times (only needed in rank mode, not shoot mode, unless forced)
+    # Fetch course times
     race_course_times: dict[str, dict[str, float]] = {}
     relay_leg_course_times: dict[str, dict[tuple[str, int], float]] = {}
-    if not shoot_mode or force_fetch_course_times:
-        if individual_race_ids:
-            with ThreadPoolExecutor(
-                max_workers=_max_workers(len(individual_race_ids), cap=8)
-            ) as executor:
-                ct_futures = {
-                    executor.submit(_fetch_course_times, rid): rid
-                    for rid in individual_race_ids
-                }
-                for fut in as_completed(ct_futures):
-                    rid = ct_futures[fut]
-                    try:
-                        race_course_times[rid] = fut.result()
-                    except BiathlonError:
-                        race_course_times[rid] = {}
+    if individual_race_ids:
+        with ThreadPoolExecutor(
+            max_workers=_max_workers(len(individual_race_ids), cap=8)
+        ) as executor:
+            ct_futures = {
+                executor.submit(_fetch_course_times, rid): rid
+                for rid in individual_race_ids
+            }
+            for fut in as_completed(ct_futures):
+                rid = ct_futures[fut]
+                try:
+                    race_course_times[rid] = fut.result()
+                except BiathlonError:
+                    race_course_times[rid] = {}
 
-        if relay_race_ids:
-            with ThreadPoolExecutor(
-                max_workers=_max_workers(len(relay_race_ids), cap=8)
-            ) as executor:
-                leg_futures = {
-                    executor.submit(_fetch_leg_course_times, rid): rid
-                    for rid in relay_race_ids
-                }
-                for leg_fut in as_completed(leg_futures):
-                    rid = leg_futures[leg_fut]
-                    try:
-                        relay_leg_course_times[rid] = leg_fut.result()
-                    except BiathlonError:
-                        relay_leg_course_times[rid] = {}
+    if relay_race_ids:
+        with ThreadPoolExecutor(
+            max_workers=_max_workers(len(relay_race_ids), cap=8)
+        ) as executor:
+            leg_futures = {
+                executor.submit(_fetch_leg_course_times, rid): rid
+                for rid in relay_race_ids
+            }
+            for leg_fut in as_completed(leg_futures):
+                rid = leg_futures[leg_fut]
+                try:
+                    relay_leg_course_times[rid] = leg_fut.result()
+                except BiathlonError:
+                    relay_leg_course_times[rid] = {}
 
     # Season race IDs = all completed (including removed disciplines)
     season_race_ids = all_completed_race_ids
@@ -1341,7 +1337,7 @@ def handle_form(args: argparse.Namespace) -> int:
                 else GENDER_TO_CAT["women"]
             )
 
-        data = _fetch_form_data(args, gender_cat, force_fetch_course_times=True)
+        data = _fetch_form_data(args, gender_cat)
         if data is None:
             return 1
 
@@ -1390,10 +1386,34 @@ def handle_form(args: argparse.Namespace) -> int:
     gender_cat = (
         GENDER_TO_CAT["men"] if getattr(args, "men", False) else GENDER_TO_CAT["women"]
     )
-    shoot_mode = getattr(args, "shoot", False)
 
     data = _fetch_form_data(args, gender_cat)
     if data is None:
         return 1
 
-    return _compute_and_render(data, args, shoot_mode=shoot_mode)
+    # Compute athletes for all three modes
+    result_athletes = _compute_athletes(data, args, shoot_mode=False, result_mode=True)
+    if result_athletes is None:
+        return 1
+    course_athletes = _compute_athletes(data, args, shoot_mode=False)
+    if course_athletes is None:
+        return 1
+    shoot_athletes = _compute_athletes(data, args, shoot_mode=True)
+    if shoot_athletes is None:
+        return 1
+
+    # Rank results table
+    print(_format_section_title("Rank results", args))
+    _render_form_table(result_athletes, data, args, shoot_mode=False)
+
+    print()
+
+    # Course time ranks table
+    print(_format_section_title("Course time ranks", args))
+    _render_form_table(course_athletes, data, args, shoot_mode=False)
+
+    print()
+
+    # Shooting accuracy table
+    print(_format_section_title("Shooting accuracy", args))
+    return _render_form_table(shoot_athletes, data, args, shoot_mode=True)

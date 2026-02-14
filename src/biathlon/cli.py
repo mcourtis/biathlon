@@ -748,11 +748,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--top", type=int, default=0, help="Filter to top N in WC standings"
     )
     form_parser.add_argument(
-        "--shoot",
-        action="store_true",
-        help="Show shooting accuracy instead of course time ranks",
-    )
-    form_parser.add_argument(
         "--min",
         type=int,
         default=50,
