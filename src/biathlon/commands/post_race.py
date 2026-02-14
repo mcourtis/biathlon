@@ -1258,7 +1258,13 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 continue
             stage_label = _stage_label(stage_idx, discipline, matched_entry.get("leg"))
             zero_miss_rows.append(
-                [secs, matched_entry["name"], matched_entry["nat"], format_seconds(secs), stage_label]
+                [
+                    secs,
+                    matched_entry["name"],
+                    matched_entry["nat"],
+                    format_seconds(secs),
+                    stage_label,
+                ]
             )
     zero_miss_rows.sort(key=lambda row: row[0])
     zero_miss_rows = zero_miss_rows[:TOP_N]
