@@ -40,7 +40,7 @@ from ._common import (
     detect_event_type,
     is_relay_discipline as _is_relay_discipline,
 )
-from .relay import _has_completed_results as _has_completed_relay_results
+from ._common import _has_completed_relay_results
 from .results import _find_latest_race_with_results_any, _has_completed_results
 from .startlist import _get_cup_ids_for_race, _get_wc_points
 
@@ -1193,7 +1193,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             )
             print()
 
-        from .relay import _fetch_analytic_times
+        from ._common import _fetch_relay_analytic_times as _fetch_analytic_times
 
         crst_times = _fetch_analytic_times(race_id, "CRST")
         leg_info = {

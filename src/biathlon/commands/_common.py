@@ -9,7 +9,7 @@ from typing import Any, Callable
 from ..api import BiathlonError, get_analytic_results
 from ..constants import EVENT_TYPE_OWG, EVENT_TYPE_WC, EVENT_TYPE_WCH, RELAY_DISCIPLINES
 from ..formatting import Color, is_pretty_output
-from ..utils import get_first_time
+from ..utils import get_first_time, parse_time_seconds
 
 
 # Leader marker characters
@@ -235,3 +235,53 @@ def _fetch_leg_lap_times(
                 if name:
                     times.setdefault((name, leg_idx), {})[f"lap{local_idx}"] = time_str
     return times
+
+
+# ---------------------------------------------------------------------------
+# Relay-specific analytics helpers
+# ---------------------------------------------------------------------------
+
+
+def _fetch_relay_analytic_times(
+    race_id: str, type_id: str
+) -> dict[tuple[str, int], float]:
+    """Fetch analytic times and return dict keyed by (Bib, Leg) -> seconds."""
+    times: dict[tuple[str, int], float] = {}
+    try:
+        analytic = get_analytic_results(race_id, type_id)
+    except BiathlonError:
+        return times
+    for res in analytic.get("Results", []):
+        if res.get("IsTeam"):
+            continue
+        bib = str(res.get("Bib") or "")
+        leg = res.get("Leg")
+        if not bib or leg is None:
+            continue
+        time_str = get_first_time(res, ["TotalTime", "Result"])
+        if time_str:
+            seconds = parse_time_seconds(time_str)
+            if seconds is not None:
+                times[(bib, leg)] = seconds
+    return times
+
+
+def _has_completed_relay_results(payload: dict) -> bool:
+    """Return True when a relay race payload contains completed results."""
+    results = payload.get("Results", [])
+    if not results:
+        return False
+    for res in results:
+        if not res.get("IsTeam"):
+            continue
+        rank = res.get("Rank")
+        if rank is not None:
+            rank_text = str(rank).strip()
+            if rank_text and rank_text != "10000":
+                return True
+        result_val = res.get("Result") or res.get("TotalTime")
+        if result_val:
+            result_text = str(result_val).strip().upper()
+            if result_text and result_text not in {"DNS", "-"}:
+                return True
+    return False

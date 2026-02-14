@@ -41,8 +41,7 @@ from ..utils import (
     parse_start_datetime,
     parse_time_seconds,
 )
-from ._common import _row_ibu_id
-from .relay import _has_completed_results as _has_completed_relay_results
+from ._common import _has_completed_relay_results, _row_ibu_id
 from .standings import find_cup_id
 
 
@@ -382,7 +381,7 @@ def _build_relay_rows(
     payload: dict, race_id: str, first_n: int, discipline: str
 ) -> list[dict]:
     """Build relay team rows with leg details."""
-    from .relay import _fetch_analytic_times, _fetch_leg_lap_times
+    from ._common import _fetch_leg_lap_times, _fetch_relay_analytic_times as _fetch_analytic_times
 
     results = payload.get("Results", [])
     if not results:
