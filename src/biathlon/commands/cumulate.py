@@ -1269,7 +1269,10 @@ def handle_cumulate_penalty(args: argparse.Namespace) -> int:
                     )
                     for rid in relay_race_ids
                 }
-                all_futures: dict[Future, tuple[str, str]] = {**lap_futures, **course_futures}
+                all_futures: dict[Future, tuple[str, str]] = {
+                    **lap_futures,
+                    **course_futures,
+                }
                 for future in as_completed(all_futures):
                     kind, rid = all_futures[future]
                     try:
