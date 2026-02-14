@@ -582,14 +582,20 @@ def _get_alltime_venue_stats(
         )
 
     # Step 2: Fetch races for all venue events in parallel
-    event_ids: list[str] = [eid for _, event in all_events if (eid := event.get("EventId"))]
+    event_ids: list[str] = [
+        eid for _, event in all_events if (eid := event.get("EventId"))
+    ]
     event_to_season: dict[str, str] = {
-        eid: season_id for season_id, event in all_events if (eid := event.get("EventId"))
+        eid: season_id
+        for season_id, event in all_events
+        if (eid := event.get("EventId"))
     }
 
     all_races: list[tuple[str, str, dict]] = []  # (season_id, event_id, race)
     with ThreadPoolExecutor(max_workers=_max_workers(len(event_ids))) as executor:
-        ev_futures = {executor.submit(_fetch_venue_races, eid): eid for eid in event_ids}
+        ev_futures = {
+            executor.submit(_fetch_venue_races, eid): eid for eid in event_ids
+        }
         for future in as_completed(ev_futures):
             event_id = ev_futures[future]
             season_id = event_to_season.get(event_id, "")
@@ -615,14 +621,19 @@ def _get_alltime_venue_stats(
         )
 
     # Step 3: Fetch race results in parallel
-    race_ids: list[str] = [rid for _, _, race in all_races if (rid := race.get("RaceId") or race.get("Id"))]
+    race_ids: list[str] = [
+        rid for _, _, race in all_races if (rid := race.get("RaceId") or race.get("Id"))
+    ]
     race_to_info: dict[str, tuple[str, dict]] = {
         rid: (season_id, race)
-        for season_id, _, race in all_races if (rid := race.get("RaceId") or race.get("Id"))
+        for season_id, _, race in all_races
+        if (rid := race.get("RaceId") or race.get("Id"))
     }
 
     with ThreadPoolExecutor(max_workers=_max_workers(len(race_ids))) as executor:
-        race_futures = {executor.submit(_fetch_race_payload, rid): rid for rid in race_ids}
+        race_futures = {
+            executor.submit(_fetch_race_payload, rid): rid for rid in race_ids
+        }
         completed = 0
         for rf in as_completed(race_futures):
             completed += 1
@@ -862,14 +873,20 @@ def _get_alltime_major_event_stats(
         )
 
     # Step 2: Fetch races for all matched events in parallel
-    event_ids: list[str] = [eid for _, event in all_events if (eid := event.get("EventId"))]
+    event_ids: list[str] = [
+        eid for _, event in all_events if (eid := event.get("EventId"))
+    ]
     event_to_season: dict[str, str] = {
-        eid: season_id for season_id, event in all_events if (eid := event.get("EventId"))
+        eid: season_id
+        for season_id, event in all_events
+        if (eid := event.get("EventId"))
     }
 
     all_races: list[tuple[str, str, dict]] = []  # (season_id, event_id, race)
     with ThreadPoolExecutor(max_workers=_max_workers(len(event_ids))) as executor:
-        ev_futures = {executor.submit(_fetch_venue_races, eid): eid for eid in event_ids}
+        ev_futures = {
+            executor.submit(_fetch_venue_races, eid): eid for eid in event_ids
+        }
         for future in as_completed(ev_futures):
             event_id = ev_futures[future]
             season_id = event_to_season.get(event_id, "")
@@ -895,14 +912,19 @@ def _get_alltime_major_event_stats(
         )
 
     # Step 3: Fetch race results in parallel
-    race_ids: list[str] = [rid for _, _, race in all_races if (rid := race.get("RaceId") or race.get("Id"))]
+    race_ids: list[str] = [
+        rid for _, _, race in all_races if (rid := race.get("RaceId") or race.get("Id"))
+    ]
     race_to_info: dict[str, tuple[str, dict]] = {
         rid: (season_id, race)
-        for season_id, _, race in all_races if (rid := race.get("RaceId") or race.get("Id"))
+        for season_id, _, race in all_races
+        if (rid := race.get("RaceId") or race.get("Id"))
     }
 
     with ThreadPoolExecutor(max_workers=_max_workers(len(race_ids))) as executor:
-        race_futures = {executor.submit(_fetch_race_payload, rid): rid for rid in race_ids}
+        race_futures = {
+            executor.submit(_fetch_race_payload, rid): rid for rid in race_ids
+        }
         completed = 0
         for rf in as_completed(race_futures):
             completed += 1
@@ -1131,11 +1153,15 @@ def _get_alltime_major_event_stats_both(
 
     # Step 2: Fetch ALL races (both genders) for all events
     event_ids: list[str] = [eid for _, ev in all_events if (eid := ev.get("EventId"))]
-    event_to_season: dict[str, str] = {eid: sid for sid, ev in all_events if (eid := ev.get("EventId"))}
+    event_to_season: dict[str, str] = {
+        eid: sid for sid, ev in all_events if (eid := ev.get("EventId"))
+    }
 
     all_races: list[tuple[str, dict]] = []  # (season_id, race)
     with ThreadPoolExecutor(max_workers=_max_workers(len(event_ids))) as executor:
-        ev_futures = {executor.submit(_fetch_venue_races, eid): eid for eid in event_ids}
+        ev_futures = {
+            executor.submit(_fetch_venue_races, eid): eid for eid in event_ids
+        }
         for future in as_completed(ev_futures):
             event_id = ev_futures[future]
             season_id = event_to_season.get(event_id, "")
@@ -1152,11 +1178,17 @@ def _get_alltime_major_event_stats_both(
         )
 
     # Step 3: Fetch results for ALL races in parallel
-    race_ids: list[str] = [rid for _, r in all_races if (rid := r.get("RaceId") or r.get("Id"))]
-    race_to_info: dict[str, tuple[str, dict]] = {rid: (sid, r) for sid, r in all_races if (rid := r.get("RaceId") or r.get("Id"))}
+    race_ids: list[str] = [
+        rid for _, r in all_races if (rid := r.get("RaceId") or r.get("Id"))
+    ]
+    race_to_info: dict[str, tuple[str, dict]] = {
+        rid: (sid, r) for sid, r in all_races if (rid := r.get("RaceId") or r.get("Id"))
+    }
 
     with ThreadPoolExecutor(max_workers=_max_workers(len(race_ids))) as executor:
-        race_futures = {executor.submit(_fetch_race_payload, rid): rid for rid in race_ids}
+        race_futures = {
+            executor.submit(_fetch_race_payload, rid): rid for rid in race_ids
+        }
         completed = 0
         for rf in as_completed(race_futures):
             completed += 1
@@ -1870,9 +1902,7 @@ def _find_all_startlist_races() -> list[tuple[str, dict]]:
 
     # Collect race IDs
     race_ids: list[str] = [
-        rid
-        for r in all_races
-        if (rid := r.get("RaceId") or r.get("Id"))
+        rid for r in all_races if (rid := r.get("RaceId") or r.get("Id"))
     ]
 
     if not race_ids:
@@ -1881,7 +1911,9 @@ def _find_all_startlist_races() -> list[tuple[str, dict]]:
     # Fetch race results in parallel to check for startlists
     race_payloads: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=_max_workers(len(race_ids))) as executor:
-        result_futures = {executor.submit(get_race_results, rid): rid for rid in race_ids}
+        result_futures = {
+            executor.submit(get_race_results, rid): rid for rid in race_ids
+        }
         for res_f in as_completed(result_futures):
             rid = result_futures[res_f]
             try:
@@ -3255,7 +3287,9 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                         name = row.get("Name") or row.get("ShortName") or ""
                         nat = row.get("Nat") or ""
                         score = row.get("Score") or 0
-                        table_rows.append([str(rank).rstrip("."), name, nat, str(score)])
+                        table_rows.append(
+                            [str(rank).rstrip("."), name, nat, str(score)]
+                        )
                     render_table(
                         ["Rank", "Team/Athlete", "Nat", "Points"],
                         table_rows,
