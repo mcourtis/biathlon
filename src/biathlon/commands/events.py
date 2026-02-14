@@ -11,12 +11,14 @@ from ..formatting import is_pretty_output, render_table
 from ..utils import get_race_label, parse_date
 
 
-def format_level(level: object) -> str:
+def format_level(level: int | str | None) -> str:
     """Return human-readable event level."""
+    if level is None:
+        return ""
     try:
         lvl_int = int(level)
     except (TypeError, ValueError):
-        return str(level or "")
+        return str(level)
     level_names = {
         -1: "All levels",
         0: "Mixed levels",
@@ -59,7 +61,7 @@ def format_event_row(event: dict, race_count: int = 0) -> list[str]:
         country,
         start_date,
         end_date,
-        race_count,
+        str(race_count),
         event_id,
     ]
 
@@ -266,15 +268,13 @@ def _handle_events_summary(events: list[dict], pretty: bool, date_only) -> int:
         event_id = event.get("EventId")
         race_list = get_races(event_id) if event_id else []
         race_count = len(race_list)
-        flags = {
-            "individual": set(),
-            "sprint": set(),
-            "pursuit": set(),
-            "mass": set(),
-            "relay": set(),
-            "mixed_relay": False,
-            "single_mixed": False,
-        }
+        individual: set[str] = set()
+        sprint: set[str] = set()
+        pursuit: set[str] = set()
+        mass: set[str] = set()
+        relay: set[str] = set()
+        mixed_relay = False
+        single_mixed = False
 
         for race in race_list:
             name = (
@@ -291,24 +291,22 @@ def _handle_events_summary(events: list[dict], pretty: bool, date_only) -> int:
                 gender_tag = "M"
 
             if disc == "IN":
-                flags["individual"].add(gender_tag or "W+M")
+                individual.add(gender_tag or "W+M")
             elif disc == "SP":
-                flags["sprint"].add(gender_tag or "W+M")
+                sprint.add(gender_tag or "W+M")
             elif disc == "PU":
-                flags["pursuit"].add(gender_tag or "W+M")
+                pursuit.add(gender_tag or "W+M")
             elif disc == "MS":
-                flags["mass"].add(gender_tag or "W+M")
+                mass.add(gender_tag or "W+M")
             elif disc == "RL" or "relay" in name:
                 if "single" in name and "mixed" in name:
-                    flags["single_mixed"] = True
+                    single_mixed = True
                 elif "mixed" in name:
-                    flags["mixed_relay"] = True
+                    mixed_relay = True
                 else:
-                    flags["relay"].add(gender_tag or "W+M")
+                    relay.add(gender_tag or "W+M")
 
-        def mark(tags: set | bool, mixed: bool = False) -> str:
-            if isinstance(tags, bool):
-                return "X" if tags else ""
+        def mark_set(tags: set[str]) -> str:
             if not tags:
                 return ""
             if "W+M" in tags or ("W" in tags and "M" in tags):
@@ -329,14 +327,14 @@ def _handle_events_summary(events: list[dict], pretty: bool, date_only) -> int:
                 date_only(
                     event.get("StartDate") or event.get("FirstCompetitionDate") or ""
                 ),
-                race_count,
-                mark(flags["individual"]),
-                mark(flags["sprint"]),
-                mark(flags["pursuit"]),
-                mark(flags["mass"]),
-                mark(flags["relay"]),
-                mark(flags["mixed_relay"], mixed=True),
-                mark(flags["single_mixed"], mixed=True),
+                str(race_count),
+                mark_set(individual),
+                mark_set(sprint),
+                mark_set(pursuit),
+                mark_set(mass),
+                mark_set(relay),
+                "X" if mixed_relay else "",
+                "X" if single_mixed else "",
             ]
         )
 
@@ -427,7 +425,7 @@ def _handle_events_with_races(
                     short_label,
                     country,
                     event_start,
-                    race_count,
+                    str(race_count),
                     "",
                     "",
                     "",
@@ -470,7 +468,7 @@ def _handle_events_with_races(
                     short_label,
                     country,
                     event_start,
-                    race_count,
+                    str(race_count),
                     race_label,
                     race_start,
                     disc_id,
