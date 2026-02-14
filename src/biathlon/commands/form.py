@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 
@@ -439,7 +440,7 @@ def _fetch_form_data(
         return None
 
     # Get all races from all events in parallel
-    event_ids = [e.get("EventId") for e in events if e.get("EventId")]
+    event_ids: list[str] = [e["EventId"] for e in events if e.get("EventId")]
     all_races: list[dict] = []
     race_to_event: dict[str, str] = {}  # race_id -> event_id
 
@@ -550,13 +551,13 @@ def _fetch_form_data(
     with ThreadPoolExecutor(
         max_workers=_max_workers(len(fetch_candidate_ids), cap=8)
     ) as executor:
-        futures = {
+        payload_futures = {
             executor.submit(get_race_results, rid): rid for rid in fetch_candidate_ids
         }
-        for future in as_completed(futures):
-            rid = futures[future]
+        for fut in as_completed(payload_futures):
+            rid = payload_futures[fut]
             try:
-                race_payloads[rid] = future.result()
+                race_payloads[rid] = fut.result()
             except BiathlonError:
                 race_payloads[rid] = {}
 
@@ -593,14 +594,14 @@ def _fetch_form_data(
             with ThreadPoolExecutor(
                 max_workers=_max_workers(len(individual_race_ids), cap=8)
             ) as executor:
-                futures = {
+                ct_futures = {
                     executor.submit(_fetch_course_times, rid): rid
                     for rid in individual_race_ids
                 }
-                for future in as_completed(futures):
-                    rid = futures[future]
+                for fut in as_completed(ct_futures):
+                    rid = ct_futures[fut]
                     try:
-                        race_course_times[rid] = future.result()
+                        race_course_times[rid] = fut.result()
                     except BiathlonError:
                         race_course_times[rid] = {}
 
@@ -608,14 +609,14 @@ def _fetch_form_data(
             with ThreadPoolExecutor(
                 max_workers=_max_workers(len(relay_race_ids), cap=8)
             ) as executor:
-                futures = {
+                leg_futures = {
                     executor.submit(_fetch_leg_course_times, rid): rid
                     for rid in relay_race_ids
                 }
-                for future in as_completed(futures):
-                    rid = futures[future]
+                for leg_fut in as_completed(leg_futures):
+                    rid = leg_futures[leg_fut]
                     try:
-                        relay_leg_course_times[rid] = future.result()
+                        relay_leg_course_times[rid] = leg_fut.result()
                     except BiathlonError:
                         relay_leg_course_times[rid] = {}
 
@@ -1034,7 +1035,7 @@ def _render_form_table(
 
     # Build cell formatters for coloring
     # Skip Rank (0), Biathlete (1), Nat (2), WC (3) — start formatters at Current/Season
-    cell_formatters = None
+    cell_formatters: list[Callable | None] | None = None
     wc_col = 3
     if pretty:
         num_cols = len(headers)
@@ -1096,7 +1097,7 @@ def _render_form_table(
 
                 return _fmt
 
-        cell_formatters = [None] * num_cols
+        cell_formatters = [None] * num_cols  # type: ignore[assignment]
         # Skip WC column (index 3) — start color formatters at Current/Season
         for ci in range(wc_col + 1, num_cols):
             cell_formatters[ci] = _make_cell_formatter(ci)
@@ -1173,15 +1174,15 @@ def _render_combined_table(
         combined = combined[:limit]
 
     headers = ["Rank", "Biathlete", "Nat", "WC", "Score", "Course", "Shooting"]
-    rows = [
+    rows: list[list[str]] = [
         [
-            e["rank"],
-            e["name"],
-            e["nat"],
+            str(e["rank"]),
+            str(e["name"]),
+            str(e["nat"]),
             str(e["wc_rank"]) if e["wc_rank"] is not None else "-",
-            e["score"],
-            e["course_rank"],
-            e["shoot_rank"],
+            str(e["score"]),
+            str(e["course_rank"]),
+            str(e["shoot_rank"]),
         ]
         for e in combined
     ]
