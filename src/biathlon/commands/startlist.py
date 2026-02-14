@@ -582,16 +582,16 @@ def _get_alltime_venue_stats(
         )
 
     # Step 2: Fetch races for all venue events in parallel
-    event_ids = [event.get("EventId") for _, event in all_events]
-    event_to_season = {
-        event.get("EventId"): season_id for season_id, event in all_events
+    event_ids: list[str] = [eid for _, event in all_events if (eid := event.get("EventId"))]
+    event_to_season: dict[str, str] = {
+        eid: season_id for season_id, event in all_events if (eid := event.get("EventId"))
     }
 
     all_races: list[tuple[str, str, dict]] = []  # (season_id, event_id, race)
     with ThreadPoolExecutor(max_workers=_max_workers(len(event_ids))) as executor:
-        futures = {executor.submit(_fetch_venue_races, eid): eid for eid in event_ids}
-        for future in as_completed(futures):
-            event_id = futures[future]
+        ev_futures = {executor.submit(_fetch_venue_races, eid): eid for eid in event_ids}
+        for future in as_completed(ev_futures):
+            event_id = ev_futures[future]
             season_id = event_to_season.get(event_id, "")
             for race in future.result():
                 race_id = race.get("RaceId") or race.get("Id")
@@ -615,16 +615,16 @@ def _get_alltime_venue_stats(
         )
 
     # Step 3: Fetch race results in parallel
-    race_ids = [race.get("RaceId") or race.get("Id") for _, _, race in all_races]
-    race_to_info = {
-        (race.get("RaceId") or race.get("Id")): (season_id, race)
-        for season_id, _, race in all_races
+    race_ids: list[str] = [rid for _, _, race in all_races if (rid := race.get("RaceId") or race.get("Id"))]
+    race_to_info: dict[str, tuple[str, dict]] = {
+        rid: (season_id, race)
+        for season_id, _, race in all_races if (rid := race.get("RaceId") or race.get("Id"))
     }
 
     with ThreadPoolExecutor(max_workers=_max_workers(len(race_ids))) as executor:
-        futures = {executor.submit(_fetch_race_payload, rid): rid for rid in race_ids}
+        race_futures = {executor.submit(_fetch_race_payload, rid): rid for rid in race_ids}
         completed = 0
-        for future in as_completed(futures):
+        for rf in as_completed(race_futures):
             completed += 1
             if show_progress and completed % 10 == 0:
                 print(
@@ -634,11 +634,11 @@ def _get_alltime_venue_stats(
                     flush=True,
                 )
 
-            race_id, payload = future.result()
+            race_id, payload = rf.result()
             if not payload:
                 continue
 
-            season_id, race = race_to_info.get(race_id, ("", {}))
+            season_id, race = race_to_info.get(race_id) or ("", {})
             is_current_season = str(season_id) == str(current_season)
 
             disc = str(race.get("DisciplineId") or "").upper()
@@ -862,16 +862,16 @@ def _get_alltime_major_event_stats(
         )
 
     # Step 2: Fetch races for all matched events in parallel
-    event_ids = [event.get("EventId") for _, event in all_events]
-    event_to_season = {
-        event.get("EventId"): season_id for season_id, event in all_events
+    event_ids: list[str] = [eid for _, event in all_events if (eid := event.get("EventId"))]
+    event_to_season: dict[str, str] = {
+        eid: season_id for season_id, event in all_events if (eid := event.get("EventId"))
     }
 
     all_races: list[tuple[str, str, dict]] = []  # (season_id, event_id, race)
     with ThreadPoolExecutor(max_workers=_max_workers(len(event_ids))) as executor:
-        futures = {executor.submit(_fetch_venue_races, eid): eid for eid in event_ids}
-        for future in as_completed(futures):
-            event_id = futures[future]
+        ev_futures = {executor.submit(_fetch_venue_races, eid): eid for eid in event_ids}
+        for future in as_completed(ev_futures):
+            event_id = ev_futures[future]
             season_id = event_to_season.get(event_id, "")
             for race in future.result():
                 race_id = race.get("RaceId") or race.get("Id")
@@ -895,16 +895,16 @@ def _get_alltime_major_event_stats(
         )
 
     # Step 3: Fetch race results in parallel
-    race_ids = [race.get("RaceId") or race.get("Id") for _, _, race in all_races]
-    race_to_info = {
-        (race.get("RaceId") or race.get("Id")): (season_id, race)
-        for season_id, _, race in all_races
+    race_ids: list[str] = [rid for _, _, race in all_races if (rid := race.get("RaceId") or race.get("Id"))]
+    race_to_info: dict[str, tuple[str, dict]] = {
+        rid: (season_id, race)
+        for season_id, _, race in all_races if (rid := race.get("RaceId") or race.get("Id"))
     }
 
     with ThreadPoolExecutor(max_workers=_max_workers(len(race_ids))) as executor:
-        futures = {executor.submit(_fetch_race_payload, rid): rid for rid in race_ids}
+        race_futures = {executor.submit(_fetch_race_payload, rid): rid for rid in race_ids}
         completed = 0
-        for future in as_completed(futures):
+        for rf in as_completed(race_futures):
             completed += 1
             if show_progress and completed % 10 == 0:
                 print(
@@ -914,11 +914,11 @@ def _get_alltime_major_event_stats(
                     flush=True,
                 )
 
-            race_id, payload = future.result()
+            race_id, payload = rf.result()
             if not payload:
                 continue
 
-            season_id, race = race_to_info.get(race_id, ("", {}))
+            season_id, race = race_to_info.get(race_id) or ("", {})
             is_current_season = str(season_id) == str(current_season)
 
             disc = str(race.get("DisciplineId") or "").upper()
@@ -1130,14 +1130,14 @@ def _get_alltime_major_event_stats_both(
         )
 
     # Step 2: Fetch ALL races (both genders) for all events
-    event_ids = [ev.get("EventId") for _, ev in all_events]
-    event_to_season = {ev.get("EventId"): sid for sid, ev in all_events}
+    event_ids: list[str] = [eid for _, ev in all_events if (eid := ev.get("EventId"))]
+    event_to_season: dict[str, str] = {eid: sid for sid, ev in all_events if (eid := ev.get("EventId"))}
 
     all_races: list[tuple[str, dict]] = []  # (season_id, race)
     with ThreadPoolExecutor(max_workers=_max_workers(len(event_ids))) as executor:
-        futures = {executor.submit(_fetch_venue_races, eid): eid for eid in event_ids}
-        for future in as_completed(futures):
-            event_id = futures[future]
+        ev_futures = {executor.submit(_fetch_venue_races, eid): eid for eid in event_ids}
+        for future in as_completed(ev_futures):
+            event_id = ev_futures[future]
             season_id = event_to_season.get(event_id, "")
             for race in future.result():
                 if race.get("RaceId") or race.get("Id"):
@@ -1152,13 +1152,13 @@ def _get_alltime_major_event_stats_both(
         )
 
     # Step 3: Fetch results for ALL races in parallel
-    race_ids = [r.get("RaceId") or r.get("Id") for _, r in all_races]
-    race_to_info = {(r.get("RaceId") or r.get("Id")): (sid, r) for sid, r in all_races}
+    race_ids: list[str] = [rid for _, r in all_races if (rid := r.get("RaceId") or r.get("Id"))]
+    race_to_info: dict[str, tuple[str, dict]] = {rid: (sid, r) for sid, r in all_races if (rid := r.get("RaceId") or r.get("Id"))}
 
     with ThreadPoolExecutor(max_workers=_max_workers(len(race_ids))) as executor:
-        futures = {executor.submit(_fetch_race_payload, rid): rid for rid in race_ids}
+        race_futures = {executor.submit(_fetch_race_payload, rid): rid for rid in race_ids}
         completed = 0
-        for future in as_completed(futures):
+        for rf in as_completed(race_futures):
             completed += 1
             if show_progress and completed % 10 == 0:
                 print(
@@ -1168,11 +1168,11 @@ def _get_alltime_major_event_stats_both(
                     flush=True,
                 )
 
-            race_id, payload = future.result()
+            race_id, payload = rf.result()
             if not payload:
                 continue
 
-            season_id, race = race_to_info.get(race_id, ("", {}))
+            season_id, race = race_to_info.get(race_id) or ("", {})
             is_current = str(season_id) == str(current_season)
             race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
             disc = str(race.get("DisciplineId") or "").upper()
@@ -1617,7 +1617,7 @@ def _compute_what_if_scenarios(
             continue
 
         # Build ranked list of athletes
-        ranked = []
+        ranked: list[dict[str, Any]] = []
         for row in standings:
             rank = _rank(row)
             if rank > 0:
@@ -1652,7 +1652,7 @@ def _compute_what_if_scenarios(
             ]
 
         # Case 1: Both racing - show direct scenarios
-        if leader_racing and chaser_racing:
+        if leader_racing and chaser_racing and chaser:
             other_contenders = _get_other_contenders(
                 {leader["ibu_id"], chaser["ibu_id"]}
             )
@@ -1733,7 +1733,7 @@ def _render_standings_section(
             name = name_formatter(name, str(ibu_id))
         if startlist_ids and ibu_id not in startlist_ids:
             missing_rows.add(idx)
-        rows.append([str(rank).rstrip("."), name, nat, points])
+        rows.append([str(rank).rstrip("."), name, nat, str(points)])
 
     def row_dimmer(cell_str: str, row_idx: int) -> str:
         return Color.dim(cell_str) if row_idx in missing_rows else cell_str
@@ -1869,10 +1869,10 @@ def _find_all_startlist_races() -> list[tuple[str, dict]]:
                 continue
 
     # Collect race IDs
-    race_ids = [
-        r.get("RaceId") or r.get("Id")
+    race_ids: list[str] = [
+        rid
         for r in all_races
-        if r.get("RaceId") or r.get("Id")
+        if (rid := r.get("RaceId") or r.get("Id"))
     ]
 
     if not race_ids:
@@ -1881,11 +1881,11 @@ def _find_all_startlist_races() -> list[tuple[str, dict]]:
     # Fetch race results in parallel to check for startlists
     race_payloads: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=_max_workers(len(race_ids))) as executor:
-        futures = {executor.submit(get_race_results, rid): rid for rid in race_ids}
-        for future in as_completed(futures):
-            rid = futures[future]
+        result_futures = {executor.submit(get_race_results, rid): rid for rid in race_ids}
+        for res_f in as_completed(result_futures):
+            rid = result_futures[res_f]
             try:
-                race_payloads[rid] = future.result()
+                race_payloads[rid] = res_f.result()
             except BiathlonError:
                 continue
 
@@ -2981,16 +2981,16 @@ def _render_olympic_individual_sections(
                 args,
             )
         )
-        athlete_rows = []
-        row_styles = []
+        athlete_rows: list[list[str]] = []
+        row_styles: list[str] = []
         for idx, (full_name, counts) in enumerate(sorted_athletes, 1):
             total = counts["gold"] + counts["silver"] + counts["bronze"]
             athlete_rows.append(
                 [
                     str(idx),
                     full_name,
-                    counts["nat"],
-                    counts["gender"],
+                    str(counts["nat"]),
+                    str(counts["gender"]),
                     str(counts["gold"]),
                     str(counts["silver"]),
                     str(counts["bronze"]),
@@ -3255,7 +3255,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                         name = row.get("Name") or row.get("ShortName") or ""
                         nat = row.get("Nat") or ""
                         score = row.get("Score") or 0
-                        table_rows.append([str(rank).rstrip("."), name, nat, score])
+                        table_rows.append([str(rank).rstrip("."), name, nat, str(score)])
                     render_table(
                         ["Rank", "Team/Athlete", "Nat", "Points"],
                         table_rows,
@@ -4537,7 +4537,7 @@ def render_venue_history(
             s_id = season.get("SeasonId")
             if not s_id:
                 continue
-            season_races: list[tuple[str, str]] = []  # (date, race_id)
+            venue_season_races: list[tuple[str, str]] = []  # (date, race_id)
             for level in _event_levels(use_major):
                 try:
                     events = get_events(str(s_id), level=level)
@@ -4572,10 +4572,10 @@ def render_venue_history(
                             if isinstance(start_raw, str)
                             else ""
                         )
-                        season_races.append((race_date, race_id_check))
+                        venue_season_races.append((race_date, race_id_check))
             # Sort this season's races by date descending
-            season_races.sort(key=lambda x: x[0], reverse=True)
-            for race_date, past_race_id in season_races:
+            venue_season_races.sort(key=lambda x: x[0], reverse=True)
+            for race_date, past_race_id in venue_season_races:
                 if len(venue_winner_rows) >= 5:
                     break
                 try:
