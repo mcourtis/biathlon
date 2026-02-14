@@ -50,7 +50,3 @@ packages = ["biathlon"]
 ignore_missing_imports = true
 check_untyped_defs = false
 disallow_untyped_defs = false
-
-[[tool.mypy.overrides]]
-module = "biathlon.*"
-ignore_errors = true
