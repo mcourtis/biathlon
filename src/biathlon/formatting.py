@@ -299,7 +299,7 @@ def render_table(
     rows: list[list[str]],
     pretty: bool,
     row_styles: list[str] | None = None,
-    cell_formatters: list[Callable] | None = None,
+    cell_formatters: list[Callable | None] | None = None,
     alignments: list[str] | None = None,
     highlight_headers: list[int] | None = None,
     highlight_header_styles: dict[int, str] | None = None,
@@ -364,8 +364,9 @@ def render_table(
                 and col_idx < len(cell_formatters)
                 and cell_formatters[col_idx]
             )
-            if has_formatter and cell_formatters:
-                cell_str = cell_formatters[col_idx](cell_str, row_idx)
+            formatter = cell_formatters[col_idx] if has_formatter and cell_formatters else None
+            if formatter:
+                cell_str = formatter(cell_str, row_idx)
             elif style:
                 cell_str = apply_row_style(cell_str, style)
             formatted_row.append(cell_str)
