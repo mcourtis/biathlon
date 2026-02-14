@@ -41,6 +41,7 @@ from ._common import (
     _ordinal,
     _parse_rank,
     _row_ibu_id,
+    _select_race_interactive,
     detect_event_type,
     is_mixed_relay as _is_mixed_relay,
     is_relay_discipline as _is_relay_disc,
@@ -1940,51 +1941,6 @@ def _find_all_startlist_races() -> list[tuple[str, dict]]:
     races.sort(key=lambda entry: (entry[0] is None, entry[0]))
 
     return [(rid, p) for _, rid, p in races]
-
-
-def _select_race_interactive(candidates: list[tuple[str, dict]]) -> tuple[str, dict]:
-    """Prompt user to select from multiple races.
-
-    If only one candidate or not a TTY, auto-select the first.
-    """
-    if len(candidates) == 1:
-        return candidates[0]
-
-    # Check if we can prompt (is a TTY)
-    if not sys.stdin.isatty():
-        # Non-interactive: auto-select and inform user
-        race_id, payload = candidates[0]
-        print(f"Multiple startlists found, using: {race_id}", file=sys.stderr)
-        return candidates[0]
-
-    # Display options
-    print("\nMultiple races with startlists found:\n", file=sys.stderr)
-    for idx, (race_id, payload) in enumerate(candidates, 1):
-        comp = payload.get("Competition") or {}
-        sport_evt = payload.get("SportEvt") or {}
-        cat = comp.get("catId") or comp.get("CatId") or "?"
-        disc = comp.get("DisciplineId") or "?"
-        venue = sport_evt.get("Organizer") or sport_evt.get("ShortDescription") or ""
-        start = comp.get("StartTime") or ""
-
-        cat_label = {"SW": "Women", "SM": "Men", "MX": "Mixed"}.get(cat, cat)
-        status = comp.get("StatusText") or ""
-        status_part = f" | Status: {status}" if status else ""
-        print(f"  {idx}. {cat_label}'s {disc} - {venue}", file=sys.stderr)
-        print(f"     Start: {start} | ID: {race_id}{status_part}\n", file=sys.stderr)
-
-    # Get user selection
-    while True:
-        try:
-            choice = input(f"Enter selection (1-{len(candidates)}): ").strip()
-            idx = int(choice) - 1
-            if 0 <= idx < len(candidates):
-                return candidates[idx]
-            print("Invalid selection, try again.", file=sys.stderr)
-        except ValueError:
-            print("Please enter a number.", file=sys.stderr)
-        except (EOFError, KeyboardInterrupt):
-            raise BiathlonError("Selection cancelled")
 
 
 def _build_startlist_entries(payload: dict) -> list[dict]:

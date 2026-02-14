@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
@@ -111,6 +112,51 @@ def is_mixed_relay(discipline: str, category: str) -> bool:
     if discipline in {"MR", "SR"}:
         return True
     return discipline == "RL" and category == "MX"
+
+
+def _select_race_interactive(candidates: list[tuple[str, dict]]) -> tuple[str, dict]:
+    """Prompt user to select from multiple races.
+
+    If only one candidate or not a TTY, auto-select the first.
+    """
+    if len(candidates) == 1:
+        return candidates[0]
+
+    # Check if we can prompt (is a TTY)
+    if not sys.stdin.isatty():
+        # Non-interactive: auto-select and inform user
+        race_id, payload = candidates[0]
+        print(f"Multiple races found, using: {race_id}", file=sys.stderr)
+        return candidates[0]
+
+    # Display options
+    print("\nMultiple races found:\n", file=sys.stderr)
+    for idx, (race_id, payload) in enumerate(candidates, 1):
+        comp = payload.get("Competition") or {}
+        sport_evt = payload.get("SportEvt") or {}
+        cat = comp.get("catId") or comp.get("CatId") or "?"
+        disc = comp.get("DisciplineId") or "?"
+        venue = sport_evt.get("Organizer") or sport_evt.get("ShortDescription") or ""
+        start = comp.get("StartTime") or ""
+
+        cat_label = {"SW": "Women", "SM": "Men", "MX": "Mixed"}.get(cat, cat)
+        status = comp.get("StatusText") or ""
+        status_part = f" | Status: {status}" if status else ""
+        print(f"  {idx}. {cat_label}'s {disc} - {venue}", file=sys.stderr)
+        print(f"     Start: {start} | ID: {race_id}{status_part}\n", file=sys.stderr)
+
+    # Get user selection
+    while True:
+        try:
+            choice = input(f"Enter selection (1-{len(candidates)}): ").strip()
+            idx = int(choice) - 1
+            if 0 <= idx < len(candidates):
+                return candidates[idx]
+            print("Invalid selection, try again.", file=sys.stderr)
+        except ValueError:
+            print("Please enter a number.", file=sys.stderr)
+        except (EOFError, KeyboardInterrupt):
+            raise BiathlonError("Selection cancelled")
 
 
 # ---------------------------------------------------------------------------

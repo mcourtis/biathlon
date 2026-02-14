@@ -271,6 +271,53 @@ def _find_latest_race_with_results_any() -> tuple[str, dict]:
     raise BiathlonError("No completed races with results found")
 
 
+def _find_recent_completed_races(count: int = 5) -> list[tuple[str, dict]]:
+    """Return the last *count* completed races, most recent first."""
+    now = datetime.datetime.now(datetime.timezone.utc)
+    season_id = get_current_season_id()
+    events = get_events(season_id, level=1)
+
+    races: list[tuple[str, str, str]] = []
+    for event in events:
+        event_id = event.get("EventId")
+        if not event_id:
+            continue
+        for race in get_races(event_id):
+            start_key = get_race_start_key(race)
+            race_id = race.get("RaceId") or race.get("Id") or ""
+            discipline = str(race.get("DisciplineId") or "").upper()
+            if race_id:
+                races.append((start_key, race_id, discipline))
+
+    races.sort(reverse=True)
+
+    found: list[tuple[str, dict]] = []
+    for start_key, race_id, discipline in races:
+        if len(found) >= count:
+            break
+        try:
+            payload = get_race_results(race_id)
+        except BiathlonError:
+            continue
+        comp = payload.get("Competition") or {}
+        start_raw = comp.get("StartTime") or start_key
+        start_dt = parse_start_datetime(
+            start_raw if isinstance(start_raw, str) else None
+        )
+        if start_dt and start_dt > now:
+            continue
+        if discipline in (RELAY_DISCIPLINE, SINGLE_MIXED_RELAY_DISCIPLINE):
+            if _has_completed_relay_results(payload):
+                found.append((race_id, payload))
+        else:
+            if _has_completed_results(payload):
+                found.append((race_id, payload))
+
+    if not found:
+        raise BiathlonError("No completed races with results found")
+    return found
+
+
 def _find_latest_race_by_discipline(
     discipline: str, mixed_mode: str, cat_filter: str | None
 ) -> tuple[str, dict]:

@@ -34,14 +34,15 @@ from ._common import (
     DISCIPLINE_LEADER_MARKER,
     GENERAL_LEADER_MARKER,
     _format_section_title,
+    _has_completed_relay_results,
     _ordinal,
     _parse_rank,
     _row_ibu_id,
+    _select_race_interactive,
     detect_event_type,
     is_relay_discipline as _is_relay_discipline,
 )
-from ._common import _has_completed_relay_results
-from .results import _find_latest_race_with_results_any, _has_completed_results
+from .results import _find_recent_completed_races, _has_completed_results
 from .startlist import _get_cup_ids_for_race, _get_wc_points
 
 
@@ -542,7 +543,8 @@ def handle_post_race(args: argparse.Namespace) -> int:
             race_id = args.race
             payload = get_race_results(race_id)
         else:
-            race_id, payload = _find_latest_race_with_results_any()
+            candidates = _find_recent_completed_races(5)
+            race_id, payload = _select_race_interactive(candidates)
     except BiathlonError as exc:
         print(str(exc), file=sys.stderr)
         return 1

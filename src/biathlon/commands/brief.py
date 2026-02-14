@@ -37,6 +37,7 @@ from ._common import (
 )
 from .post_race import handle_post_race
 from .results import _get_wc_rows
+from ._common import _select_race_interactive
 from .startlist import (
     _build_startlist_entries,
     _build_team_entries,
@@ -47,7 +48,6 @@ from .startlist import (
     _is_true,
     _parse_leg,
     _prepare_startlist_context,
-    _select_race_interactive,
     render_startlist_analysis,
 )
 

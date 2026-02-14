@@ -40,7 +40,8 @@ from ._common import (
     is_relay_discipline as _is_relay,
 )
 from .results import _get_top_n_ibu_ids, _get_wc_rows
-from .startlist import _find_all_startlist_races, _select_race_interactive
+from ._common import _select_race_interactive
+from .startlist import _find_all_startlist_races
 
 
 # Mapping from discipline names to codes
