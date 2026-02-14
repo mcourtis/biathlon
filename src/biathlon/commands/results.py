@@ -381,7 +381,10 @@ def _build_relay_rows(
     payload: dict, race_id: str, first_n: int, discipline: str
 ) -> list[dict]:
     """Build relay team rows with leg details."""
-    from ._common import _fetch_leg_lap_times, _fetch_relay_analytic_times as _fetch_analytic_times
+    from ._common import (
+        _fetch_leg_lap_times,
+        _fetch_relay_analytic_times as _fetch_analytic_times,
+    )
 
     results = payload.get("Results", [])
     if not results:
