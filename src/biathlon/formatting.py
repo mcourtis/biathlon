@@ -364,7 +364,7 @@ def render_table(
                 and col_idx < len(cell_formatters)
                 and cell_formatters[col_idx]
             )
-            if has_formatter:
+            if has_formatter and cell_formatters:
                 cell_str = cell_formatters[col_idx](cell_str, row_idx)
             elif style:
                 cell_str = apply_row_style(cell_str, style)
