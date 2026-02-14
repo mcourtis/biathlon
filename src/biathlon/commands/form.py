@@ -1225,7 +1225,16 @@ def _render_combined_table(
         combined = combined[:limit]
 
     if result_rank:
-        headers = ["Rank", "Biathlete", "Nat", "WC", "Score", "Result", "Course", "Shooting"]
+        headers = [
+            "Rank",
+            "Biathlete",
+            "Nat",
+            "WC",
+            "Score",
+            "Result",
+            "Course",
+            "Shooting",
+        ]
         rows: list[list[str]] = [
             [
                 str(e["rank"]),

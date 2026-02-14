@@ -2,7 +2,6 @@
 
 import datetime
 
-import pytest
 
 from biathlon.utils import (
     parse_date,
@@ -140,7 +139,12 @@ class TestExtractResults:
         assert len(results) == 1
 
     def test_filters_teams(self):
-        payload = {"Results": [{"Rank": 1, "Name": "A"}, {"Rank": 2, "Name": "Team", "IsTeam": True}]}
+        payload = {
+            "Results": [
+                {"Rank": 1, "Name": "A"},
+                {"Rank": 2, "Name": "Team", "IsTeam": True},
+            ]
+        }
         results = extract_results(payload)
         assert len(results) == 1
         assert results[0]["Name"] == "A"

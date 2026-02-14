@@ -1,7 +1,5 @@
 """Tests for shared helpers in commands._common."""
 
-import argparse
-
 from biathlon.commands._common import (
     _max_workers,
     _ordinal,

@@ -2,7 +2,6 @@
 
 import argparse
 
-import pytest
 
 from biathlon.formatting import (
     format_seconds,
