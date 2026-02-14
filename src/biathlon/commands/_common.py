@@ -32,7 +32,7 @@ def _format_leader_markers(
     text = cell_str.rstrip()
     pad_len = len(cell_str) - len(text)
     tokens = text.split()
-    markers = []
+    markers: list[str] = []
     while tokens and tokens[-1] in {GENERAL_LEADER_MARKER, DISCIPLINE_LEADER_MARKER}:
         markers.insert(0, tokens.pop())
     base = " ".join(tokens)
