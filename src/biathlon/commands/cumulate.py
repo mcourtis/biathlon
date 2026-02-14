@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import sys
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from typing import Any
 
 from ..api import (
     BiathlonError,
@@ -86,7 +88,9 @@ def _race_list(season_id: str, event_id: str | None) -> list[dict]:
     """Return list of races for season or event."""
     events = get_events(season_id, level=1) if not event_id else [{"EventId": event_id}]
     races: list[dict] = []
-    event_ids = [event.get("EventId") for event in events if event.get("EventId")]
+    event_ids: list[str] = [
+        event["EventId"] for event in events if event.get("EventId")
+    ]
     if not event_ids:
         return races
     if len(event_ids) == 1:
@@ -337,7 +341,7 @@ def _collect_races(
     allow_event: bool = True,
 ) -> tuple[list[tuple[str, dict]], str]:
     """Collect race payloads matching args; returns ([(race_id, payload)], season_id)."""
-    if not allow_event and getattr(args, "event", ""):
+    if not allow_event and getattr(args, "event", None):
         raise BiathlonError("--event is not supported for this subcommand")
     discipline_value = (
         discipline_override or getattr(args, "discipline", "all") or "all"
@@ -1190,8 +1194,8 @@ def handle_cumulate_miss(args: argparse.Namespace) -> int:
         rank_val = entry["misses"]
         rows.append({"rank_val": rank_val, "row": row})
     rows.sort(key=lambda r: (r["rank_val"], r["row"][1]))
-    for idx, row in enumerate(rows, start=1):
-        row["row"][0] = idx
+    for idx, r in enumerate(rows, start=1):
+        r["row"][0] = idx
     rows = _apply_limit(rows, args.limit)
     headers = [
         "Rank",
@@ -1265,7 +1269,7 @@ def handle_cumulate_penalty(args: argparse.Namespace) -> int:
                     )
                     for rid in relay_race_ids
                 }
-                all_futures = {**lap_futures, **course_futures}
+                all_futures: dict[Future, tuple[str, str]] = {**lap_futures, **course_futures}
                 for future in as_completed(all_futures):
                     kind, rid = all_futures[future]
                     try:
@@ -1529,8 +1533,8 @@ def handle_cumulate_cleansheet(args: argparse.Namespace) -> int:
         if _is_relay(payload):
             continue
         disc = str((payload.get("Competition") or {}).get("DisciplineId") or "").upper()
-        stages = 2 if disc == "SP" else 4
-        for s in range(1, stages + 1):
+        n_disc_stages = 2 if disc == "SP" else 4
+        for s in range(1, n_disc_stages + 1):
             analytic_requests.append((race_id, f"S{s}TM"))
             analytic_requests.append((race_id, f"RNG{s}"))
     prefetched_analytic = _prefetch_analytic_maps(analytic_requests)
@@ -1882,9 +1886,9 @@ def handle_cumulate_cleansheet(args: argparse.Namespace) -> int:
             }
         )
     sort_key = f"sort_{getattr(args, 'sort', 'cleansheets')}"
-    rows.sort(key=lambda r: (r[sort_key], r["row"][1]))
-    for idx, row in enumerate(rows, start=1):
-        row["row"][0] = idx
+    rows.sort(key=lambda r: (r[sort_key], r["row"][1]))  # type: ignore[index,misc]
+    for idx, r in enumerate(rows, start=1):
+        r["row"][0] = idx  # type: ignore[index]
     rows = _apply_limit(rows, args.limit)
     headers = [
         "Rank",
@@ -1919,7 +1923,7 @@ def handle_cumulate_cleansheet(args: argparse.Namespace) -> int:
             highlight_headers = [headers.index(sort_col)]
 
     # Build relative color-scale cell formatters
-    cell_formatters = None
+    cell_formatters: list[Callable[..., Any] | None] | None = None
     if pretty and rows:
         cell_formatters = [None] * len(headers)
 
@@ -2044,7 +2048,7 @@ def handle_cumulate_remontada(args: argparse.Namespace) -> int:
             start_rank = res.get("StartOrder") or res.get("StartPosition")
             finish_rank = res.get("Rank") or res.get("ResultOrder")
             try:
-                gain = int(start_rank) - int(finish_rank)
+                gain = int(start_rank) - int(finish_rank)  # type: ignore[arg-type]
             except (TypeError, ValueError):
                 gain = None
             ident = res.get("IBUId") or res.get("Name") or res.get("ShortName") or ""
@@ -2084,8 +2088,8 @@ def handle_cumulate_remontada(args: argparse.Namespace) -> int:
         row.append(f"+{avg_gain:.1f}" if avg_gain > 0 else f"{avg_gain:.1f}")
         rows.append({"rank_val": -entry["total_gain"], "row": row})
     rows.sort(key=lambda r: (r["rank_val"], r["row"][1]))
-    for idx, row in enumerate(rows, start=1):
-        row["row"][0] = idx
+    for idx, r in enumerate(rows, start=1):
+        r["row"][0] = idx
     rows = _apply_limit(rows, args.limit)
     headers = ["Rank", "Biathlete", "Country", "Races", "Gain"]
     headers.extend(labels)
