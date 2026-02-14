@@ -662,6 +662,7 @@ def _compute_athletes(
     args: argparse.Namespace,
     shoot_mode: bool,
     filter_ibu_ids: set[str] | None = None,
+    result_mode: bool = False,
 ) -> list[dict] | None:
     """Compute athlete form scores.
 
@@ -689,8 +690,37 @@ def _compute_athletes(
     race_ranks: dict[str, dict[str, int]] = {}
     relay_leg_ranks: dict[str, dict[tuple[str, int], int]] = {}
     race_accuracy: dict[str, dict[str, float]] = {}
+    # result_mode: direct finish ranks per race
+    race_result_ranks: dict[str, dict[str, int]] = {}
+    relay_team_ranks: dict[str, dict[str, int]] = {}  # Bib -> team rank
 
-    if shoot_mode:
+    if result_mode:
+        for rid in season_race_ids:
+            payload = race_payloads.get(rid, {})
+            results = payload.get("Results", [])
+            is_relay = race_is_relay.get(rid, False)
+            if is_relay:
+                team_rank_map: dict[str, int] = {}
+                for res in results:
+                    if res.get("IsTeam"):
+                        bib = str(res.get("Bib") or "")
+                        rank = res.get("Rank")
+                        if bib and rank and int(rank) != 10000:
+                            team_rank_map[bib] = int(rank)
+                relay_team_ranks[rid] = team_rank_map
+            else:
+                indiv_ranks: dict[str, int] = {}
+                for res in results:
+                    if res.get("IsTeam"):
+                        continue
+                    ibu_id = _row_ibu_id(res)
+                    if not ibu_id:
+                        continue
+                    rank = res.get("Rank")
+                    if rank and int(rank) != 10000:
+                        indiv_ranks[ibu_id] = int(rank)
+                race_result_ranks[rid] = indiv_ranks
+    elif shoot_mode:
         for rid in season_race_ids:
             payload = race_payloads.get(rid, {})
             results = payload.get("Results", [])
@@ -734,6 +764,7 @@ def _compute_athletes(
         if is_relay:
             leg_ranks = relay_leg_ranks.get(rid, {})
             acc = race_accuracy.get(rid, {}) if shoot_mode else {}
+            team_ranks = relay_team_ranks.get(rid, {}) if result_mode else {}
             discipline = race_discipline.get(rid, "")
             category = race_category.get(rid, "")
             is_mixed = _is_mixed_relay(discipline, category)
@@ -769,7 +800,11 @@ def _compute_athletes(
                 if not _is_valid_result(res):
                     continue
 
-                if shoot_mode:
+                if result_mode:
+                    bib = str(res.get("Bib") or "")
+                    if bib and bib in team_ranks:
+                        athletes[ibu_id]["ranks"][rid] = team_ranks[bib]
+                elif shoot_mode:
                     if ibu_id in acc:
                         athletes[ibu_id]["ranks"][rid] = acc[ibu_id]
                 else:
@@ -784,6 +819,7 @@ def _compute_athletes(
         else:
             ranks = race_ranks.get(rid, {})
             acc = race_accuracy.get(rid, {}) if shoot_mode else {}
+            result_ranks = race_result_ranks.get(rid, {}) if result_mode else {}
             for res in results:
                 if res.get("IsTeam"):
                     continue
@@ -808,7 +844,10 @@ def _compute_athletes(
                 if not _is_valid_result(res):
                     continue
 
-                if shoot_mode:
+                if result_mode:
+                    if ibu_id in result_ranks:
+                        athletes[ibu_id]["ranks"][rid] = result_ranks[ibu_id]
+                elif shoot_mode:
                     if ibu_id in acc:
                         athletes[ibu_id]["ranks"][rid] = acc[ibu_id]
                 else:
@@ -1118,8 +1157,9 @@ def _render_combined_table(
     course_athletes: list[dict],
     shoot_athletes: list[dict],
     args: argparse.Namespace,
+    result_athletes: list[dict] | None = None,
 ) -> int:
-    """Render combined course time + shooting ranking table."""
+    """Render combined course time + shooting (+ result) ranking table."""
     season_mode = getattr(args, "season", False)
     form_key = "season_form" if season_mode else "current_form"
 
@@ -1133,6 +1173,12 @@ def _render_combined_table(
     shoot_sorted = sorted(shoot_athletes, key=lambda a: (-a[form_key], a["name"]))
     shoot_rank: dict[str, int] = {a["ibu_id"]: i for i, a in enumerate(shoot_sorted, 1)}
 
+    # Rank result athletes (ascending — lower avg rank is better)
+    result_rank: dict[str, int] = {}
+    if result_athletes:
+        result_sorted = sorted(result_athletes, key=lambda a: (a[form_key], a["name"]))
+        result_rank = {a["ibu_id"]: i for i, a in enumerate(result_sorted, 1)}
+
     # Lookup for name/nat/wc_rank
     athlete_info: dict[str, tuple[str, str, int | None]] = {}
     for a in course_athletes:
@@ -1140,8 +1186,10 @@ def _render_combined_table(
     for a in shoot_athletes:
         athlete_info[a["ibu_id"]] = (a["name"], a["nat"], a.get("wc_rank"))
 
-    # Combine athletes present in both rankings
+    # Combine athletes present in all rankings
     common_ids = set(course_rank) & set(shoot_rank)
+    if result_rank:
+        common_ids &= set(result_rank)
     if not common_ids:
         print("no athletes found for combined ranking", file=sys.stderr)
         return 1
@@ -1150,15 +1198,18 @@ def _render_combined_table(
     for ibu_id in common_ids:
         cr = course_rank[ibu_id]
         sr = shoot_rank[ibu_id]
+        rr = result_rank.get(ibu_id, 0)
         name, nat, wc_rank = athlete_info[ibu_id]
+        score = cr + sr + rr if result_rank else cr + sr
         combined.append(
             {
                 "name": name,
                 "nat": nat,
                 "wc_rank": wc_rank,
-                "score": cr + sr,
+                "score": score,
                 "course_rank": cr,
                 "shoot_rank": sr,
+                "result_rank": rr,
             }
         )
 
@@ -1173,19 +1224,35 @@ def _render_combined_table(
     if limit > 0:
         combined = combined[:limit]
 
-    headers = ["Rank", "Biathlete", "Nat", "WC", "Score", "Course", "Shooting"]
-    rows: list[list[str]] = [
-        [
-            str(e["rank"]),
-            str(e["name"]),
-            str(e["nat"]),
-            str(e["wc_rank"]) if e["wc_rank"] is not None else "-",
-            str(e["score"]),
-            str(e["course_rank"]),
-            str(e["shoot_rank"]),
+    if result_rank:
+        headers = ["Rank", "Biathlete", "Nat", "WC", "Score", "Result", "Course", "Shooting"]
+        rows: list[list[str]] = [
+            [
+                str(e["rank"]),
+                str(e["name"]),
+                str(e["nat"]),
+                str(e["wc_rank"]) if e["wc_rank"] is not None else "-",
+                str(e["score"]),
+                str(e["result_rank"]),
+                str(e["course_rank"]),
+                str(e["shoot_rank"]),
+            ]
+            for e in combined
         ]
-        for e in combined
-    ]
+    else:
+        headers = ["Rank", "Biathlete", "Nat", "WC", "Score", "Course", "Shooting"]
+        rows = [
+            [
+                str(e["rank"]),
+                str(e["name"]),
+                str(e["nat"]),
+                str(e["wc_rank"]) if e["wc_rank"] is not None else "-",
+                str(e["score"]),
+                str(e["course_rank"]),
+                str(e["shoot_rank"]),
+            ]
+            for e in combined
+        ]
 
     pretty = is_pretty_output(args)
     row_styles = [rank_style(e["rank"]) for e in combined] if pretty else None
@@ -1269,7 +1336,7 @@ def handle_form(args: argparse.Namespace) -> int:
         if data is None:
             return 1
 
-        # Compute athletes for both modes
+        # Compute athletes for all three modes
         course_athletes = _compute_athletes(
             data, args, shoot_mode=False, filter_ibu_ids=startlist_ids
         )
@@ -1280,6 +1347,17 @@ def handle_form(args: argparse.Namespace) -> int:
         )
         if shoot_athletes is None:
             return 1
+        result_athletes = _compute_athletes(
+            data, args, shoot_mode=False, result_mode=True, filter_ibu_ids=startlist_ids
+        )
+        if result_athletes is None:
+            return 1
+
+        # Rank results table
+        print(_format_section_title("Rank results", args))
+        _render_form_table(result_athletes, data, args, shoot_mode=False)
+
+        print()
 
         # Course time ranks table
         print(_format_section_title("Course time ranks", args))
@@ -1295,7 +1373,9 @@ def handle_form(args: argparse.Namespace) -> int:
 
         # Combined ranking table
         print(_format_section_title("Combined ranking", args))
-        return _render_combined_table(course_athletes, shoot_athletes, args)
+        return _render_combined_table(
+            course_athletes, shoot_athletes, args, result_athletes=result_athletes
+        )
 
     # Standard mode (no --startlist flag)
     gender_cat = (
