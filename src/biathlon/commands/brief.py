@@ -6,6 +6,7 @@ import argparse
 import datetime
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any, cast
 
 from ..api import (
     BiathlonError,
@@ -355,15 +356,15 @@ def _render_venue_history_table(
                 ]
             )
 
-    def highlight_cell(cell_str: str, row_idx: int) -> str:
+    def highlight_cell_exp(cell_str: str, row_idx: int) -> str:
         return Color.highlight(cell_str) if row_idx in highlight_rows else cell_str
 
     if use_medal_columns:
         headers = ["#", "Athlete", "Races", "Gold", "Silver", "Bronze", "Total"]
-        formatters = [None, highlight_cell, None, None, None, None, None]
+        formatters = [None, highlight_cell_exp, None, None, None, None, None]
     else:
         headers = ["#", "Athlete", "Races", "Wins", "Podiums", "Flowers"]
-        formatters = [None, highlight_cell, None, None, None, None]
+        formatters = [None, highlight_cell_exp, None, None, None, None]
 
     render_table(
         headers,
@@ -550,7 +551,7 @@ def handle_brief_event(args: argparse.Namespace) -> int:
             owg_events = []
             for ev in women_events:
                 # Skip future events
-                ev_year = season_years.get(ev.get("season_id"))
+                ev_year = season_years.get(str(ev.get("season_id", "")))
                 if ev_year and ev_year > max_event_year:
                     continue
 
@@ -852,7 +853,7 @@ def handle_brief_season(args: argparse.Namespace) -> int:
     for event in agenda_events:
         event_id = event.get("EventId")
         race_list = races_by_event.get(str(event_id), []) if event_id else []
-        flags = {
+        flags: dict[str, set[str] | bool] = {
             "individual": set(),
             "sprint": set(),
             "pursuit": set(),
@@ -877,20 +878,20 @@ def handle_brief_season(args: argparse.Namespace) -> int:
                 gender_tag = "M"
 
             if disc in {"IN", "SI"}:
-                flags["individual"].add(gender_tag or "W+M")
+                cast(set[str], flags["individual"]).add(gender_tag or "W+M")
             elif disc == "SP":
-                flags["sprint"].add(gender_tag or "W+M")
+                cast(set[str], flags["sprint"]).add(gender_tag or "W+M")
             elif disc == "PU":
-                flags["pursuit"].add(gender_tag or "W+M")
+                cast(set[str], flags["pursuit"]).add(gender_tag or "W+M")
             elif disc == "MS":
-                flags["mass"].add(gender_tag or "W+M")
+                cast(set[str], flags["mass"]).add(gender_tag or "W+M")
             elif disc == "RL" or "relay" in name:
                 if "single" in name and "mixed" in name:
                     flags["single_mixed"] = True
                 elif "mixed" in name:
                     flags["mixed_relay"] = True
                 else:
-                    flags["relay"].add(gender_tag or "W+M")
+                    cast(set[str], flags["relay"]).add(gender_tag or "W+M")
 
         agenda_rows.append(
             [
@@ -904,7 +905,7 @@ def handle_brief_season(args: argparse.Namespace) -> int:
                 date_only(
                     event.get("StartDate") or event.get("FirstCompetitionDate") or ""
                 ),
-                len(race_list),
+                str(len(race_list)),
                 mark(flags["individual"]),
                 mark(flags["sprint"]),
                 mark(flags["pursuit"]),
@@ -953,7 +954,7 @@ def handle_brief_season(args: argparse.Namespace) -> int:
         )
         print()
 
-    decorated_stats = {"SW": {}, "SM": {}}
+    decorated_stats: dict[str, dict[str, Any]] = {"SW": {}, "SM": {}}
     race_jobs: list[tuple[str, str]] = []
     for event in events:
         event_id = event.get("EventId")
@@ -1066,9 +1067,9 @@ def handle_brief_season(args: argparse.Namespace) -> int:
         rows = []
         for code in ("SW", "SM", "MX"):
             if code in category_counts:
-                rows.append([cat_labels.get(code, code), category_counts[code]])
+                rows.append([cat_labels.get(code, code), str(category_counts[code])])
         for code in sorted(k for k in category_counts if k not in {"SW", "SM", "MX"}):
-            rows.append([cat_labels.get(code, code), category_counts[code]])
+            rows.append([cat_labels.get(code, code), str(category_counts[code])])
         print(_format_section_title("Race categories:", args))
         render_table(["Category", "Races"], rows, pretty=pretty)
         print()
@@ -1088,9 +1089,9 @@ def handle_brief_season(args: argparse.Namespace) -> int:
         rows = []
         for code in order:
             if code in discipline_counts:
-                rows.append([disc_labels.get(code, code), discipline_counts[code]])
+                rows.append([disc_labels.get(code, code), str(discipline_counts[code])])
         for code in sorted(k for k in discipline_counts if k not in order):
-            rows.append([disc_labels.get(code, code), discipline_counts[code]])
+            rows.append([disc_labels.get(code, code), str(discipline_counts[code])])
         print(_format_section_title("Race disciplines:", args))
         render_table(["Discipline", "Races"], rows, pretty=pretty)
         print()
@@ -1508,16 +1509,16 @@ def _render_team_startlist(
                 f"5. Athlete medal table ({cat_name} {disc_name}):", args
             )
         )
-        athlete_rows = []
-        row_styles = []
+        athlete_rows: list[list[str]] = []
+        row_styles: list[str] = []
         for idx, (full_name, counts) in enumerate(sorted_athletes, 1):
             total = counts["gold"] + counts["silver"] + counts["bronze"]
             athlete_rows.append(
                 [
                     str(idx),
                     full_name,
-                    counts["nat"],
-                    counts["gender"],
+                    str(counts["nat"]),
+                    str(counts["gender"]),
                     str(counts["gold"]),
                     str(counts["silver"]),
                     str(counts["bronze"]),
