@@ -147,9 +147,10 @@ def handle_athlete_results_scan(args: argparse.Namespace) -> int:
                 nat = res.get("Nat") or ""
                 key = ibuid or name.lower()
                 if args.ski:
-                    rank_val = ski_ranks.get(
-                        res.get("IBUId") or res.get("Bib") or res.get("Name") or "", ""
+                    ski_rank = ski_ranks.get(
+                        res.get("IBUId") or res.get("Bib") or res.get("Name") or ""
                     )
+                    rank_val = str(ski_rank) if ski_rank is not None else ""
                 else:
                     rank_val = (
                         res.get("Rank")
