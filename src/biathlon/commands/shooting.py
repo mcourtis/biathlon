@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from ..api import (
@@ -673,7 +674,7 @@ def handle_shooting(args: argparse.Namespace) -> int:
         "Avg Stage Shoot",
         "Avg Stage Range",
     ]
-    render_rows = []
+    render_rows: list[list] = []
     accuracy_values: list[tuple[float, float, float]] = []
     stage_extra: list[dict] = []
     position = 1
@@ -732,10 +733,10 @@ def handle_shooting(args: argparse.Namespace) -> int:
     show_sort_rank = bool(args.sort)
     if show_sort_rank:
         headers = ["Sort"] + headers
-        for idx, row in enumerate(render_rows, start=1):
-            row.insert(0, idx)
+        for idx, rrow in enumerate(render_rows, start=1):
+            rrow.insert(0, idx)
 
-    cell_formatters = None
+    cell_formatters: list[Callable | None] | None = None
     if pretty:
 
         def rank_formatter(cell_str: str, row_idx: int) -> str:
