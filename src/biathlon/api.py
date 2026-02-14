@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import socket
-from collections.abc import Iterable
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
@@ -17,7 +16,7 @@ class BiathlonError(Exception):
     """Raised when the remote API call fails."""
 
 
-def fetch_json(path: str) -> Iterable[dict[str, Any]]:
+def fetch_json(path: str) -> Any:
     """Retrieve JSON data from the API and decode it."""
     url = f"{API_BASE}/{path}"
     try:
