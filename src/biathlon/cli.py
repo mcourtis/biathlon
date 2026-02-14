@@ -317,7 +317,7 @@ def build_parser() -> argparse.ArgumentParser:
         return 0
 
     add_cumulate_args(cumulate_parser, allow_discipline_event=True)
-    cumulate_parser._custom_help = _show_cumulate_help
+    cumulate_parser._custom_help = _show_cumulate_help  # type: ignore[attr-defined]
     cumulate_parser.set_defaults(func=_show_cumulate_help, cumulate_command=None)
     cumulate_sub = cumulate_parser.add_subparsers(
         dest="cumulate_command", title="subcommands", metavar=""
@@ -632,7 +632,7 @@ def build_parser() -> argparse.ArgumentParser:
             print(f"  {name.ljust(width)}  {help_text}")
         return 0
 
-    brief_parser._custom_help = _show_brief_help
+    brief_parser._custom_help = _show_brief_help  # type: ignore[attr-defined]
     brief_parser.set_defaults(func=_show_brief_help, brief_command=None)
     brief_sub = brief_parser.add_subparsers(
         dest="brief_command", title="subcommands", metavar=""
