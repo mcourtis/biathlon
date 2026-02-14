@@ -348,12 +348,14 @@ def _sort_rows(rows: list[dict], key: str, relay: bool) -> list[dict]:
 
     def int_key(value: object) -> tuple:
         try:
-            return (0, int(value))
+            return (0, int(str(value)))
         except (TypeError, ValueError):
             return (1, 10**9)
 
     def shooting_key(value: object) -> tuple:
-        shooting = parse_relay_shooting(value) if value not in ("", None, "-") else None
+        shooting = (
+            parse_relay_shooting(str(value)) if value not in ("", None, "-") else None
+        )
         if shooting:
             return (0, shooting[0], shooting[1])
         return (1, 9999, 9999)
@@ -697,7 +699,7 @@ def handle_results(args: argparse.Namespace) -> int:
                 "error: --men is not supported for mixed relay races", file=sys.stderr
             )
             return 1
-        cat_filter = RELAY_MEN_CAT if is_men else RELAY_WOMEN_CAT
+        cat_filter: str | None = RELAY_MEN_CAT if is_men else RELAY_WOMEN_CAT
         if disc_arg in {"mixed-relay", "single-mixed-relay"}:
             cat_filter = None
         race_id, payload = _find_latest_race_by_discipline(
@@ -884,7 +886,7 @@ def handle_results(args: argparse.Namespace) -> int:
                 val = entry.get(detail_sort_key)
                 if detail_sort_key in {"leg"}:
                     try:
-                        return (1, 0) if dns_flag else (0, int(val))
+                        return (1, 0) if dns_flag else (0, int(str(val)))
                     except (TypeError, ValueError):
                         return (0, 10**9)
                 if detail_sort_key in {"leg_miss", "leg_prone", "leg_standing"}:
@@ -932,6 +934,10 @@ def handle_results(args: argparse.Namespace) -> int:
                 if None in (leg_time_secs, leg_course_secs, range1_secs, range2_secs):
                     entry["leg_penalty"] = "-"
                 else:
+                    assert leg_time_secs is not None
+                    assert leg_course_secs is not None
+                    assert range1_secs is not None
+                    assert range2_secs is not None
                     penalty_secs = (
                         leg_time_secs - leg_course_secs - range1_secs - range2_secs
                     )
@@ -970,7 +976,7 @@ def handle_results(args: argparse.Namespace) -> int:
                     ]
                 )
                 if show_sort_rank:
-                    render_rows[-1].insert(0, idx)
+                    render_rows[-1].insert(0, str(idx))
                 row_styles.append(rank_style(entry.get("rank")))
         else:
             for idx, row in enumerate(rows, start=1):
@@ -988,7 +994,7 @@ def handle_results(args: argparse.Namespace) -> int:
                     ]
                 )
                 if show_sort_rank:
-                    render_rows[-1].insert(0, idx)
+                    render_rows[-1].insert(0, str(idx))
                 row_styles.append(rank_style(row.get("rank")))
         highlight_headers = None
         if show_sort_rank and sort_header and sort_header in headers:
@@ -1057,7 +1063,7 @@ def handle_results(args: argparse.Namespace) -> int:
     with ThreadPoolExecutor(max_workers=len(fetches)) as executor:
         futures = [executor.submit(fetch_one, ft, tid, idx) for ft, tid, idx in fetches]
         for future in as_completed(futures):
-            fetch_type, type_id, idx, data = future.result()
+            fetch_type, type_id, idx_r, data = future.result()
             if fetch_type == "map":
                 if type_id == "CRST":
                     course_times = data
@@ -1067,12 +1073,12 @@ def handle_results(args: argparse.Namespace) -> int:
                     range_times = data
                 elif type_id == "STTM":
                     shooting_times = data
-            elif fetch_type == "course_lap" and idx is not None:
-                course_laps[idx] = data
-            elif fetch_type == "range_lap" and idx is not None:
-                range_laps[idx] = data
-            elif fetch_type == "shooting_lap" and idx is not None:
-                shooting_laps[idx] = data
+            elif fetch_type == "course_lap" and idx_r is not None:
+                course_laps[idx_r] = data
+            elif fetch_type == "range_lap" and idx_r is not None:
+                range_laps[idx_r] = data
+            elif fetch_type == "shooting_lap" and idx_r is not None:
+                shooting_laps[idx_r] = data
 
     rows = []
     for res in results:
@@ -1116,7 +1122,7 @@ def handle_results(args: argparse.Namespace) -> int:
 
         start_rank = res.get("StartOrder") or res.get("StartPosition") or "-"
         start_delay = res.get("StartInfo") or "-"
-        gain = "-"
+        gain: str | int = "-"
         try:
             gain = int(start_rank) - int(rank)
         except (TypeError, ValueError):
@@ -1270,7 +1276,7 @@ def handle_results(args: argparse.Namespace) -> int:
 
     print(format_race_header(payload, race_id))
 
-    headers: list[str] = []
+    headers = []
     if discipline == "PU":
         headers = [
             "Rank",
@@ -1345,7 +1351,7 @@ def handle_results(args: argparse.Namespace) -> int:
     if show_sort_rank:
         headers.insert(0, "Sort")
 
-    render_rows: list[list[str]] = []
+    render_rows = []
     for idx, row in enumerate(rows, start=1):
         base = []
         if discipline == "PU":
@@ -1431,17 +1437,17 @@ def handle_results(args: argparse.Namespace) -> int:
                 )
 
         if show_sort_rank:
-            base.insert(0, idx)
+            base.insert(0, str(idx))
         render_rows.append(base)
 
-    row_styles = None
+    row_styles = None  # type: ignore[assignment]
     if is_pretty_output(args):
         if getattr(args, "highlight_wc", False):
             cat_id = (payload.get("Competition") or {}).get("catId", "").upper()
             if cat_id in ("SM", "SW"):
                 wc_rank_map = _get_wc_rank_map(cat_id, 6)
                 row_styles = [
-                    rank_style(wc_rank_map.get(row.get("ibu_id"))) for row in rows
+                    rank_style(wc_rank_map.get(row.get("ibu_id", ""))) for row in rows
                 ]
         if row_styles is None:
             row_styles = [rank_style(row.get("rank")) for row in rows]
