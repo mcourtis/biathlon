@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
@@ -13,7 +14,6 @@ from ..api import (
     get_all_results,
     get_analytic_results,
     get_cup_results,
-    get_current_season_id,
     get_events,
     get_race_results,
     get_races,
@@ -33,6 +33,7 @@ from ..constants import (
 )
 from ..formatting import Color, is_pretty_output, render_table, rank_style
 from ..utils import (
+    parse_start_datetime,
     format_race_header,
     get_first_time,
     parse_time_seconds,
@@ -227,6 +228,179 @@ def _is_team_level_result(result: dict) -> bool:
         SINGLE_MIXED_RELAY_DISCIPLINE,
         "MR",
     }
+
+
+RACE_SEASON_RE = re.compile(r"^BT(?P<season>\d{4})")
+SEASON_TEXT_RE = re.compile(r"^(?P<s1>\d{2})\s*/\s*(?P<s2>\d{2})$")
+
+
+def _season_id_from_race_id(race_id: str) -> str:
+    match = RACE_SEASON_RE.match(str(race_id or "").strip().upper())
+    if not match:
+        return ""
+    return str(match.group("season") or "")
+
+
+def _normalize_season_id(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) == 4 and text.isdigit():
+        return text
+    match = SEASON_TEXT_RE.match(text)
+    if match:
+        return f"{match.group('s1')}{match.group('s2')}"
+    return ""
+
+
+def _season_id_from_result(result: dict) -> str:
+    season_id = _normalize_season_id(result.get("SeasonId"))
+    if season_id:
+        return season_id
+    season = _normalize_season_id(result.get("Season"))
+    if season:
+        return season
+    race_id = str(result.get("RaceId") or "")
+    if race_id:
+        return _season_id_from_race_id(race_id)
+    return ""
+
+
+def _season_sort_key(season_id: str) -> int | None:
+    text = _normalize_season_id(season_id)
+    if len(text) != 4 or not text.isdigit():
+        return None
+    start_yy = int(text[:2])
+    century = 1900 if start_yy >= 90 else 2000
+    return century + start_yy
+
+
+def _start_dt_from_competition(comp: dict | None) -> datetime.datetime | None:
+    if not isinstance(comp, dict):
+        return None
+    for key in ("StartTime", "StartDate", "Date"):
+        raw = comp.get(key)
+        if raw:
+            dt = parse_start_datetime(str(raw))
+            if dt is not None:
+                return dt
+    return None
+
+
+def _start_dt_from_race_row(race: dict | None) -> datetime.datetime | None:
+    if not isinstance(race, dict):
+        return None
+    for key in ("StartTime", "StartDate", "Date", "FirstStart"):
+        raw = race.get(key)
+        if raw:
+            dt = parse_start_datetime(str(raw))
+            if dt is not None:
+                return dt
+    return None
+
+
+def _warn_once(message: str, warning_keys: set[str], key: str) -> None:
+    if key in warning_keys:
+        return
+    warning_keys.add(key)
+    print(message, file=sys.stderr)
+
+
+def _resolve_result_start_datetime(
+    result: dict,
+    race_start_cache: dict[str, datetime.datetime | None],
+) -> datetime.datetime | None:
+    for key in ("StartTime", "StartDate", "Date", "RaceDate"):
+        raw = result.get(key)
+        if raw:
+            dt = parse_start_datetime(str(raw))
+            if dt is not None:
+                return dt
+    race_id = str(result.get("RaceId") or "")
+    if not race_id:
+        return None
+    if race_id in race_start_cache:
+        return race_start_cache[race_id]
+    try:
+        payload = get_race_results(race_id)
+    except BiathlonError:
+        race_start_cache[race_id] = None
+        return None
+    comp = payload.get("Competition") or {}
+    start_dt = _start_dt_from_competition(comp)
+    race_start_cache[race_id] = start_dt
+    return start_dt
+
+
+def _is_result_at_or_before_target(
+    result: dict,
+    target_race_id: str,
+    target_start_dt: datetime.datetime | None,
+    race_start_cache: dict[str, datetime.datetime | None],
+    warning_keys: set[str],
+    warning_context: str,
+) -> bool:
+    race_id = str(result.get("RaceId") or "")
+    if race_id and race_id == target_race_id:
+        return True
+
+    # Fast path: if season is strictly before/after target season, no per-race lookup.
+    target_season_key = _season_sort_key(_season_id_from_race_id(target_race_id))
+    result_season_key = _season_sort_key(_season_id_from_result(result))
+    if target_season_key is not None and result_season_key is not None:
+        if result_season_key < target_season_key:
+            return True
+        if result_season_key > target_season_key:
+            return False
+
+    if target_start_dt is None:
+        return True
+    start_dt = _resolve_result_start_datetime(result, race_start_cache)
+    if start_dt is None:
+        warn_key = f"{warning_context}:{race_id or id(result)}"
+        _warn_once(
+            (
+                "warning: skipping row with unknown chronology in "
+                f"{warning_context} (race {race_id or 'unknown'})"
+            ),
+            warning_keys,
+            warn_key,
+        )
+        return False
+    return start_dt <= target_start_dt
+
+
+def _filter_results_to_snapshot(
+    rows: list[dict],
+    target_race_id: str,
+    target_start_dt: datetime.datetime | None,
+    race_start_cache: dict[str, datetime.datetime | None],
+    warning_keys: set[str],
+    warning_context: str,
+) -> list[dict]:
+    return [
+        row
+        for row in rows
+        if _is_result_at_or_before_target(
+            row,
+            target_race_id,
+            target_start_dt,
+            race_start_cache,
+            warning_keys,
+            warning_context,
+        )
+    ]
+
+
+def _discipline_cup_key(discipline: str) -> str:
+    disc = str(discipline or "").upper()
+    return "IN" if disc == "SI" else disc
+
+
+def _is_same_discipline_cup(race_discipline: str, target_discipline: str) -> bool:
+    return _discipline_cup_key(race_discipline) == _discipline_cup_key(
+        target_discipline
+    )
 
 
 def _sort_results_by_rank(results: list[dict]) -> list[dict]:
@@ -523,6 +697,198 @@ def _build_standings_rows(
     return rows_out, row_styles
 
 
+def _race_meta_sort_key(
+    entry: tuple[datetime.datetime | None, str, str],
+) -> tuple[bool, datetime.datetime, str]:
+    start_dt, race_id, _disc = entry
+    fallback_dt = datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)
+    return (start_dt is None, start_dt or fallback_dt, race_id)
+
+
+def _collect_wc_individual_races(
+    season_id: str,
+    cat_id: str,
+) -> list[tuple[datetime.datetime | None, str, str]]:
+    try:
+        events = get_events(season_id, level=1)
+    except BiathlonError:
+        return []
+
+    races_out: list[tuple[datetime.datetime | None, str, str]] = []
+    for event in events:
+        if detect_event_type(event) != EVENT_TYPE_WC:
+            continue
+        event_id = event.get("EventId")
+        if not event_id:
+            continue
+        try:
+            races = get_races(event_id)
+        except BiathlonError:
+            continue
+        for race in races:
+            race_id = str(race.get("RaceId") or race.get("Id") or "")
+            if not race_id:
+                continue
+            race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
+            if cat_id and race_cat != cat_id:
+                continue
+            race_disc = str(race.get("DisciplineId") or "").upper()
+            if not _is_individual_like_discipline(race_disc):
+                continue
+            races_out.append((_start_dt_from_race_row(race), race_id, race_disc))
+
+    races_out.sort(key=_race_meta_sort_key)
+    return races_out
+
+
+def _build_individual_race_points(
+    payload: dict,
+    discipline: str,
+) -> tuple[dict[str, int], dict[str, tuple[str, str]]]:
+    points_by_id: dict[str, int] = {}
+    athlete_info: dict[str, tuple[str, str]] = {}
+    is_mass_start = str(discipline or "").upper() == "MS"
+    for res in payload.get("Results") or []:
+        if res.get("IsTeam"):
+            continue
+        ibu_id = str(res.get("IBUId") or "")
+        if not ibu_id:
+            continue
+        rank_val = _parse_rank(res.get("Rank") or res.get("ResultOrder"))
+        if rank_val is None:
+            continue
+        pts = _get_wc_points(rank_val, mass_start=is_mass_start)
+        if pts <= 0:
+            continue
+        points_by_id[ibu_id] = pts
+        athlete_info[ibu_id] = (
+            str(res.get("Name") or res.get("ShortName") or ""),
+            str(res.get("Nat") or ""),
+        )
+    return points_by_id, athlete_info
+
+
+def _merge_points(total: dict[str, int], race_points: dict[str, int]) -> None:
+    for ibu_id, points in race_points.items():
+        total[ibu_id] = total.get(ibu_id, 0) + points
+
+
+def _rank_points(points_by_id: dict[str, int]) -> dict[str, int]:
+    ranked = sorted(points_by_id.items(), key=lambda item: (-item[1], item[0]))
+    return {ibu_id: idx for idx, (ibu_id, _pts) in enumerate(ranked, 1)}
+
+
+def _rows_from_points(
+    points_by_id: dict[str, int],
+    prev_points_by_id: dict[str, int],
+    athlete_info: dict[str, tuple[str, str]],
+) -> list[dict]:
+    curr_rank = _rank_points(points_by_id)
+    prev_rank = _rank_points(prev_points_by_id)
+    ranked_ids = sorted(points_by_id, key=lambda ibu_id: curr_rank[ibu_id])
+    rows: list[dict] = []
+    for ibu_id in ranked_ids:
+        name, nat = athlete_info.get(ibu_id, ("", ""))
+        row: dict[str, Any] = {
+            "Rank": curr_rank[ibu_id],
+            "Name": name,
+            "Nat": nat,
+            "IBUId": ibu_id,
+            "Score": points_by_id[ibu_id],
+        }
+        prev = prev_rank.get(ibu_id)
+        if prev is not None:
+            row["RnkDiff"] = curr_rank[ibu_id] - prev
+        rows.append(row)
+    return rows
+
+
+def _has_newer_relevant_wc_points_race(
+    season_id: str,
+    cat_id: str,
+    target_race_id: str,
+    target_start_dt: datetime.datetime | None,
+) -> bool:
+    races = _collect_wc_individual_races(season_id, cat_id)
+    for start_dt, race_id, _disc in races:
+        if race_id == target_race_id:
+            continue
+        if target_start_dt is None:
+            if start_dt is None:
+                continue
+        elif start_dt is None:
+            return True
+        elif start_dt <= target_start_dt:
+            continue
+        try:
+            payload = get_race_results(race_id)
+        except BiathlonError:
+            continue
+        if _has_completed_results(payload):
+            return True
+    return False
+
+
+def _compute_wc_snapshot_rows(
+    season_id: str,
+    cat_id: str,
+    target_race_id: str,
+    target_discipline: str,
+    target_start_dt: datetime.datetime | None,
+    warning_keys: set[str],
+) -> tuple[list[dict], list[dict]]:
+    races = _collect_wc_individual_races(season_id, cat_id)
+    pre_total: dict[str, int] = {}
+    post_total: dict[str, int] = {}
+    pre_disc: dict[str, int] = {}
+    post_disc: dict[str, int] = {}
+    athlete_info: dict[str, tuple[str, str]] = {}
+
+    for start_dt, race_id, race_disc in races:
+        if race_id == target_race_id:
+            pass
+        elif target_start_dt is not None:
+            if start_dt is None:
+                _warn_once(
+                    (
+                        "warning: skipping race with unknown chronology while "
+                        f"building standings snapshot ({race_id})"
+                    ),
+                    warning_keys,
+                    f"snapshot:{race_id}",
+                )
+                continue
+            if start_dt > target_start_dt:
+                continue
+
+        try:
+            payload = get_race_results(race_id)
+        except BiathlonError:
+            continue
+        if not _has_completed_results(payload):
+            continue
+        race_points, race_info = _build_individual_race_points(payload, race_disc)
+        for ibu_id, info in race_info.items():
+            athlete_info.setdefault(ibu_id, info)
+        is_target = race_id == target_race_id
+        same_disc = _is_same_discipline_cup(race_disc, target_discipline)
+
+        if is_target:
+            _merge_points(post_total, race_points)
+            if same_disc:
+                _merge_points(post_disc, race_points)
+        else:
+            _merge_points(pre_total, race_points)
+            _merge_points(post_total, race_points)
+            if same_disc:
+                _merge_points(pre_disc, race_points)
+                _merge_points(post_disc, race_points)
+
+    total_rows = _rows_from_points(post_total, pre_total, athlete_info)
+    disc_rows = _rows_from_points(post_disc, pre_disc, athlete_info)
+    return total_rows, disc_rows
+
+
 def _make_key(
     ibu_id: str | None, bib: str | None, name: str | None, leg: int | None
 ) -> str:
@@ -698,6 +1064,7 @@ def _render_olympic_medal_sections(
     gold_ids: set[str],
     silver_ids: set[str],
     bronze_ids: set[str],
+    cutoff_dt: datetime.datetime | None = None,
     race_country_medals: dict[str, set[str]] | None = None,
     race_athlete_medals: dict[str, set[str]] | None = None,
 ) -> int:
@@ -717,13 +1084,19 @@ def _render_olympic_medal_sections(
     with ThreadPoolExecutor(max_workers=2) as executor:
         if is_relay:
             podiums_future = executor.submit(
-                _get_past_olympic_relay_podiums, discipline, cat_id
+                _get_past_olympic_relay_podiums,
+                discipline,
+                cat_id,
+                cutoff_dt=cutoff_dt,
             )
         else:
             podiums_future = executor.submit(
-                _get_past_olympic_individual_podiums, discipline, cat_id
+                _get_past_olympic_individual_podiums,
+                discipline,
+                cat_id,
+                cutoff_dt=cutoff_dt,
             )
-        medals_future = executor.submit(_get_all_olympic_medals, cat_id)
+        medals_future = executor.submit(_get_all_olympic_medals, cat_id, cutoff_dt)
         podiums = podiums_future.result()
         all_country_medals, all_athlete_stats = medals_future.result()
 
@@ -1108,18 +1481,22 @@ def _collect_discipline_race_ids(
     discipline: str,
     cat_id: str,
     target_event_type: str,
+    cutoff_dt: datetime.datetime | None = None,
+    warning_keys: set[str] | None = None,
+    warning_context: str = "medal races",
 ) -> list[str]:
     """Find level-1 race_ids for a discipline+category across seasons.
 
     Filters events to match *target_event_type* (WC / WCH / OWG).
     """
+    warned = warning_keys if warning_keys is not None else set()
 
     def _races_for_season(season_id: str) -> list[str]:
         try:
             events = get_events(season_id, level=1)
         except BiathlonError:
             return []
-        matched: list[str] = []
+        matched: list[tuple[datetime.datetime | None, str]] = []
         for event in events:
             if detect_event_type(event) != target_event_type:
                 continue
@@ -1136,9 +1513,31 @@ def _collect_discipline_race_ids(
                     continue
                 race_disc = str(race.get("DisciplineId") or "").upper()
                 race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
-                if race_disc == discipline and (not cat_id or race_cat == cat_id):
-                    matched.append(rid)
-        return matched
+                if race_disc != discipline or (cat_id and race_cat != cat_id):
+                    continue
+                start_dt = _start_dt_from_race_row(race)
+                if cutoff_dt is not None:
+                    if start_dt is None:
+                        _warn_once(
+                            (
+                                "warning: skipping race with unknown chronology in "
+                                f"{warning_context} ({rid})"
+                            ),
+                            warned,
+                            f"{warning_context}:{rid}",
+                        )
+                        continue
+                    if start_dt > cutoff_dt:
+                        continue
+                matched.append((start_dt, rid))
+        matched.sort(
+            key=lambda item: (
+                item[0] is None,
+                item[0] or datetime.datetime.max.replace(tzinfo=datetime.timezone.utc),
+                item[1],
+            )
+        )
+        return [rid for _start, rid in matched]
 
     race_ids: list[str] = []
     with ThreadPoolExecutor(max_workers=8) as executor:
@@ -1248,16 +1647,37 @@ def _result_discipline_id(row: dict) -> str:
     ).upper()
 
 
+def _is_lapped_current_result(
+    entry: dict,
+    current_rank: int | None,
+    discipline: str,
+) -> bool:
+    irm = str(entry.get("irm") or "").upper()
+    if irm == "LAP":
+        return True
+    result_text = str(entry.get("time") or "").upper()
+    if "LAP" in result_text:
+        return True
+    # Defensive fallback for pursuit rows where lapped status appears as large rank
+    # codes (e.g. 10059/10060) without explicit IRM.
+    return str(discipline or "").upper() == "PU" and bool(
+        current_rank is not None and current_rank >= 10000
+    )
+
+
 def _render_best_performances_section(
     args: argparse.Namespace,
     sec: int,
     entries: list[dict],
     team_results: list[dict],
     race_id: str,
+    target_start_dt: datetime.datetime | None,
     discipline: str,
     is_relay: bool,
     decorate_name: Callable[[str, str, str], str],
     name_formatter: Callable[[str, int], str],
+    race_start_cache: dict[str, datetime.datetime | None],
+    warning_keys: set[str],
 ) -> int:
     """Render Olympic best-performance milestones (overall + discipline)."""
     pretty = is_pretty_output(args)
@@ -1297,6 +1717,8 @@ def _render_best_performances_section(
             current_rank = team_rank_by_bib.get(str(entry.get("bib") or ""))
         else:
             current_rank = _parse_rank(entry.get("rank"))
+        if _is_lapped_current_result(entry, current_rank, discipline):
+            continue
         if current_rank is None:
             continue
 
@@ -1310,6 +1732,15 @@ def _render_best_performances_section(
         major_ranked: list[tuple[dict, int]] = []
         for res in all_results_cache[ibu_id]:
             if str(res.get("Level") or "").upper() not in MAJOR_LEVELS:
+                continue
+            if not _is_result_at_or_before_target(
+                res,
+                race_id,
+                target_start_dt,
+                race_start_cache,
+                warning_keys,
+                f"best performances for {ibu_id}",
+            ):
                 continue
             rank_val = _parse_rank(
                 res.get("Rank") or res.get("SO") or res.get("ResultOrder")
@@ -1419,6 +1850,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
         return 1
 
     comp = payload.get("Competition") or {}
+    target_start_dt = _start_dt_from_competition(comp)
     discipline = str(comp.get("DisciplineId") or "").upper()
     is_relay = _is_relay_discipline(discipline)
     sport_evt = payload.get("SportEvt") or {}
@@ -1434,6 +1866,10 @@ def handle_post_race(args: argparse.Namespace) -> int:
             return 1
 
     results = payload.get("Results", []) or []
+    chronology_warning_keys: set[str] = set()
+    history_race_start_cache: dict[str, datetime.datetime | None] = {
+        race_id: target_start_dt
+    }
     team_results = [r for r in results if r.get("IsTeam")]
     leg_results = [r for r in results if not r.get("IsTeam")]
     flower_entries = _collect_flower_entries(results, is_relay, RESULTS_TOP_N)
@@ -1449,6 +1885,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             "nat": res.get("Nat") or "",
             "bib": str(res.get("Bib") or ""),
             "leg": res.get("Leg"),
+            "irm": str(res.get("IRM") or "").upper(),
             "shootings": res.get("Shootings") or res.get("ShootingTotal") or "",
             "rank": res.get("Rank") or res.get("ResultOrder") or "",
             "time": res.get("TotalTime") or res.get("Result") or "",
@@ -1501,14 +1938,36 @@ def handle_post_race(args: argparse.Namespace) -> int:
     season_id = ""
     if is_wc_race and not is_relay and _is_individual_like_discipline(discipline):
         cat_id = str(comp.get("catId") or comp.get("CatId") or "").upper()
-        season_id = str(sport_evt.get("SeasonId") or "") or get_current_season_id()
-        total_cup_id, disc_cup_id = _get_cup_ids_for_race(season_id, cat_id, discipline)
+        season_id = str(sport_evt.get("SeasonId") or "") or _season_id_from_race_id(
+            race_id
+        )
         race_points_by_id = _build_race_points_map(results, discipline)
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            total_future = executor.submit(_fetch_cup_rows, total_cup_id)
-            disc_future = executor.submit(_fetch_cup_rows, disc_cup_id)
-            total_rows = total_future.result()
-            disc_rows = disc_future.result()
+        use_live_standings = True
+        if season_id and cat_id:
+            use_live_standings = not _has_newer_relevant_wc_points_race(
+                season_id,
+                cat_id,
+                race_id,
+                target_start_dt,
+            )
+        if use_live_standings and season_id:
+            total_cup_id, disc_cup_id = _get_cup_ids_for_race(
+                season_id, cat_id, discipline
+            )
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                total_future = executor.submit(_fetch_cup_rows, total_cup_id)
+                disc_future = executor.submit(_fetch_cup_rows, disc_cup_id)
+                total_rows = total_future.result()
+                disc_rows = disc_future.result()
+        elif season_id and cat_id:
+            total_rows, disc_rows = _compute_wc_snapshot_rows(
+                season_id,
+                cat_id,
+                race_id,
+                discipline,
+                target_start_dt,
+                chronology_warning_keys,
+            )
         if total_rows:
             general_leader = {
                 "id": _row_ibu_id(total_rows[0]),
@@ -1705,10 +2164,13 @@ def handle_post_race(args: argparse.Namespace) -> int:
             entries,
             team_results,
             race_id,
+            target_start_dt,
             discipline,
             is_relay,
             decorate_any,
             name_formatter_plain,
+            history_race_start_cache,
+            chronology_warning_keys,
         )
 
     run_standard_sections = event_type != EVENT_TYPE_OWG
@@ -1746,6 +2208,14 @@ def handle_post_race(args: argparse.Namespace) -> int:
         ]
         if race_row and race_row not in level_results:
             level_results.append(race_row)
+        level_results = _filter_results_to_snapshot(
+            level_results,
+            race_id,
+            target_start_dt,
+            history_race_start_cache,
+            chronology_warning_keys,
+            f"milestones for {ibu_id}",
+        )
         race_count = len(level_results)
         stats_by_category: dict[str, dict[str, dict[str, int]]] = {
             "Individual": {},
@@ -2237,7 +2707,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
     medal_season_id = (
         season_id
         if season_id
-        else str(sport_evt.get("SeasonId") or "") or get_current_season_id()
+        else str(sport_evt.get("SeasonId") or "") or _season_id_from_race_id(race_id)
     )
     medal_cat_id = (
         cat_id if cat_id else str(comp.get("catId") or comp.get("CatId") or "").upper()
@@ -2258,7 +2728,13 @@ def handle_post_race(args: argparse.Namespace) -> int:
         medal_scope = EVENT_TYPE_LABELS.get(event_type, "Season")
 
     disc_race_ids = _collect_discipline_race_ids(
-        medal_season_ids, discipline, medal_cat_id, event_type
+        medal_season_ids,
+        discipline,
+        medal_cat_id,
+        event_type,
+        cutoff_dt=target_start_dt,
+        warning_keys=chronology_warning_keys,
+        warning_context="medal races",
     )
     if disc_race_ids:
         sorted_countries, sorted_athletes, medal_races_used = (
@@ -2436,6 +2912,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             gold_ids,
             silver_ids,
             bronze_ids,
+            cutoff_dt=target_start_dt,
             race_country_medals=race_country_medals,
             race_athlete_medals=race_athlete_medals,
         )

@@ -2092,6 +2092,7 @@ def _fetch_olympic_individual_podium(
     season_id: str,
     discipline: str,
     category: str,
+    cutoff_dt: datetime.datetime | None = None,
 ) -> dict | None:
     """Fetch podium for a single Olympic individual race. Returns None if not found."""
     event_id = f"BT{season_id}SWRLOG__"
@@ -2099,13 +2100,26 @@ def _fetch_olympic_individual_podium(
         races = get_races(event_id)
     except BiathlonError:
         return None
-    race_id = None
+    candidates: list[tuple[datetime.datetime | None, str]] = []
     for race in races:
         race_disc = str(race.get("DisciplineId") or "").upper()
         race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
         if race_disc == discipline and race_cat == category:
-            race_id = race.get("RaceId")
-            break
+            race_id = str(race.get("RaceId") or "")
+            if not race_id:
+                continue
+            start_dt = parse_start_datetime(
+                str(race.get("StartTime") or race.get("StartDate") or "")
+            )
+            if cutoff_dt is not None:
+                if start_dt is None or start_dt > cutoff_dt:
+                    continue
+            candidates.append((start_dt, race_id))
+    if not candidates:
+        return None
+    fallback_dt = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+    candidates.sort(key=lambda item: (item[0] or fallback_dt, item[1]), reverse=True)
+    race_id = candidates[0][1]
     if not race_id:
         return None
     try:
@@ -2180,6 +2194,7 @@ def _fetch_olympic_podium(
     season_id: str,
     discipline: str,
     category: str,
+    cutoff_dt: datetime.datetime | None = None,
 ) -> dict | None:
     """Fetch podium for a single Olympic relay race. Returns None if not found."""
     event_id = f"BT{season_id}SWRLOG__"
@@ -2188,13 +2203,26 @@ def _fetch_olympic_podium(
     except BiathlonError:
         return None
     # Find the matching relay race
-    race_id = None
+    candidates: list[tuple[datetime.datetime | None, str]] = []
     for race in races:
         race_disc = str(race.get("DisciplineId") or "").upper()
         race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
         if race_disc == discipline and race_cat == category:
-            race_id = race.get("RaceId")
-            break
+            race_id = str(race.get("RaceId") or "")
+            if not race_id:
+                continue
+            start_dt = parse_start_datetime(
+                str(race.get("StartTime") or race.get("StartDate") or "")
+            )
+            if cutoff_dt is not None:
+                if start_dt is None or start_dt > cutoff_dt:
+                    continue
+            candidates.append((start_dt, race_id))
+    if not candidates:
+        return None
+    fallback_dt = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
+    candidates.sort(key=lambda item: (item[0] or fallback_dt, item[1]), reverse=True)
+    race_id = candidates[0][1]
     if not race_id:
         return None
     try:
@@ -2285,6 +2313,7 @@ def _fetch_olympic_podium(
 def _get_past_olympic_relay_podiums(
     discipline: str,
     category: str,
+    cutoff_dt: datetime.datetime | None = None,
 ) -> list[dict]:
     """Fetch podiums from past Olympic relay races.
 
@@ -2295,7 +2324,13 @@ def _get_past_olympic_relay_podiums(
         max_workers=_max_workers(len(OLYMPIC_SEASON_IDS))
     ) as executor:
         futures = {
-            executor.submit(_fetch_olympic_podium, s_id, discipline, category): s_id
+            executor.submit(
+                _fetch_olympic_podium,
+                s_id,
+                discipline,
+                category,
+                cutoff_dt,
+            ): s_id
             for s_id in OLYMPIC_SEASON_IDS
         }
         for future in as_completed(futures):
@@ -2311,6 +2346,7 @@ def _get_past_olympic_relay_podiums(
 def _get_past_olympic_individual_podiums(
     discipline: str,
     category: str,
+    cutoff_dt: datetime.datetime | None = None,
 ) -> list[dict]:
     """Fetch podiums from past Olympic individual races."""
     podiums: list[dict] = []
@@ -2319,7 +2355,11 @@ def _get_past_olympic_individual_podiums(
     ) as executor:
         futures = {
             executor.submit(
-                _fetch_olympic_individual_podium, s_id, discipline, category
+                _fetch_olympic_individual_podium,
+                s_id,
+                discipline,
+                category,
+                cutoff_dt,
             ): s_id
             for s_id in OLYMPIC_SEASON_IDS
         }
@@ -2335,6 +2375,7 @@ def _get_past_olympic_individual_podiums(
 def _fetch_olympic_season_medals(
     season_id: str,
     category: str,
+    cutoff_dt: datetime.datetime | None = None,
 ) -> tuple[list[dict], dict[str, dict]]:
     """Fetch country and athlete medals for all disciplines in one Olympic season.
 
@@ -2363,6 +2404,12 @@ def _fetch_olympic_season_medals(
         is_mixed = race_disc in {"MR", "SR"} or race_cat == "MX"
         if race_cat != category and not is_mixed:
             continue
+        start_dt = parse_start_datetime(
+            str(race.get("StartTime") or race.get("StartDate") or "")
+        )
+        if cutoff_dt is not None:
+            if start_dt is None or start_dt > cutoff_dt:
+                continue
         rid = race.get("RaceId")
         if not rid:
             continue
@@ -2615,6 +2662,7 @@ def _fetch_olympic_season_medals(
 
 def _get_all_olympic_medals(
     category: str,
+    cutoff_dt: datetime.datetime | None = None,
 ) -> tuple[list[dict], dict[str, dict]]:
     """Fetch country and athlete medals across all Olympic seasons.
 
@@ -2677,7 +2725,9 @@ def _get_all_olympic_medals(
         max_workers=_max_workers(len(OLYMPIC_SEASON_IDS))
     ) as executor:
         futures = {
-            executor.submit(_fetch_olympic_season_medals, s_id, category): s_id
+            executor.submit(
+                _fetch_olympic_season_medals, s_id, category, cutoff_dt
+            ): s_id
             for s_id in OLYMPIC_SEASON_IDS
         }
         for future in as_completed(futures):
