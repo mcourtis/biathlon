@@ -7,7 +7,7 @@ import datetime
 import sys
 
 from ..api import get_current_season_id, get_events, get_races, get_seasons
-from ..formatting import is_pretty_output, render_table
+from ..formatting import is_pretty_output, get_output_format, render_table
 from ..utils import get_race_label, parse_date
 
 
@@ -180,9 +180,10 @@ def handle_events(args: argparse.Namespace) -> int:
         ]
 
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
 
     if args.summary:
-        return _handle_events_summary(events, pretty, date_only)
+        return _handle_events_summary(events, pretty, output_format, date_only)
 
     sort_key = (args.sort or "startdate").lower()
 
@@ -217,7 +218,7 @@ def handle_events(args: argparse.Namespace) -> int:
     # Auto-enable --races when -d/--discipline is used
     if args.races or args.discipline:
         return _handle_events_with_races(
-            events, args, pretty, date_only, date_with_time
+            events, args, pretty, output_format, date_only, date_with_time
         )
 
     rows = []
@@ -237,11 +238,13 @@ def handle_events(args: argparse.Namespace) -> int:
         "EventId",
     ]
     row_styles = compute_event_styles(events) if pretty else None
-    render_table(headers, rows, pretty=pretty, row_styles=row_styles)
+    render_table(headers, rows, output_format=output_format, row_styles=row_styles)
     return 0
 
 
-def _handle_events_summary(events: list[dict], pretty: bool, date_only) -> int:
+def _handle_events_summary(
+    events: list[dict], pretty: bool, output_format: str, date_only
+) -> int:
     """Handle --summary flag for events command."""
     headers = [
         "Season",
@@ -339,12 +342,17 @@ def _handle_events_summary(events: list[dict], pretty: bool, date_only) -> int:
         )
 
     row_styles = compute_event_styles(level1_events) if pretty else None
-    render_table(headers, rows, pretty=pretty, row_styles=row_styles)
+    render_table(headers, rows, output_format=output_format, row_styles=row_styles)
     return 0
 
 
 def _handle_events_with_races(
-    events: list[dict], args, pretty: bool, date_only, date_with_time
+    events: list[dict],
+    args,
+    pretty: bool,
+    output_format: str,
+    date_only,
+    date_with_time,
 ) -> int:
     """Handle --races flag for events command."""
     type_filter = None
@@ -479,6 +487,9 @@ def _handle_events_with_races(
             row_styles.append(race_style)
 
     render_table(
-        headers, rows, pretty=pretty, row_styles=row_styles if pretty else None
+        headers,
+        rows,
+        output_format=output_format,
+        row_styles=row_styles if pretty else None,
     )
     return 0

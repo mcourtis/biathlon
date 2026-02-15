@@ -7,7 +7,10 @@ from biathlon.formatting import (
     format_seconds,
     format_pct,
     rank_style,
+    get_output_format,
     is_pretty_output,
+    is_markdown_output,
+    render_table,
 )
 
 
@@ -75,14 +78,44 @@ class TestRankStyle:
 
 
 class TestIsPrettyOutput:
-    def test_no_tsv_flag(self):
+    def test_no_format_flag(self):
         args = argparse.Namespace()
         assert is_pretty_output(args) is True
+        assert is_markdown_output(args) is False
+        assert get_output_format(args) == "pretty"
 
-    def test_tsv_false(self):
-        args = argparse.Namespace(tsv=False)
-        assert is_pretty_output(args) is True
-
-    def test_tsv_true(self):
-        args = argparse.Namespace(tsv=True)
+    def test_tsv_format(self):
+        args = argparse.Namespace(format="tsv")
         assert is_pretty_output(args) is False
+        assert is_markdown_output(args) is False
+        assert get_output_format(args) == "tsv"
+
+    def test_markdown_format(self):
+        args = argparse.Namespace(format="markdown")
+        assert is_pretty_output(args) is False
+        assert is_markdown_output(args) is True
+        assert get_output_format(args) == "markdown"
+
+
+class TestRenderTableMarkdown:
+    def test_markdown_table_basic(self, capsys):
+        render_table(
+            ["Name", "Score"],
+            [["Alice", "10"], ["Bob", "9"]],
+            output_format="markdown",
+        )
+        assert capsys.readouterr().out == (
+            "| Name | Score |\n| --- | --- |\n| Alice | 10 |\n| Bob | 9 |\n"
+        )
+
+    def test_markdown_escapes_cells_and_strips_ansi(self, capsys):
+        def cell_formatter(_value: str, _row_idx: int) -> str:
+            return "\033[31mA|B\nC\033[0m"
+
+        render_table(
+            ["Col"],
+            [["raw"]],
+            cell_formatters=[cell_formatter],
+            output_format="markdown",
+        )
+        assert capsys.readouterr().out == ("| Col |\n| --- |\n| A\\|B<br>C |\n")

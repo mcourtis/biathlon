@@ -100,12 +100,14 @@ def traverse_to_parser(
     return traverse_to_parser(choices[command], tokens[1:])
 
 
-def add_output_flag(subparser: argparse.ArgumentParser) -> None:
-    """Add --tsv flag to a subparser."""
+def add_output_format_arg(subparser: argparse.ArgumentParser) -> None:
+    """Add --format flag to a subparser."""
     subparser.add_argument(
-        "--tsv",
-        action="store_true",
-        help="Output TSV instead of aligned table",
+        "--format",
+        choices=["tsv", "markdown"],
+        default="",
+        metavar="FORMAT",
+        help="Output format (tsv, markdown). Default: aligned table",
     )
 
 
@@ -165,7 +167,7 @@ def add_cumulate_args(
         default=25,
         help="Number of rows to display (default: 25, 0 for all)",
     )
-    add_output_flag(subparser)
+    add_output_format_arg(subparser)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -203,7 +205,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=25,
         help="Limit output rows (default: 25, 0 for all)",
     )
-    add_output_flag(seasons_parser)
+    add_output_format_arg(seasons_parser)
     seasons_parser.set_defaults(func=handle_seasons)
 
     # --- events ---
@@ -243,7 +245,7 @@ def build_parser() -> argparse.ArgumentParser:
         default="",
         help="Filter races by discipline (individual, sprint, pursuit, mass-start, relay, mixed-relay, single-mixed-relay)",
     )
-    add_output_flag(events_parser)
+    add_output_format_arg(events_parser)
     events_parser.set_defaults(func=handle_events)
 
     # --- results ---
@@ -294,7 +296,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Highlight top 6 by World Cup standing instead of race rank",
     )
-    add_output_flag(results_parser)
+    add_output_format_arg(results_parser)
     results_parser.set_defaults(func=handle_results)
 
     # --- cumulate ---
@@ -465,7 +467,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=25,
         help="Limit output rows (default: 25, 0 for all)",
     )
-    add_output_flag(standings_parser)
+    add_output_format_arg(standings_parser)
     standings_parser.set_defaults(func=handle_standings)
 
     # --- ceremony ---
@@ -498,7 +500,7 @@ def build_parser() -> argparse.ArgumentParser:
     ceremony_parser.add_argument(
         "--season", default="", help="Season id (default: current season)"
     )
-    add_output_flag(ceremony_parser)
+    add_output_format_arg(ceremony_parser)
     ceremony_parser.set_defaults(func=handle_ceremony)
 
     # --- shooting ---
@@ -541,7 +543,7 @@ def build_parser() -> argparse.ArgumentParser:
     shooting_parser.add_argument(
         "--debug-races", action="store_true", help="Debug: print races considered"
     )
-    add_output_flag(shooting_parser)
+    add_output_format_arg(shooting_parser)
     shooting_parser.set_defaults(func=handle_shooting)
 
     # --- athlete ---
@@ -556,7 +558,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     athlete_parser.add_argument("--search", default="", help="Search by name")
     athlete_parser.add_argument("--season", default="", help="Season id")
-    add_output_flag(athlete_parser)
+    add_output_format_arg(athlete_parser)
     athlete_parser.set_defaults(func=handle_athlete_info, athlete_command=None)
     athlete_sub = athlete_parser.add_subparsers(
         dest="athlete_command", title="subcommands", metavar=""
@@ -580,7 +582,7 @@ def build_parser() -> argparse.ArgumentParser:
     athlete_results.add_argument(
         "--course", action="store_true", help="Use course time rank"
     )
-    add_output_flag(athlete_results)
+    add_output_format_arg(athlete_results)
     athlete_results.set_defaults(func=handle_athlete_results)
 
     athlete_info = athlete_sub.add_parser(
@@ -597,7 +599,7 @@ def build_parser() -> argparse.ArgumentParser:
     athlete_info.add_argument(
         "--level", type=int, default=0, help="Event level (1-5, 0 for all)"
     )
-    add_output_flag(athlete_info)
+    add_output_format_arg(athlete_info)
     athlete_info.set_defaults(func=handle_athlete_info)
 
     athlete_id = athlete_sub.add_parser(
@@ -611,7 +613,7 @@ def build_parser() -> argparse.ArgumentParser:
     athlete_id.add_argument(
         "--level", type=int, default=0, help="Event level (1-5, 0 for all)"
     )
-    add_output_flag(athlete_id)
+    add_output_format_arg(athlete_id)
     athlete_id.set_defaults(func=handle_athlete_id)
 
     # --- brief ---
@@ -655,7 +657,7 @@ def build_parser() -> argparse.ArgumentParser:
     brief_event.add_argument(
         "--major", action="store_true", help="Use WC+WCH+OWG stats"
     )
-    add_output_flag(brief_event)
+    add_output_format_arg(brief_event)
     brief_event.set_defaults(func=handle_brief_event)
 
     # brief season
@@ -670,7 +672,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--season", default="", help="Season id (default: current season)"
     )
     brief_season.add_argument("--level", default="1", help="Event level (default: 1)")
-    add_output_flag(brief_season)
+    add_output_format_arg(brief_season)
     brief_season.set_defaults(func=handle_brief_season)
 
     # brief startlist
@@ -687,7 +689,7 @@ def build_parser() -> argparse.ArgumentParser:
     brief_startlist.add_argument(
         "--major", action="store_true", help="Use WC+WCH+OWG milestones"
     )
-    add_output_flag(brief_startlist)
+    add_output_format_arg(brief_startlist)
     brief_startlist.set_defaults(func=handle_brief_startlist)
 
     # brief postrace
@@ -704,7 +706,7 @@ def build_parser() -> argparse.ArgumentParser:
     brief_post_race.add_argument(
         "--major", action="store_true", help="Use WC+WCH+OWG milestones"
     )
-    add_output_flag(brief_post_race)
+    add_output_format_arg(brief_post_race)
     brief_post_race.set_defaults(func=handle_brief_post_race)
 
     # --- form ---
@@ -771,7 +773,7 @@ def build_parser() -> argparse.ArgumentParser:
         choices=["relay", "mixed-relay", "single-mixed", "all", ""],
         help="Include relay races (relay, mixed-relay, single-mixed, all)",
     )
-    add_output_flag(form_parser)
+    add_output_format_arg(form_parser)
     form_parser.set_defaults(func=handle_form)
 
     return parser

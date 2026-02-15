@@ -24,7 +24,7 @@ from ..constants import (
     EVENT_TYPE_WC,
     EVENT_TYPE_WCH,
 )
-from ..formatting import is_pretty_output, Color, render_table
+from ..formatting import is_pretty_output, get_output_format, Color, render_table
 from ..utils import format_race_header, parse_date, parse_start_datetime
 from .events import compute_event_styles, format_level
 
@@ -302,7 +302,7 @@ def _render_venue_history_table(
         render_table(
             headers,
             venue_rows,
-            pretty=is_pretty_output(args),
+            output_format=get_output_format(args),
             cell_formatters=formatters,
         )
         print()
@@ -386,7 +386,7 @@ def _render_venue_history_table(
     render_table(
         headers,
         venue_rows,
-        pretty=is_pretty_output(args),
+        output_format=get_output_format(args),
         cell_formatters=formatters,
     )
     print()
@@ -692,7 +692,7 @@ def handle_brief_event(args: argparse.Namespace) -> int:
         render_table(
             ["Date", "Time", "Category", "Discipline"],
             [row[1] for row in schedule_rows],
-            pretty=is_pretty_output(args),
+            output_format=get_output_format(args),
         )
         print()
 
@@ -776,6 +776,7 @@ def handle_brief_season(args: argparse.Namespace) -> int:
         return 0
 
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     today = datetime.date.today()
     completed = 0
     upcoming = 0
@@ -952,7 +953,7 @@ def handle_brief_season(args: argparse.Namespace) -> int:
                 "SingleMixedRelay",
             ],
             agenda_rows,
-            pretty=pretty,
+            output_format=output_format,
             row_styles=agenda_styles,
             cell_formatters=[
                 None,
@@ -1071,7 +1072,7 @@ def handle_brief_season(args: argparse.Namespace) -> int:
                     "Races",
                 ],
                 rows,
-                pretty=pretty,
+                output_format=output_format,
                 cell_formatters=[None, None, None, None, None, None, None, None],
             )
             print()
@@ -1088,7 +1089,7 @@ def handle_brief_season(args: argparse.Namespace) -> int:
         for code in sorted(k for k in category_counts if k not in {"SW", "SM", "MX"}):
             rows.append([cat_labels.get(code, code), str(category_counts[code])])
         print(_format_section_title("Race categories:", args))
-        render_table(["Category", "Races"], rows, pretty=pretty)
+        render_table(["Category", "Races"], rows, output_format=output_format)
         print()
 
     if discipline_counts:
@@ -1110,7 +1111,7 @@ def handle_brief_season(args: argparse.Namespace) -> int:
         for code in sorted(k for k in discipline_counts if k not in order):
             rows.append([disc_labels.get(code, code), str(discipline_counts[code])])
         print(_format_section_title("Race disciplines:", args))
-        render_table(["Discipline", "Races"], rows, pretty=pretty)
+        render_table(["Discipline", "Races"], rows, output_format=output_format)
         print()
 
     render_decorated_section("Women", decorated_stats["SW"])
@@ -1219,7 +1220,7 @@ def _render_team_startlist(
     args: argparse.Namespace,
 ) -> int:
     """Render a relay startlist with team entries and Olympic history."""
-    pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     comp = payload.get("Competition") or {}
     discipline = str(comp.get("DisciplineId") or "").upper()
     category = str(comp.get("catId") or comp.get("CatId") or "").upper()
@@ -1295,7 +1296,7 @@ def _render_team_startlist(
             padded = (roster + ["-"] * 4)[:4]
             row.extend(padded)
         rows.append(row)
-    render_table(headers, rows, pretty=pretty)
+    render_table(headers, rows, output_format=output_format)
     print()
 
     # Section 2: Past Olympic podiums
@@ -1365,7 +1366,7 @@ def _render_team_startlist(
                 Color.bronze("Bronze"),
             ],
             podium_rows,
-            pretty=pretty,
+            output_format=output_format,
         )
         print()
 
@@ -1422,7 +1423,7 @@ def _render_team_startlist(
                 "Total",
             ],
             medal_rows,
-            pretty=pretty,
+            output_format=output_format,
         )
         print()
 
@@ -1475,7 +1476,7 @@ def _render_team_startlist(
                     "Total",
                 ],
                 all_country_rows,
-                pretty=pretty,
+                output_format=output_format,
             )
             print()
 
@@ -1561,7 +1562,7 @@ def _render_team_startlist(
                 "Races",
             ],
             athlete_rows,
-            pretty=pretty,
+            output_format=output_format,
             row_styles=row_styles,
         )
         print()
@@ -1685,7 +1686,7 @@ def _render_team_startlist(
                     "Races",
                 ],
                 all_rows,
-                pretty=pretty,
+                output_format=output_format,
                 row_styles=all_row_styles,
                 column_separators={4, 9, 14},
                 group_headers=[(4, 9, "All"), (9, 14, "Individual"), (14, 19, "Relay")],

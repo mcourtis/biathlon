@@ -25,7 +25,13 @@ from ..constants import (
     RELAY_WOMEN_CAT,
     SINGLE_MIXED_RELAY_DISCIPLINE,
 )
-from ..formatting import Color, is_pretty_output, rank_style, render_table
+from ..formatting import (
+    Color,
+    is_pretty_output,
+    get_output_format,
+    rank_style,
+    render_table,
+)
 from ..utils import (
     get_first_time,
     get_race_start_key,
@@ -1067,6 +1073,7 @@ def _render_form_table(
 
     # Render table
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     row_styles = [rank_style(r["row"][0]) for r in rows] if pretty else None
 
     # Build cell formatters for coloring
@@ -1141,7 +1148,7 @@ def _render_form_table(
     render_table(
         headers,
         [r["row"] for r in rows],
-        pretty=pretty,
+        output_format=output_format,
         row_styles=row_styles,
         highlight_headers=highlight_headers if pretty else None,
         cell_formatters=cell_formatters,
@@ -1261,12 +1268,13 @@ def _render_combined_table(
         ]
 
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     row_styles = [rank_style(e["rank"]) for e in combined] if pretty else None
 
     render_table(
         headers,
         rows,
-        pretty=pretty,
+        output_format=output_format,
         row_styles=row_styles,
     )
 

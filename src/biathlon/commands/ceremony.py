@@ -15,7 +15,7 @@ from ..api import (
     get_seasons,
 )
 from ..constants import RELAY_DISCIPLINE
-from ..formatting import is_pretty_output, rank_style, render_table
+from ..formatting import is_pretty_output, get_output_format, rank_style, render_table
 from ..utils import extract_results
 
 
@@ -268,6 +268,7 @@ def handle_ceremony(args: argparse.Namespace) -> int:
         render_rows.append(base)
 
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     row_styles = (
         [rank_style(idx + 1) for idx in range(len(render_rows))] if pretty else None
     )
@@ -285,6 +286,8 @@ def handle_ceremony(args: argparse.Namespace) -> int:
     print(
         f"# Medal ranking — {scope_label} — {gender_label}, {group_label} ({used_races} races)"
     )
-    render_table(headers, render_rows, pretty=pretty, row_styles=row_styles)
+    render_table(
+        headers, render_rows, output_format=output_format, row_styles=row_styles
+    )
     print()
     return 0

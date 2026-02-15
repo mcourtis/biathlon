@@ -25,7 +25,13 @@ from ..constants import (
     SKI_LAPS,
     SHOOTING_STAGES,
 )
-from ..formatting import format_seconds, is_pretty_output, rank_style, render_table
+from ..formatting import (
+    format_seconds,
+    is_pretty_output,
+    get_output_format,
+    rank_style,
+    render_table,
+)
 from ..utils import (
     add_relay_shootings,
     base_time_seconds,
@@ -1049,7 +1055,7 @@ def handle_results(args: argparse.Namespace) -> int:
         render_table(
             headers,
             render_rows,
-            pretty=is_pretty_output(args),
+            output_format=get_output_format(args),
             row_styles=row_styles if is_pretty_output(args) else None,
             highlight_headers=highlight_headers,
         )
@@ -1504,7 +1510,7 @@ def handle_results(args: argparse.Namespace) -> int:
     render_table(
         headers,
         render_rows,
-        pretty=is_pretty_output(args),
+        output_format=get_output_format(args),
         row_styles=row_styles,
         highlight_headers=highlight_headers,
     )

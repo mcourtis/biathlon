@@ -168,6 +168,13 @@ Run without installing:
 python -m biathlon.cli seasons
 ```
 
+Output formats:
+
+```bash
+biathlon results --format tsv
+biathlon results --format markdown
+```
+
 ## License
 
 MIT

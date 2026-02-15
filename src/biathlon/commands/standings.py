@@ -7,7 +7,7 @@ import sys
 
 from ..api import BiathlonError, get_cups, get_cup_results, get_current_season_id
 from ..constants import GENDER_TO_CAT
-from ..formatting import Color, is_pretty_output, render_table
+from ..formatting import Color, is_pretty_output, get_output_format, render_table
 from ._common import (
     DISCIPLINE_LEADER_MARKER,
     GENERAL_LEADER_MARKER,
@@ -203,6 +203,7 @@ def handle_standings(args: argparse.Namespace) -> int:
                 discipline_leaders.add(leaders[disc])
 
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
 
     # Build render rows
     render_rows = []
@@ -330,7 +331,7 @@ def handle_standings(args: argparse.Namespace) -> int:
     render_table(
         headers,
         render_rows,
-        pretty=pretty,
+        output_format=output_format,
         row_styles=row_styles if pretty else None,
         cell_formatters=cell_formatters,
         highlight_headers=highlight_headers,

@@ -30,7 +30,7 @@ from ..constants import (
     EVENT_TYPE_WCH,
     RELAY_DISCIPLINES,
 )
-from ..formatting import Color, is_pretty_output, render_table
+from ..formatting import Color, is_pretty_output, get_output_format, render_table
 from ..utils import parse_start_datetime, parse_time_seconds
 from ._common import (
     DISCIPLINE_LEADER_MARKER,
@@ -2076,7 +2076,7 @@ def _render_standings_section(
     render_table(
         ["Rank", "Athlete", "Nat", "Points"],
         rows,
-        pretty=is_pretty_output(args),
+        output_format=get_output_format(args),
         cell_formatters=[row_dimmer, name_cell, row_dimmer, row_dimmer],
         column_separators={3},
     )
@@ -2130,7 +2130,7 @@ def _render_wc_standings_sections(
             render_table(
                 ["Rank", "Name", "Age", "Nat"],
                 missing_rows,
-                pretty=is_pretty_output(args),
+                output_format=get_output_format(args),
                 cell_formatters=[None, leader_name_cell, None, None],
                 column_separators={2},
             )
@@ -3091,7 +3091,7 @@ def _render_olympic_individual_sections(
     race_disc = ctx["race_disc"]
     cat_id = ctx["cat_id"]
     startlist_ids = ctx["startlist_ids"]
-    pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
 
     disc_name = DISCIPLINE_NAMES.get(race_disc, race_disc)
     cat_name = CATEGORY_DISPLAY_NAMES.get(cat_id, cat_id)
@@ -3168,7 +3168,7 @@ def _render_olympic_individual_sections(
                 Color.bronze("Bronze"),
             ],
             podium_rows,
-            pretty=pretty,
+            output_format=output_format,
             column_separators={2},
         )
         print()
@@ -3231,7 +3231,7 @@ def _render_olympic_individual_sections(
                 "Total",
             ],
             medal_rows,
-            pretty=pretty,
+            output_format=output_format,
             column_separators={2},
         )
         print()
@@ -3329,7 +3329,7 @@ def _render_olympic_individual_sections(
                 "Total",
             ],
             all_country_rows,
-            pretty=pretty,
+            output_format=output_format,
             column_separators={2, 6, 10},
             group_headers=[
                 (2, 6, "All"),
@@ -3436,7 +3436,7 @@ def _render_olympic_individual_sections(
                 "Races",
             ],
             athlete_rows,
-            pretty=pretty,
+            output_format=output_format,
             row_styles=row_styles,
             column_separators={4},
         )
@@ -3562,7 +3562,7 @@ def _render_olympic_individual_sections(
                 "Races",
             ],
             all_rows,
-            pretty=pretty,
+            output_format=output_format,
             row_styles=all_row_styles,
             column_separators={4, 9, 14},
             group_headers=[(4, 9, "All"), (9, 14, "Individual"), (14, 19, "Relay")],
@@ -3598,6 +3598,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
         snapshot_race_start_cache = {}
     is_mixed = ctx.get("is_mixed", False)
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     milestone_disc_label = (
         "Individual" if race_disc in INDIVIDUAL_EQUIVALENT_DISCIPLINES else race_disc
     )
@@ -3711,7 +3712,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                     render_table(
                         ["Rank", "Team/Athlete", "Nat", "Points"],
                         table_rows,
-                        pretty=pretty,
+                        output_format=output_format,
                     )
                     print()
             except BiathlonError:
@@ -3743,7 +3744,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
             render_table(
                 ["Delay", "Athlete", "Nat"],
                 contenders,
-                pretty=pretty,
+                output_format=output_format,
                 cell_formatters=[None, leader_name_cell, None],
             )
             print()
@@ -4144,14 +4145,14 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                     "CurrentRaces",
                 ],
                 race_milestone_rows,
-                pretty=pretty,
+                output_format=output_format,
                 cell_formatters=[None, None, leader_name_cell, None, None, None, None],
             )
         else:
             render_table(
                 ["Milestone", "Type", "Athlete", "Age", "Nat", "CurrentRaces"],
                 race_milestone_rows,
-                pretty=pretty,
+                output_format=output_format,
                 cell_formatters=[None, None, leader_name_cell, None, None, None],
             )
         print()
@@ -4176,14 +4177,14 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
             render_table(
                 ["Milestone", "Type", "Athlete", "Gender", "Age", "Nat", "CurrentWins"],
                 win_milestone_rows,
-                pretty=pretty,
+                output_format=output_format,
                 cell_formatters=[None, None, leader_name_cell, None, None, None, None],
             )
         else:
             render_table(
                 ["Milestone", "Type", "Athlete", "Age", "Nat", "CurrentWins"],
                 win_milestone_rows,
-                pretty=pretty,
+                output_format=output_format,
                 cell_formatters=[None, None, leader_name_cell, None, None, None],
             )
         print()
@@ -4208,14 +4209,14 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
             render_table(
                 ["Milestone", "Athlete", "Gender", "Age", "Nat", "CurrentRaces"],
                 disc_race_rows,
-                pretty=pretty,
+                output_format=output_format,
                 cell_formatters=[None, leader_name_cell, None, None, None, None],
             )
         else:
             render_table(
                 ["Milestone", "Athlete", "Age", "Nat", "CurrentRaces"],
                 disc_race_rows,
-                pretty=pretty,
+                output_format=output_format,
                 cell_formatters=[None, leader_name_cell, None, None, None],
             )
         print()
@@ -4240,14 +4241,14 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
             render_table(
                 ["Milestone", "Athlete", "Gender", "Age", "Nat", "CurrentWins"],
                 disc_win_rows,
-                pretty=pretty,
+                output_format=output_format,
                 cell_formatters=[None, leader_name_cell, None, None, None, None],
             )
         else:
             render_table(
                 ["Milestone", "Athlete", "Age", "Nat", "CurrentWins"],
                 disc_win_rows,
-                pretty=pretty,
+                output_format=output_format,
                 cell_formatters=[None, leader_name_cell, None, None, None],
             )
         print()
@@ -4339,7 +4340,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                         "Races",
                     ],
                     individual_rows,
-                    pretty=pretty,
+                    output_format=output_format,
                     cell_formatters=[
                         None,
                         leader_name_cell,
@@ -4367,7 +4368,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                         "Races",
                     ],
                     individual_rows,
-                    pretty=pretty,
+                    output_format=output_format,
                     cell_formatters=[
                         None,
                         leader_name_cell,
@@ -4460,7 +4461,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                         "Races",
                     ],
                     overall_rows,
-                    pretty=pretty,
+                    output_format=output_format,
                     cell_formatters=[
                         None,
                         leader_name_cell,
@@ -4488,7 +4489,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                         "Races",
                     ],
                     overall_rows,
-                    pretty=pretty,
+                    output_format=output_format,
                     cell_formatters=[
                         None,
                         leader_name_cell,
@@ -4583,7 +4584,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                         "Races",
                     ],
                     venue_rows,
-                    pretty=pretty,
+                    output_format=output_format,
                     cell_formatters=[
                         None,
                         leader_name_cell,
@@ -4611,7 +4612,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                         "Races",
                     ],
                     venue_rows,
-                    pretty=pretty,
+                    output_format=output_format,
                     cell_formatters=[
                         None,
                         leader_name_cell,
@@ -4698,7 +4699,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                         "Flowers",
                     ],
                     exp_rows,
-                    pretty=pretty,
+                    output_format=output_format,
                     cell_formatters=[
                         None,
                         leader_name_cell,
@@ -4724,7 +4725,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                         "Flowers",
                     ],
                     exp_rows,
-                    pretty=pretty,
+                    output_format=output_format,
                     cell_formatters=[
                         None,
                         leader_name_cell,
@@ -4798,7 +4799,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                         "Flowers",
                     ],
                     venue_exp_rows,
-                    pretty=pretty,
+                    output_format=output_format,
                     cell_formatters=[
                         None,
                         leader_name_cell,
@@ -4824,7 +4825,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                         "Flowers",
                     ],
                     venue_exp_rows,
-                    pretty=pretty,
+                    output_format=output_format,
                     cell_formatters=[
                         None,
                         leader_name_cell,
@@ -4980,7 +4981,7 @@ def render_venue_history(
             render_table(
                 ["Date", "Location", "Winner"],
                 recent_rows,
-                pretty=is_pretty_output(args),
+                output_format=get_output_format(args),
             )
             print()
 
@@ -5072,7 +5073,9 @@ def render_venue_history(
                 )
             )
             render_table(
-                ["Date", "Winner"], venue_winner_rows, pretty=is_pretty_output(args)
+                ["Date", "Winner"],
+                venue_winner_rows,
+                output_format=get_output_format(args),
             )
             print()
 
@@ -5111,7 +5114,7 @@ def render_venue_history(
                 render_table(
                     ["Athlete", "Wins"],
                     venue_win_rows,
-                    pretty=is_pretty_output(args),
+                    output_format=get_output_format(args),
                     cell_formatters=[hl_16, None],
                 )
                 print()
@@ -5145,7 +5148,7 @@ def render_venue_history(
                 render_table(
                     ["Athlete", "Age", "Nat", "Races"],
                     venue_race_rows,
-                    pretty=is_pretty_output(args),
+                    output_format=get_output_format(args),
                     cell_formatters=[hl_17, None, None, None],
                 )
                 print()
@@ -5189,7 +5192,7 @@ def render_venue_history(
                 render_table(
                     ["#", "Athlete", "Wins", "Podiums", "Flowers", "Races"],
                     alltime_venue_rows,
-                    pretty=is_pretty_output(args),
+                    output_format=get_output_format(args),
                     cell_formatters=[None, highlight_athlete, None, None, None, None],
                 )
                 print()
@@ -5224,7 +5227,7 @@ def render_venue_history(
             render_table(
                 ["Team", "Participations", "Wins", "Podiums", "Flowers"],
                 team_rows,
-                pretty=is_pretty_output(args),
+                output_format=get_output_format(args),
             )
             print()
 
@@ -5269,6 +5272,6 @@ def render_venue_history(
                 render_table(
                     ["Category", "Team", "Count"],
                     team_records_rows,
-                    pretty=is_pretty_output(args),
+                    output_format=get_output_format(args),
                 )
                 print()

@@ -30,6 +30,7 @@ from ..formatting import (
     format_pct,
     format_seconds,
     is_pretty_output,
+    get_output_format,
     rank_style,
     render_table,
 )
@@ -730,6 +731,7 @@ def handle_shooting(args: argparse.Namespace) -> int:
         position += 1
 
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     show_sort_rank = bool(args.sort)
     if show_sort_rank:
         headers = ["Sort"] + headers
@@ -877,7 +879,7 @@ def handle_shooting(args: argparse.Namespace) -> int:
     render_table(
         headers,
         render_rows,
-        pretty=pretty,
+        output_format=output_format,
         cell_formatters=cell_formatters,
         highlight_headers=highlight_headers,
         column_separators=column_separators,

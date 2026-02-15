@@ -42,7 +42,7 @@ def test_handle_brief_startlist_completed_race_uses_snapshot(monkeypatch):
     monkeypatch.setattr(brief, "_prepare_startlist_context", fake_prepare)
     monkeypatch.setattr(brief, "render_startlist_analysis", lambda ctx, args: None)
 
-    args = argparse.Namespace(race="RACE1", major=False, tsv=True)
+    args = argparse.Namespace(race="RACE1", major=False, format="tsv")
     rc = brief.handle_brief_startlist(args)
 
     assert rc == 0
@@ -71,7 +71,7 @@ def test_handle_brief_startlist_completed_race_requires_start_datetime(
     }
     monkeypatch.setattr(brief, "get_race_results", lambda race_id: payload)
 
-    args = argparse.Namespace(race="RACE1", major=False, tsv=True)
+    args = argparse.Namespace(race="RACE1", major=False, format="tsv")
     rc = brief.handle_brief_startlist(args)
 
     assert rc == 1
@@ -111,7 +111,7 @@ def test_handle_brief_startlist_keeps_startlist_mode_for_is_startlist_true(monke
     monkeypatch.setattr(brief, "_prepare_startlist_context", fake_prepare)
     monkeypatch.setattr(brief, "render_startlist_analysis", lambda ctx, args: None)
 
-    args = argparse.Namespace(race="RACE1", major=False, tsv=True)
+    args = argparse.Namespace(race="RACE1", major=False, format="tsv")
     rc = brief.handle_brief_startlist(args)
 
     assert rc == 0

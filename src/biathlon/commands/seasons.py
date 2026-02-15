@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 
 from ..api import fetch_json
-from ..formatting import is_pretty_output, render_table
+from ..formatting import is_pretty_output, get_output_format, render_table
 
 
 def compute_season_styles(seasons: list[dict]) -> list[str]:
@@ -43,6 +43,7 @@ def handle_seasons(args: argparse.Namespace) -> int:
         sorted_seasons = sorted_seasons[:limit_n]
 
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     rows: list[list[str]] = []
     for season in sorted_seasons:
         season_id = season.get("SeasonId", "")
@@ -52,5 +53,10 @@ def handle_seasons(args: argparse.Namespace) -> int:
         rows.append([season_id, desc])
 
     row_styles = compute_season_styles(sorted_seasons) if pretty else None
-    render_table(["Season", "Description"], rows, pretty=pretty, row_styles=row_styles)
+    render_table(
+        ["Season", "Description"],
+        rows,
+        output_format=output_format,
+        row_styles=row_styles,
+    )
     return 0

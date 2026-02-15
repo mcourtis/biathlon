@@ -17,7 +17,7 @@ from ..api import (
     get_analytic_results,
 )
 from ..constants import RELAY_DISCIPLINE
-from ..formatting import is_pretty_output, render_table
+from ..formatting import get_output_format, render_table
 from ..utils import (
     build_analytic_times,
     extract_results,
@@ -216,7 +216,7 @@ def handle_athlete_results_scan(args: argparse.Namespace) -> int:
 
     print()
     print(f"# Athlete results — season {season_id}")
-    render_table(headers, rows, pretty=is_pretty_output(args))
+    render_table(headers, rows, output_format=get_output_format(args))
     print()
     return 0
 
@@ -345,7 +345,7 @@ def handle_athlete_results(args: argparse.Namespace) -> int:
         )
         label = season_label or "all"
     print(f"# Athlete results — season {label}")
-    render_table(headers, rows, pretty=is_pretty_output(args))
+    render_table(headers, rows, output_format=get_output_format(args))
     print()
     return 0
 
@@ -456,7 +456,9 @@ def handle_athlete_id(args: argparse.Namespace) -> int:
 
     print()
     print("# Athlete IBU ids")
-    render_table(["Name", "Country", "IBUId"], rows, pretty=is_pretty_output(args))
+    render_table(
+        ["Name", "Country", "IBUId"], rows, output_format=get_output_format(args)
+    )
     print()
     return 0
 
@@ -538,6 +540,6 @@ def handle_athlete_info(args: argparse.Namespace) -> int:
     ]
     print()
     print("# Athlete info")
-    render_table(headers, rows, pretty=is_pretty_output(args))
+    render_table(headers, rows, output_format=get_output_format(args))
     print()
     return 0

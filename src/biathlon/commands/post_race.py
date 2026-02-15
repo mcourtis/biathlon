@@ -31,7 +31,13 @@ from ..constants import (
     SINGLE_MIXED_RELAY_DISCIPLINE,
     SKI_LAPS,
 )
-from ..formatting import Color, is_pretty_output, render_table, rank_style
+from ..formatting import (
+    Color,
+    is_pretty_output,
+    get_output_format,
+    render_table,
+    rank_style,
+)
 from ..utils import (
     parse_start_datetime,
     format_race_header,
@@ -1072,7 +1078,7 @@ def _render_olympic_medal_sections(
 
     Returns the updated section counter.
     """
-    pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     disc_name = DISCIPLINE_NAMES.get(discipline, discipline)
     cat_name = CATEGORY_DISPLAY_NAMES.get(cat_id, cat_id)
 
@@ -1180,7 +1186,7 @@ def _render_olympic_medal_sections(
                 "Total",
             ],
             medal_rows,
-            pretty=pretty,
+            output_format=output_format,
             row_styles=disc_country_styles,
             column_separators={2},
             cell_formatters=[None, disc_country_fmt, None, None, None, None],
@@ -1286,7 +1292,7 @@ def _render_olympic_medal_sections(
                 "Total",
             ],
             all_country_rows,
-            pretty=pretty,
+            output_format=output_format,
             row_styles=all_country_styles,
             column_separators={2, 6, 10},
             group_headers=[
@@ -1445,7 +1451,7 @@ def _render_olympic_medal_sections(
                 "Races",
             ],
             all_rows,
-            pretty=pretty,
+            output_format=output_format,
             row_styles=all_row_styles,
             column_separators={4, 9, 14},
             group_headers=[(4, 9, "All"), (9, 14, "Individual"), (14, 19, "Relay")],
@@ -1680,7 +1686,7 @@ def _render_best_performances_section(
     warning_keys: set[str],
 ) -> int:
     """Render Olympic best-performance milestones (overall + discipline)."""
-    pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     disc_label = DISCIPLINE_NAMES.get(discipline, discipline)
     disc_label_lc = disc_label.lower()
     if is_relay:
@@ -1828,7 +1834,7 @@ def _render_best_performances_section(
     render_table(
         ["Rank", "Athlete", "Nat", "Milestone", "Previous Best Results"],
         table_rows,
-        pretty=pretty,
+        output_format=output_format,
         row_styles=row_styles,
         cell_formatters=[None, athlete_formatter, None, None, None],
     )
@@ -1929,6 +1935,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     flowers.add(entry["ibu_id"])
 
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     total_rows: list[dict] = []
     disc_rows: list[dict] = []
     race_points_by_id: dict[str, int] = {}
@@ -2055,7 +2062,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
         render_table(
             headers,
             results_rows,
-            pretty=pretty,
+            output_format=output_format,
             cell_formatters=cell_fmts,
         )
         print()
@@ -2089,7 +2096,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 render_table(
                     ["Rank", "Athlete", "Nat", "Race Pts", "Total Pts", "Change"],
                     total_standings_rows,
-                    pretty=pretty,
+                    output_format=output_format,
                     cell_formatters=[
                         None,
                         total_name_formatter,
@@ -2128,7 +2135,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 render_table(
                     ["Rank", "Athlete", "Nat", "Race Pts", "Total Pts", "Change"],
                     disc_standings_rows,
-                    pretty=pretty,
+                    output_format=output_format,
                     cell_formatters=[
                         None,
                         disc_name_formatter,
@@ -2390,7 +2397,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             render_table(
                 ["Milestone", "Athlete", "Nat"],
                 race_milestones,
-                pretty=pretty,
+                output_format=output_format,
                 cell_formatters=[None, name_formatter_plain, None],
             )
             print()
@@ -2457,7 +2464,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 render_table(
                     ["Milestone", "Type"],
                     display_rows,
-                    pretty=pretty,
+                    output_format=output_format,
                     show_headers=False,
                     row_styles=row_styles,
                 )
@@ -2495,7 +2502,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             render_table(
                 headers,
                 rows,
-                pretty=is_pretty_output(args),
+                output_format=get_output_format(args),
                 cell_formatters=cell_formatters,
             )
             print()
@@ -2558,7 +2565,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             render_table(
                 ["Time", "Athlete", "Nat", "Leg"],
                 rows,
-                pretty=pretty,
+                output_format=output_format,
                 cell_formatters=[None, name_formatter_plain, None, None],
             )
             print()
@@ -2601,7 +2608,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             render_table(
                 ["Time", "Athlete", "Nat", "Leg"],
                 rows,
-                pretty=pretty,
+                output_format=output_format,
                 cell_formatters=[None, name_formatter_plain, None, None],
             )
             print()
@@ -2662,7 +2669,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             render_table(
                 headers,
                 rows,
-                pretty=pretty,
+                output_format=output_format,
                 cell_formatters=[None, name_formatter_plain, None, None],
             )
             print()
@@ -2788,7 +2795,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                         "Total",
                     ],
                     medal_rows,
-                    pretty=pretty,
+                    output_format=output_format,
                     row_styles=country_styles,
                     cell_formatters=[None, country_fmt, None, None, None, None],
                 )
@@ -2873,7 +2880,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     "Races",
                 ],
                 ath_rows,
-                pretty=pretty,
+                output_format=output_format,
                 row_styles=ath_row_styles,
                 column_separators={4},
                 cell_formatters=[

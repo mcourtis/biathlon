@@ -7,6 +7,7 @@ import re
 import sys
 import unicodedata
 from collections.abc import Callable
+from typing import Literal
 
 
 class Color:
@@ -258,10 +259,17 @@ class Color:
 
 _ANSI_RE = re.compile(r"\x1b\[[0-9;]*m")
 _ZERO_WIDTH_CODEPOINTS = {0xFE0E, 0xFE0F}
+OutputFormat = Literal["pretty", "tsv", "markdown"]
 
 
 def _strip_ansi(text: str) -> str:
     return _ANSI_RE.sub("", text)
+
+
+def _escape_markdown_cell(text: str) -> str:
+    escaped = str(text).replace("\\", "\\\\").replace("|", "\\|")
+    escaped = escaped.replace("\r\n", "\n").replace("\r", "\n")
+    return escaped.replace("\n", "<br>")
 
 
 def _display_width(text: str) -> int:
@@ -304,7 +312,7 @@ def _pad_cell(text: str, width: int, alignment: str = "left") -> str:
 def render_table(
     headers: list[str],
     rows: list[list[str]],
-    pretty: bool,
+    pretty: bool | None = None,
     row_styles: list[str] | None = None,
     cell_formatters: list[Callable | None] | None = None,
     alignments: list[str] | None = None,
@@ -313,13 +321,15 @@ def render_table(
     show_headers: bool = True,
     column_separators: set[int] | None = None,
     group_headers: list[tuple[int, int, str]] | None = None,
+    output_format: OutputFormat | None = None,
 ) -> None:
-    """Render tabular data either aligned (pretty) or TSV.
+    """Render tabular data as aligned text, TSV, or Markdown.
 
     Args:
         headers: Column headers.
         rows: Data rows.
-        pretty: If True, align columns; otherwise output TSV.
+        pretty: Deprecated compatibility switch. True -> aligned, False -> TSV.
+        output_format: Explicit output mode ("pretty", "tsv", "markdown").
         row_styles: Optional list of style names per row ("dim", "highlight", or "").
         cell_formatters: Optional list of functions (one per column) to format cell values.
             Each function takes (value, row_index) and returns formatted string.
@@ -331,7 +341,15 @@ def render_table(
             group header line above the column headers. Each label is centered over
             the span of columns [start_col, end_col).
     """
-    if not pretty:
+    mode: OutputFormat
+    if output_format is not None:
+        mode = output_format
+    elif pretty is None:
+        mode = "pretty"
+    else:
+        mode = "pretty" if pretty else "tsv"
+
+    if mode == "tsv":
         if show_headers:
             print("\t".join(headers))
         for row in rows:
@@ -378,10 +396,22 @@ def render_table(
             )
             if formatter:
                 cell_str = formatter(cell_str, row_idx)
-            elif style:
+            elif style and mode == "pretty":
                 cell_str = apply_row_style(cell_str, style)
             formatted_row.append(cell_str)
         formatted_rows.append(formatted_row)
+
+    if mode == "markdown":
+        markdown_headers = headers if show_headers else [""] * len(headers)
+        escaped_headers = [
+            _escape_markdown_cell(_strip_ansi(h)) for h in markdown_headers
+        ]
+        print(f"| {' | '.join(escaped_headers)} |")
+        print(f"| {' | '.join(['---'] * len(markdown_headers))} |")
+        for row in formatted_rows:
+            escaped_row = [_escape_markdown_cell(_strip_ansi(cell)) for cell in row]
+            print(f"| {' | '.join(escaped_row)} |")
+        return
 
     widths = [
         max(
@@ -494,8 +524,23 @@ def format_pct(numerator: int, denominator: int) -> str:
 
 
 def is_pretty_output(args) -> bool:
-    """Return True if output should be pretty-printed (not TSV)."""
-    return not getattr(args, "tsv", False)
+    """Return True when aligned, colorized terminal output should be used."""
+    return get_output_format(args) == "pretty"
+
+
+def is_markdown_output(args) -> bool:
+    """Return True when output should be rendered as Markdown."""
+    return get_output_format(args) == "markdown"
+
+
+def get_output_format(args) -> OutputFormat:
+    """Return the normalized output format for parsed CLI arguments."""
+    value = str(getattr(args, "format", "") or "").lower()
+    if value == "tsv":
+        return "tsv"
+    if value == "markdown":
+        return "markdown"
+    return "pretty"
 
 
 def rank_style(rank: int | object) -> str:

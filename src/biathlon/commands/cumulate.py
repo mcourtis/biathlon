@@ -30,6 +30,7 @@ from ..formatting import (
     format_pct,
     format_seconds,
     is_pretty_output,
+    get_output_format,
     rank_style,
     render_table,
 )
@@ -577,9 +578,13 @@ def handle_cumulate_results(args: argparse.Namespace) -> int:
     rows = _apply_limit(rows, args.limit)
     headers = ["Rank", "Biathlete", "Country", "Races", "Total Results"]
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     row_styles = [rank_style(r["row"][0]) for r in rows] if pretty else None
     render_table(
-        headers, [r["row"] for r in rows], pretty=pretty, row_styles=row_styles
+        headers,
+        [r["row"] for r in rows],
+        output_format=output_format,
+        row_styles=row_styles,
     )
     return 0
 
@@ -664,9 +669,13 @@ def handle_cumulate_ski(args: argparse.Namespace) -> int:
     rows = _apply_limit(rows, args.limit)
     headers = ["Rank", "Biathlete", "Country", "Races", "Total Ski"]
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     row_styles = [rank_style(r["row"][0]) for r in rows] if pretty else None
     render_table(
-        headers, [r["row"] for r in rows], pretty=pretty, row_styles=row_styles
+        headers,
+        [r["row"] for r in rows],
+        output_format=output_format,
+        row_styles=row_styles,
     )
     return 0
 
@@ -755,7 +764,7 @@ def handle_cumulate_pursuit(args: argparse.Namespace) -> int:
     render_table(
         headers,
         render_rows,
-        pretty=is_pretty_output(args),
+        output_format=get_output_format(args),
         row_styles=row_styles,
     )
     return 0
@@ -902,7 +911,7 @@ def handle_cumulate_course(args: argparse.Namespace) -> int:
     render_table(
         headers,
         render_rows,
-        pretty=is_pretty_output(args),
+        output_format=get_output_format(args),
         row_styles=row_styles,
     )
     return 0
@@ -1073,6 +1082,7 @@ def _cumulate_range_or_shooting(args: argparse.Namespace, kind: str) -> int:
     ]
     render_rows = [r["row"] for r in rows]
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     row_styles = [rank_style(r[0]) for r in render_rows] if pretty else None
     cell_formatters = (
         _build_accuracy_cell_formatters(headers, render_rows) if pretty else None
@@ -1080,7 +1090,7 @@ def _cumulate_range_or_shooting(args: argparse.Namespace, kind: str) -> int:
     render_table(
         headers,
         render_rows,
-        pretty=pretty,
+        output_format=output_format,
         row_styles=row_styles,
         cell_formatters=cell_formatters,
     )
@@ -1211,6 +1221,7 @@ def handle_cumulate_miss(args: argparse.Namespace) -> int:
     ]
     render_rows = [r["row"] for r in rows]
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     row_styles = [rank_style(r[0]) for r in render_rows] if pretty else None
     cell_formatters = (
         _build_accuracy_cell_formatters(headers, render_rows) if pretty else None
@@ -1218,7 +1229,7 @@ def handle_cumulate_miss(args: argparse.Namespace) -> int:
     render_table(
         headers,
         render_rows,
-        pretty=pretty,
+        output_format=output_format,
         row_styles=row_styles,
         cell_formatters=cell_formatters,
     )
@@ -1511,7 +1522,7 @@ def handle_cumulate_penalty(args: argparse.Namespace) -> int:
     render_table(
         headers,
         [r["row"] for r in rows],
-        pretty=is_pretty_output(args),
+        output_format=get_output_format(args),
         row_styles=row_styles,
     )
     return 0
@@ -1910,6 +1921,7 @@ def handle_cumulate_cleansheet(args: argparse.Namespace) -> int:
     ]
     render_rows = [r["row"] for r in rows]
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     row_styles = [rank_style(r[0]) for r in render_rows] if pretty else None
     # Column separators before the stage and race sections
     column_separators = {5, 9} if pretty else None
@@ -1989,7 +2001,7 @@ def handle_cumulate_cleansheet(args: argparse.Namespace) -> int:
     render_table(
         headers,
         render_rows,
-        pretty=pretty,
+        output_format=output_format,
         row_styles=row_styles,
         cell_formatters=cell_formatters,
         column_separators=column_separators,
@@ -2098,13 +2110,14 @@ def handle_cumulate_remontada(args: argparse.Namespace) -> int:
     headers.extend(labels)
     headers.append("Average")
     pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
     row_styles = [rank_style(r["row"][0]) for r in rows] if pretty else None
     highlight_headers = [headers.index("Gain")] if pretty else None
     highlight_header_styles = {headers.index("Gain"): "highlight"} if pretty else None
     render_table(
         headers,
         [r["row"] for r in rows],
-        pretty=pretty,
+        output_format=output_format,
         row_styles=row_styles,
         highlight_headers=highlight_headers,
         highlight_header_styles=highlight_header_styles,

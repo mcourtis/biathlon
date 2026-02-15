@@ -16,7 +16,7 @@ from ..constants import (
     EVENT_TYPE_WCH,
     RELAY_DISCIPLINES,
 )
-from ..formatting import Color, is_pretty_output
+from ..formatting import Color, get_output_format
 from ..utils import get_first_time, parse_start_datetime, parse_time_seconds
 
 
@@ -75,10 +75,16 @@ def _parse_rank(value: Any) -> int | None:
 
 
 def _format_section_title(text: str, args: argparse.Namespace) -> str:
-    """Return *text* styled as a section title when pretty output is on."""
-    if not is_pretty_output(args):
-        return text
-    return Color.section_title(text)
+    """Return *text* as a section title for the active output format."""
+    output_format = get_output_format(args)
+    if output_format == "pretty":
+        return Color.section_title(text)
+    if output_format == "markdown":
+        stripped = text.strip()
+        if not stripped or stripped.startswith("#"):
+            return stripped
+        return f"## {stripped}"
+    return text
 
 
 def _ordinal(n: int) -> str:
