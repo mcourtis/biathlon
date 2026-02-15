@@ -28,6 +28,23 @@ cd biathlon
 pip install -e .
 ```
 
+## Releases
+
+CI runs on every push and pull request to `main`.
+Publishing to PyPI and creating a GitHub release only happen when a version tag is pushed.
+
+Create a release:
+
+```bash
+git tag v1.5.0
+git push origin v1.5.0
+```
+
+Version numbers are derived dynamically from Git tags via `setuptools-scm`.
+
+PyPI publishing uses GitHub Actions trusted publishing (`id-token: write`), so the
+project must be configured as a trusted publisher on PyPI.
+
 ## Usage
 
 List available seasons:
