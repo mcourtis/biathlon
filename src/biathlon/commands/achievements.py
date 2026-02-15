@@ -453,18 +453,18 @@ def _aggregate_achievements(
             continue
 
         if is_relay:
-            seen_keys: set[str] = set()
+            seen_keys_relay: set[str] = set()
             for row in results:
                 if row.get("IsTeam"):
                     continue
                 nat = str(row.get("Nat") or "")
-                medal = medal_by_nat.get(nat)
-                if not medal:
+                medal_for_nat = medal_by_nat.get(nat)
+                if not medal_for_nat:
                     continue
                 ibu_id = _row_ibu_id(row)
                 name = str(row.get("Name") or row.get("ShortName") or "")
                 key = ibu_id or f"{name}|{nat}"
-                if not key or key in seen_keys:
+                if not key or key in seen_keys_relay:
                     continue
 
                 if mixed:
@@ -479,17 +479,17 @@ def _aggregate_achievements(
                     if ibu_id:
                         known_cat_ids.add(ibu_id)
 
-                seen_keys.add(key)
+                seen_keys_relay.add(key)
                 if key not in athlete_stats:
                     athlete_stats[key] = _empty_athlete(name, nat, category, ibu_id)
                 athlete_stats[key]["name"] = _prefer_name(
                     athlete_stats[key]["name"], name
                 )
                 _add_race(athlete_stats[key], is_relay=True)
-                _add_medal(athlete_stats[key], medal, is_relay=True)
+                _add_medal(athlete_stats[key], medal_for_nat, is_relay=True)
             continue
 
-        seen_keys: set[str] = set()
+        seen_keys_individual: set[str] = set()
         medal_by_key: dict[str, str] = {}
         for rank, medal in MEDAL_BY_RANK.items():
             row = podium.get(rank)
@@ -509,18 +509,18 @@ def _aggregate_achievements(
             ibu_id = _row_ibu_id(row)
             name = str(row.get("Name") or row.get("ShortName") or "")
             key = ibu_id or f"{name}|{nat}"
-            if not key or key in seen_keys:
+            if not key or key in seen_keys_individual:
                 continue
-            seen_keys.add(key)
+            seen_keys_individual.add(key)
             if ibu_id:
                 known_cat_ids.add(ibu_id)
             if key not in athlete_stats:
                 athlete_stats[key] = _empty_athlete(name, nat, category, ibu_id)
             athlete_stats[key]["name"] = _prefer_name(athlete_stats[key]["name"], name)
             _add_race(athlete_stats[key], is_relay=False)
-            medal = medal_by_key.get(key)
-            if medal:
-                _add_medal(athlete_stats[key], medal, is_relay=False)
+            medal_for_key = medal_by_key.get(key)
+            if medal_for_key:
+                _add_medal(athlete_stats[key], medal_for_key, is_relay=False)
 
     if by_country:
         rows = [row for row in country_stats.values() if _has_medal(row)]
@@ -711,11 +711,11 @@ def _build_wc_title_map(
                 cup_ids[discipline] = cup_id
 
         for discipline, _label, field in WC_TITLE_FIELDS:
-            cup_id = cup_ids.get(discipline)
-            if not cup_id:
+            selected_cup_id = cup_ids.get(discipline)
+            if not selected_cup_id:
                 continue
             try:
-                payload = get_cup_results(cup_id)
+                payload = get_cup_results(selected_cup_id)
             except BiathlonError:
                 continue
             winner = _pick_cup_winner(_title_rows_from_payload(payload))
