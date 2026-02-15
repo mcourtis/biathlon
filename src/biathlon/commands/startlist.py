@@ -31,7 +31,7 @@ from ..constants import (
     RELAY_DISCIPLINES,
 )
 from ..formatting import Color, is_pretty_output, render_table
-from ..utils import format_race_header, parse_start_datetime, parse_time_seconds
+from ..utils import parse_start_datetime, parse_time_seconds
 from ._common import (
     DISCIPLINE_LEADER_MARKER,
     GENERAL_LEADER_MARKER,
@@ -41,12 +41,11 @@ from ._common import (
     _ordinal,
     _parse_rank,
     _row_ibu_id,
-    _select_race_interactive,
     detect_event_type,
     is_mixed_relay as _is_mixed_relay,
     is_relay_discipline as _is_relay_disc,
 )
-from .results import _get_wc_rows
+from .results import _get_wc_rows, _has_completed_results
 
 
 WC_RACE_MILESTONE_STEP = 25
@@ -1598,6 +1597,239 @@ def _get_wc_points(position: int, mass_start: bool = False) -> int:
     return WC_POINTS.get(position, 0)
 
 
+def _start_dt_from_competition(comp: dict | None) -> datetime.datetime | None:
+    if not isinstance(comp, dict):
+        return None
+    for key in ("StartTime", "StartDate", "Date"):
+        raw = comp.get(key)
+        if raw:
+            dt = parse_start_datetime(str(raw))
+            if dt is not None:
+                return dt
+    return None
+
+
+def _start_dt_from_race_row(race: dict | None) -> datetime.datetime | None:
+    if not isinstance(race, dict):
+        return None
+    for key in ("StartTime", "StartDate", "Date", "FirstStart"):
+        raw = race.get(key)
+        if raw:
+            dt = parse_start_datetime(str(raw))
+            if dt is not None:
+                return dt
+    return None
+
+
+def _resolve_result_start_datetime(
+    result: dict,
+    race_start_cache: dict[str, datetime.datetime | None],
+) -> datetime.datetime | None:
+    for key in ("StartTime", "StartDate", "Date", "RaceDate"):
+        raw = result.get(key)
+        if raw:
+            dt = parse_start_datetime(str(raw))
+            if dt is not None:
+                return dt
+    race_id = str(result.get("RaceId") or "")
+    if not race_id:
+        return None
+    if race_id in race_start_cache:
+        return race_start_cache[race_id]
+    try:
+        payload = get_race_results(race_id)
+    except BiathlonError:
+        race_start_cache[race_id] = None
+        return None
+    start_dt = _start_dt_from_competition(payload.get("Competition") or {})
+    race_start_cache[race_id] = start_dt
+    return start_dt
+
+
+def _is_result_before_cutoff(
+    result: dict,
+    target_race_id: str,
+    cutoff_dt: datetime.datetime | None,
+    race_start_cache: dict[str, datetime.datetime | None],
+) -> bool:
+    race_id = str(result.get("RaceId") or "")
+    if race_id and race_id == target_race_id:
+        return False
+    if cutoff_dt is None:
+        return True
+    start_dt = _resolve_result_start_datetime(result, race_start_cache)
+    if start_dt is None:
+        return False
+    return start_dt < cutoff_dt
+
+
+def _filter_results_before_cutoff(
+    rows: list[dict],
+    target_race_id: str,
+    cutoff_dt: datetime.datetime | None,
+    race_start_cache: dict[str, datetime.datetime | None],
+) -> list[dict]:
+    return [
+        row
+        for row in rows
+        if _is_result_before_cutoff(
+            row,
+            target_race_id,
+            cutoff_dt,
+            race_start_cache,
+        )
+    ]
+
+
+def _discipline_cup_key(discipline: str) -> str:
+    disc = str(discipline or "").upper()
+    return "IN" if disc == "SI" else disc
+
+
+def _is_same_discipline_cup(race_discipline: str, target_discipline: str) -> bool:
+    return _discipline_cup_key(race_discipline) == _discipline_cup_key(
+        target_discipline
+    )
+
+
+def _race_meta_sort_key(
+    entry: tuple[datetime.datetime | None, str, str],
+) -> tuple[bool, datetime.datetime, str]:
+    start_dt, race_id, _disc = entry
+    fallback_dt = datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)
+    return (start_dt is None, start_dt or fallback_dt, race_id)
+
+
+def _collect_wc_individual_races(
+    season_id: str,
+    cat_id: str,
+) -> list[tuple[datetime.datetime | None, str, str]]:
+    try:
+        events = get_events(season_id, level=1)
+    except BiathlonError:
+        return []
+    races_out: list[tuple[datetime.datetime | None, str, str]] = []
+    for event in events:
+        if detect_event_type(event) != EVENT_TYPE_WC:
+            continue
+        event_id = str(event.get("EventId") or "")
+        if not event_id:
+            continue
+        try:
+            races = get_races(event_id)
+        except BiathlonError:
+            continue
+        for race in races:
+            race_id = str(race.get("RaceId") or race.get("Id") or "")
+            if not race_id:
+                continue
+            race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
+            if cat_id and race_cat != cat_id:
+                continue
+            race_disc = str(race.get("DisciplineId") or "").upper()
+            if race_disc not in DISCIPLINES:
+                continue
+            races_out.append((_start_dt_from_race_row(race), race_id, race_disc))
+
+    races_out.sort(key=_race_meta_sort_key)
+    return races_out
+
+
+def _build_race_points_and_info(
+    payload: dict,
+    discipline: str,
+) -> tuple[dict[str, int], dict[str, tuple[str, str]]]:
+    points_by_id: dict[str, int] = {}
+    athlete_info: dict[str, tuple[str, str]] = {}
+    is_mass_start = str(discipline or "").upper() == "MS"
+    for res in payload.get("Results") or []:
+        if res.get("IsTeam"):
+            continue
+        ibu_id = str(res.get("IBUId") or "")
+        if not ibu_id:
+            continue
+        rank_val = _parse_rank(res.get("Rank") or res.get("ResultOrder"))
+        if rank_val is None:
+            continue
+        pts = _get_wc_points(rank_val, mass_start=is_mass_start)
+        if pts <= 0:
+            continue
+        points_by_id[ibu_id] = pts
+        athlete_info[ibu_id] = (
+            str(res.get("Name") or res.get("ShortName") or ""),
+            str(res.get("Nat") or ""),
+        )
+    return points_by_id, athlete_info
+
+
+def _merge_points(total: dict[str, int], race_points: dict[str, int]) -> None:
+    for ibu_id, points in race_points.items():
+        total[ibu_id] = total.get(ibu_id, 0) + points
+
+
+def _rank_points(points_by_id: dict[str, int]) -> dict[str, int]:
+    ranked = sorted(points_by_id.items(), key=lambda item: (-item[1], item[0]))
+    return {ibu_id: idx for idx, (ibu_id, _pts) in enumerate(ranked, 1)}
+
+
+def _rows_from_points(
+    points_by_id: dict[str, int],
+    athlete_info: dict[str, tuple[str, str]],
+) -> list[dict]:
+    rank_map = _rank_points(points_by_id)
+    ranked_ids = sorted(points_by_id, key=lambda ibu_id: rank_map[ibu_id])
+    rows: list[dict] = []
+    for ibu_id in ranked_ids:
+        name, nat = athlete_info.get(ibu_id, ("", ""))
+        rows.append(
+            {
+                "Rank": rank_map[ibu_id],
+                "Name": name,
+                "Nat": nat,
+                "IBUId": ibu_id,
+                "Score": points_by_id[ibu_id],
+            }
+        )
+    return rows
+
+
+def _compute_wc_pre_race_standings(
+    season_id: str,
+    cat_id: str,
+    target_race_id: str,
+    target_discipline: str,
+    cutoff_dt: datetime.datetime | None,
+) -> tuple[list[dict], list[dict]]:
+    if cutoff_dt is None:
+        return [], []
+    races = _collect_wc_individual_races(season_id, cat_id)
+    total_points: dict[str, int] = {}
+    disc_points: dict[str, int] = {}
+    athlete_info: dict[str, tuple[str, str]] = {}
+
+    for start_dt, race_id, race_disc in races:
+        if race_id == target_race_id:
+            continue
+        if start_dt is None or start_dt >= cutoff_dt:
+            continue
+        try:
+            payload = get_race_results(race_id)
+        except BiathlonError:
+            continue
+        if not _has_completed_results(payload):
+            continue
+        race_points, race_info = _build_race_points_and_info(payload, race_disc)
+        _merge_points(total_points, race_points)
+        if _is_same_discipline_cup(race_disc, target_discipline):
+            _merge_points(disc_points, race_points)
+        for ibu_id, info in race_info.items():
+            athlete_info.setdefault(ibu_id, info)
+
+    return _rows_from_points(total_points, athlete_info), _rows_from_points(
+        disc_points, athlete_info
+    )
+
+
 def _compute_what_if_scenarios(
     total_standings: list[dict],
     disc_standings: list[dict],
@@ -1856,6 +2088,7 @@ def _render_wc_standings_sections(
     args: argparse.Namespace,
     total_standings: list[dict],
     disc_standings: list[dict],
+    wc_rows_for_missing: list[dict] | None,
     disc_name: str,
     format_leader_name: Callable[[str, str], str],
     leader_name_cell: Callable[[str, int], str],
@@ -1871,7 +2104,11 @@ def _render_wc_standings_sections(
     # Section 1: Missing from top 25 World Cup standings (individual races only)
     if not is_mixed and cat_id in {"SW", "SM"}:
         missing_rows = []
-        wc_rows = _get_wc_rows(cat_id, season_id)
+        wc_rows = (
+            wc_rows_for_missing
+            if wc_rows_for_missing is not None
+            else _get_wc_rows(cat_id, season_id)
+        )
         top_rows = wc_rows[:25]
         missing = [row for row in top_rows if _row_ibu_id(row) not in startlist_ids]
         if missing:
@@ -2742,6 +2979,8 @@ def _prepare_startlist_context(
     payload: dict,
     race_id: str,
     args: argparse.Namespace,
+    snapshot_target_race_id: str = "",
+    snapshot_cutoff_dt: datetime.datetime | None = None,
 ) -> dict:
     """Prepare shared context for startlist analysis functions.
 
@@ -2812,6 +3051,10 @@ def _prepare_startlist_context(
                 ibu_id, result = future.result()
                 prefetched_results[ibu_id] = result
 
+    snapshot_race_start_cache: dict[str, datetime.datetime | None] = {}
+    if snapshot_target_race_id:
+        snapshot_race_start_cache[snapshot_target_race_id] = snapshot_cutoff_dt
+
     return {
         "payload": payload,
         "race_id": race_id,
@@ -2831,6 +3074,10 @@ def _prepare_startlist_context(
         "startlist_ids": startlist_ids,
         "alltime_stats": alltime_stats,
         "prefetched_results": prefetched_results,
+        "is_snapshot": bool(snapshot_target_race_id),
+        "snapshot_target_race_id": snapshot_target_race_id,
+        "snapshot_cutoff_dt": snapshot_cutoff_dt,
+        "snapshot_race_start_cache": snapshot_race_start_cache,
     }
 
 
@@ -2848,6 +3095,7 @@ def _render_olympic_individual_sections(
 
     disc_name = DISCIPLINE_NAMES.get(race_disc, race_disc)
     cat_name = CATEGORY_DISPLAY_NAMES.get(cat_id, cat_id)
+    cutoff_dt = ctx.get("snapshot_cutoff_dt") if ctx.get("is_snapshot") else None
 
     highlight_athletes = _get_startlist_family_names(payload)
 
@@ -2856,9 +3104,9 @@ def _render_olympic_individual_sections(
     all_athlete_stats: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=2) as executor:
         podiums_future = executor.submit(
-            _get_past_olympic_individual_podiums, race_disc, cat_id
+            _get_past_olympic_individual_podiums, race_disc, cat_id, cutoff_dt
         )
-        medals_future = executor.submit(_get_all_olympic_medals, cat_id)
+        medals_future = executor.submit(_get_all_olympic_medals, cat_id, cutoff_dt)
         podiums = podiums_future.result()
         all_country_medals, all_athlete_stats = medals_future.result()
 
@@ -3342,6 +3590,12 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
     )
     startlist_ids = ctx["startlist_ids"]
     prefetched_results = ctx["prefetched_results"]
+    snapshot_mode = bool(ctx.get("is_snapshot"))
+    snapshot_target_race_id = str(ctx.get("snapshot_target_race_id") or "")
+    snapshot_cutoff_dt = ctx.get("snapshot_cutoff_dt")
+    snapshot_race_start_cache = ctx.get("snapshot_race_start_cache")
+    if not isinstance(snapshot_race_start_cache, dict):
+        snapshot_race_start_cache = {}
     is_mixed = ctx.get("is_mixed", False)
     pretty = is_pretty_output(args)
     milestone_disc_label = (
@@ -3349,15 +3603,30 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
     )
     total_standings: list[dict] = []
     disc_standings: list[dict] = []
+    wc_rows_for_missing: list[dict] | None = None
     general_leader_id = ""
     discipline_leader_id = ""
     disc_name = DISCIPLINE_CUP_SUFFIX.get(race_disc, race_disc)
     if race_disc in DISCIPLINES and cat_id in {"SW", "SM"}:
-        total_cup_id, disc_cup_id = _get_cup_ids_for_race(season_id, cat_id, race_disc)
-        total_standings = (
-            _fetch_standings(total_cup_id, limit=10) if total_cup_id else []
-        )
-        disc_standings = _fetch_standings(disc_cup_id, limit=10) if disc_cup_id else []
+        if snapshot_mode:
+            total_standings, disc_standings = _compute_wc_pre_race_standings(
+                season_id,
+                cat_id,
+                snapshot_target_race_id,
+                race_disc,
+                snapshot_cutoff_dt,
+            )
+            wc_rows_for_missing = total_standings
+        else:
+            total_cup_id, disc_cup_id = _get_cup_ids_for_race(
+                season_id, cat_id, race_disc
+            )
+            total_standings = (
+                _fetch_standings(total_cup_id, limit=10) if total_cup_id else []
+            )
+            disc_standings = (
+                _fetch_standings(disc_cup_id, limit=10) if disc_cup_id else []
+            )
         if total_standings:
             general_leader_id = _row_ibu_id(total_standings[0])
         if disc_standings:
@@ -3388,6 +3657,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
         args,
         total_standings,
         disc_standings,
+        wc_rows_for_missing,
         disc_name,
         format_leader_name,
         leader_name_cell,
@@ -3498,6 +3768,13 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
         if not all_payload:
             continue
         results = list(all_payload.get("Results") or [])
+        if snapshot_mode:
+            results = _filter_results_before_cutoff(
+                results,
+                snapshot_target_race_id,
+                snapshot_cutoff_dt,
+                snapshot_race_start_cache,
+            )
         wc_results = [
             res for res in results if str(res.get("Level") or "").upper() == "WC"
         ]
@@ -4995,38 +5272,3 @@ def render_venue_history(
                     pretty=is_pretty_output(args),
                 )
                 print()
-
-
-def handle_startlist(args: argparse.Namespace) -> int:
-    """Analyze a startlist for missing WC athletes and milestones."""
-    try:
-        if args.race:
-            race_id = args.race
-            payload = get_race_results(race_id)
-        else:
-            candidates = _find_all_startlist_races()
-            race_id, payload = _select_race_interactive(candidates)
-    except BiathlonError as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
-
-    if not _is_true(payload.get("IsStartList")):
-        print(f"race {race_id} does not have a startlist", file=sys.stderr)
-        return 1
-
-    entries = _build_startlist_entries(payload)
-    if not entries:
-        print(f"no startlist entries found for race {race_id}", file=sys.stderr)
-        return 1
-
-    ctx = _prepare_startlist_context(payload, race_id, args)
-
-    print()
-    print(_format_section_title(format_race_header(payload, race_id), args))
-    print(f"Startlist entries: {len(ctx['entries'])}")
-    print()
-
-    render_startlist_analysis(ctx, args)
-    render_venue_history(ctx, args)
-
-    return 0

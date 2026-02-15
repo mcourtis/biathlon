@@ -24,7 +24,6 @@ from .athlete import (
     handle_athlete_id,
 )
 from .shooting import handle_shooting
-from .startlist import handle_startlist
 from .post_race import handle_post_race
 from .brief import (
     handle_brief_event,
@@ -55,7 +54,6 @@ __all__ = [
     "handle_athlete_info",
     "handle_athlete_id",
     "handle_shooting",
-    "handle_startlist",
     "handle_post_race",
     "handle_brief_event",
     "handle_brief_season",

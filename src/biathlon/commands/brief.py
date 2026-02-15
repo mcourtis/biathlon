@@ -25,18 +25,19 @@ from ..constants import (
     EVENT_TYPE_WCH,
 )
 from ..formatting import is_pretty_output, Color, render_table
-from ..utils import format_race_header, parse_date
+from ..utils import format_race_header, parse_date, parse_start_datetime
 from .events import compute_event_styles, format_level
 
 from ._common import (
     _format_section_title,
+    _has_completed_relay_results,
     _max_workers,
     _row_ibu_id,
     detect_event_type,
     is_relay_discipline,
 )
 from .post_race import handle_post_race
-from .results import _get_wc_rows
+from .results import _get_wc_rows, _has_completed_results
 from ._common import _select_race_interactive
 from .startlist import (
     _build_startlist_entries,
@@ -158,6 +159,22 @@ def _format_local_time(start_raw: str) -> tuple[str, str]:
             date_part, time_part = start_raw.split("T", 1)
             return date_part, time_part[:5]
         return start_raw.split(" ", 1)[0], ""
+
+
+def _resolve_race_start_datetime(
+    competition: dict | None,
+) -> datetime.datetime | None:
+    """Resolve race start datetime from a competition payload."""
+    if not isinstance(competition, dict):
+        return None
+    for key in ("StartTime", "StartDate", "Date"):
+        raw = competition.get(key)
+        if not raw:
+            continue
+        start_dt = parse_start_datetime(str(raw))
+        if start_dt is not None:
+            return start_dt
+    return None
 
 
 def _season_end_year(season_id: str) -> int | None:
@@ -1684,8 +1701,12 @@ def handle_brief_startlist(args: argparse.Namespace) -> int:
     Shows sections 1-13 from the startlist analysis (World Cup races).
     Olympic races show Olympic history sections instead.
     """
+    snapshot_mode = False
+    snapshot_cutoff_dt: datetime.datetime | None = None
+    explicit_race = bool(getattr(args, "race", ""))
+
     try:
-        if getattr(args, "race", ""):
+        if explicit_race:
             race_id = args.race
             payload = get_race_results(race_id)
         else:
@@ -1695,29 +1716,55 @@ def handle_brief_startlist(args: argparse.Namespace) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    if not _is_true(payload.get("IsStartList")):
-        print(f"race {race_id} does not have a startlist", file=sys.stderr)
-        return 1
+    comp = payload.get("Competition") or {}
+    race_disc = str(comp.get("DisciplineId") or "").upper()
+    is_startlist = _is_true(payload.get("IsStartList"))
+    if not is_startlist:
+        if not explicit_race:
+            print(f"race {race_id} does not have a startlist", file=sys.stderr)
+            return 1
+        if is_relay_discipline(race_disc):
+            has_completed_results = _has_completed_relay_results(payload)
+        else:
+            has_completed_results = _has_completed_results(payload)
+        if not has_completed_results:
+            print(
+                f"race {race_id} does not have a startlist or completed results",
+                file=sys.stderr,
+            )
+            return 1
+        snapshot_mode = True
+        snapshot_cutoff_dt = _resolve_race_start_datetime(comp)
+        if snapshot_cutoff_dt is None:
+            print(
+                f"race {race_id} does not expose a race start datetime for snapshot mode",
+                file=sys.stderr,
+            )
+            return 1
 
     entries = _build_startlist_entries(payload)
     team_entries = _build_team_entries(payload)
-    comp = payload.get("Competition") or {}
-    race_disc = str(comp.get("DisciplineId") or "").upper()
     event_type = detect_event_type(payload.get("SportEvt") or {})
     is_olympic_relay = event_type == EVENT_TYPE_OWG and is_relay_discipline(race_disc)
 
-    if is_olympic_relay and team_entries:
+    if is_olympic_relay and team_entries and not snapshot_mode:
         return _render_team_startlist(payload, race_id, team_entries, args)
 
     if not entries:
         # Try team entries for provisional relay startlists
-        if team_entries:
+        if team_entries and not snapshot_mode:
             return _render_team_startlist(payload, race_id, team_entries, args)
         print(f"no startlist entries found for race {race_id}", file=sys.stderr)
         return 1
 
     args.leader_markers = True
-    ctx = _prepare_startlist_context(payload, race_id, args)
+    ctx = _prepare_startlist_context(
+        payload,
+        race_id,
+        args,
+        snapshot_target_race_id=race_id if snapshot_mode else "",
+        snapshot_cutoff_dt=snapshot_cutoff_dt,
+    )
 
     print()
     print(_format_section_title(format_race_header(payload, race_id), args))
