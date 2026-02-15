@@ -69,6 +69,72 @@ OLYMPIC_SEASON_IDS = [
     "8182",
 ]
 
+# Display names for 3-letter country/NOC codes used in IBU results.
+COUNTRY_CODE_TO_NAME = {
+    "AND": "Andorra",
+    "ARG": "Argentina",
+    "ARM": "Armenia",
+    "AUS": "Australia",
+    "AUT": "Austria",
+    "AZE": "Azerbaijan",
+    "BEL": "Belgium",
+    "BIH": "Bosnia and Herzegovina",
+    "BLR": "Belarus",
+    "BRA": "Brazil",
+    "BUL": "Bulgaria",
+    "CAN": "Canada",
+    "CHE": "Switzerland",
+    "CHN": "China",
+    "CRO": "Croatia",
+    "CZE": "Czech Republic",
+    "ESP": "Spain",
+    "EST": "Estonia",
+    "EUN": "Unified Team",
+    "FIN": "Finland",
+    "FRA": "France",
+    "FRG": "West Germany",
+    "GBR": "Great Britain",
+    "GDR": "East Germany",
+    "GER": "Germany",
+    "GRE": "Greece",
+    "HUN": "Hungary",
+    "ITA": "Italy",
+    "JPN": "Japan",
+    "KAZ": "Kazakhstan",
+    "KOR": "South Korea",
+    "LAT": "Latvia",
+    "LTU": "Lithuania",
+    "MDA": "Moldova",
+    "MGL": "Mongolia",
+    "MKD": "North Macedonia",
+    "NED": "Netherlands",
+    "NOR": "Norway",
+    "NZL": "New Zealand",
+    "OAR": "Olympic Athletes from Russia",
+    "POL": "Poland",
+    "ROU": "Romania",
+    "ROC": "Russia",
+    "RUS": "Russia",
+    "SCG": "Serbia and Montenegro",
+    "SLO": "Slovenia",
+    "SRB": "Serbia",
+    "SVK": "Slovakia",
+    "SWE": "Sweden",
+    "TCH": "Czechoslovakia",
+    "UKR": "Ukraine",
+    "URS": "Soviet Union",
+    "USA": "United States",
+    "YUG": "Yugoslavia",
+}
+
+
+def _country_display(value: str) -> str:
+    code = str(value or "").strip().upper()
+    if not code:
+        return ""
+    return COUNTRY_CODE_TO_NAME.get(code, str(value))
+
+
 # IBU World Cup points distribution (positions 1-40)
 # Source: IBU Rules 2025, Chapter 3
 WC_POINTS = {
@@ -1780,6 +1846,7 @@ def _render_standings_section(
         rows,
         pretty=is_pretty_output(args),
         cell_formatters=[row_dimmer, name_cell, row_dimmer, row_dimmer],
+        column_separators={3},
     )
     print()
 
@@ -1828,6 +1895,7 @@ def _render_wc_standings_sections(
                 missing_rows,
                 pretty=is_pretty_output(args),
                 cell_formatters=[None, leader_name_cell, None, None],
+                column_separators={2},
             )
             print()
         else:
@@ -2803,6 +2871,7 @@ def _render_olympic_individual_sections(
             ],
             podium_rows,
             pretty=pretty,
+            column_separators={2},
         )
         print()
 
@@ -2847,7 +2916,7 @@ def _render_olympic_individual_sections(
             medal_rows.append(
                 [
                     str(idx),
-                    country,
+                    _country_display(country),
                     str(counts["gold"]),
                     str(counts["silver"]),
                     str(counts["bronze"]),
@@ -2865,6 +2934,7 @@ def _render_olympic_individual_sections(
             ],
             medal_rows,
             pretty=pretty,
+            column_separators={2},
         )
         print()
 
@@ -2872,21 +2942,39 @@ def _render_olympic_individual_sections(
     if not all_country_medals:
         print(
             _format_section_title(
-                f"{section_offset + 3}. Country medal table (all Olympic disciplines): none",
+                f"{section_offset + 3}. Country medal table ({cat_name}, all Olympic disciplines): none",
                 args,
             )
         )
         print()
     else:
+
+        def _init_country() -> dict[str, int]:
+            return {
+                "gold": 0,
+                "silver": 0,
+                "bronze": 0,
+                "gold_ind": 0,
+                "silver_ind": 0,
+                "bronze_ind": 0,
+                "gold_relay": 0,
+                "silver_relay": 0,
+                "bronze_relay": 0,
+            }
+
         all_country_counts: dict[str, dict[str, int]] = {}
         for m in all_country_medals:
+            disc = str(m.get("discipline") or "").upper()
+            is_relay_disc = disc in RELAY_DISCIPLINES
             for medal_type in ("gold", "silver", "bronze"):
                 nat = m.get(medal_type, "")
                 if not nat:
                     continue
                 if nat not in all_country_counts:
-                    all_country_counts[nat] = {"gold": 0, "silver": 0, "bronze": 0}
+                    all_country_counts[nat] = _init_country()
                 all_country_counts[nat][medal_type] += 1
+                suffix = "_relay" if is_relay_disc else "_ind"
+                all_country_counts[nat][medal_type + suffix] += 1
 
         sorted_all_countries = sorted(
             all_country_counts.items(),
@@ -2896,21 +2984,33 @@ def _render_olympic_individual_sections(
 
         print(
             _format_section_title(
-                f"{section_offset + 3}. Country medal table (all Olympic disciplines):",
+                f"{section_offset + 3}. Country medal table ({cat_name}, all Olympic disciplines):",
                 args,
             )
         )
         all_country_rows = []
         for idx, (country, counts) in enumerate(sorted_all_countries, 1):
             total = counts["gold"] + counts["silver"] + counts["bronze"]
+            total_ind = counts["gold_ind"] + counts["silver_ind"] + counts["bronze_ind"]
+            total_relay = (
+                counts["gold_relay"] + counts["silver_relay"] + counts["bronze_relay"]
+            )
             all_country_rows.append(
                 [
                     str(idx),
-                    country,
+                    _country_display(country),
                     str(counts["gold"]),
                     str(counts["silver"]),
                     str(counts["bronze"]),
                     str(total),
+                    str(counts["gold_ind"]),
+                    str(counts["silver_ind"]),
+                    str(counts["bronze_ind"]),
+                    str(total_ind),
+                    str(counts["gold_relay"]),
+                    str(counts["silver_relay"]),
+                    str(counts["bronze_relay"]),
+                    str(total_relay),
                 ]
             )
         render_table(
@@ -2921,9 +3021,23 @@ def _render_olympic_individual_sections(
                 Color.silver("Silver"),
                 Color.bronze("Bronze"),
                 "Total",
+                Color.gold("Gold"),
+                Color.silver("Silver"),
+                Color.bronze("Bronze"),
+                "Total",
+                Color.gold("Gold"),
+                Color.silver("Silver"),
+                Color.bronze("Bronze"),
+                "Total",
             ],
             all_country_rows,
             pretty=pretty,
+            column_separators={2, 6, 10},
+            group_headers=[
+                (2, 6, "All"),
+                (6, 10, "Individual"),
+                (10, 14, "Relay"),
+            ],
         )
         print()
 
@@ -2956,7 +3070,15 @@ def _render_olympic_individual_sections(
                 athlete_counts[full_name]["races"] += 1
 
     sorted_athletes = sorted(
-        ((k, v) for k, v in athlete_counts.items() if v["gold"] > 0),
+        (
+            (k, v)
+            for k, v in athlete_counts.items()
+            if v["gold"] > 0
+            or (
+                v["family_name"] in highlight_athletes
+                and (v["gold"] + v["silver"] + v["bronze"]) > 0
+            )
+        ),
         key=lambda x: (
             x[1]["gold"],
             x[1]["silver"],
@@ -3018,12 +3140,19 @@ def _render_olympic_individual_sections(
             athlete_rows,
             pretty=pretty,
             row_styles=row_styles,
+            column_separators={4},
         )
         print()
 
     # Section 5: Athlete medal table (all Olympic disciplines)
     medalists = [
-        (key, stats) for key, stats in all_athlete_stats.items() if stats["gold"] > 0
+        (key, stats)
+        for key, stats in all_athlete_stats.items()
+        if stats["gold"] >= 2
+        or (
+            key in startlist_ids
+            and (stats["gold"] + stats["silver"] + stats["bronze"]) > 0
+        )
     ]
     medalists.sort(
         key=lambda x: (
@@ -3054,7 +3183,7 @@ def _render_olympic_individual_sections(
     if not medalists:
         print(
             _format_section_title(
-                f"{section_offset + 5}. Athlete medal table (all Olympic disciplines): none",
+                f"{section_offset + 5}. Athlete medal table ({cat_name}, all Olympic disciplines): none",
                 args,
             )
         )
@@ -3062,7 +3191,7 @@ def _render_olympic_individual_sections(
     else:
         print(
             _format_section_title(
-                f"{section_offset + 5}. Athlete medal table (all Olympic disciplines):",
+                f"{section_offset + 5}. Athlete medal table ({cat_name}, all Olympic disciplines):",
                 args,
             )
         )
