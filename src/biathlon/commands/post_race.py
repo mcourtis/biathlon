@@ -973,11 +973,11 @@ def _render_olympic_medal_sections(
         if stats["gold"] > 0 or stats["silver"] > 0 or stats["bronze"] > 0
     ]
     all_medalists.sort(key=_medal_sort_key)
-    # Build ranked list: keep athletes with 2+ gold medals + race medalists + participants with any medal
+    # Build ranked list: keep athletes with 2+ gold medals + race medalists
     medalists = [
         (rank, key, stats)
         for rank, (key, stats) in enumerate(all_medalists, 1)
-        if stats["gold"] >= 2 or key in race_medalist_ids or key in participating_ids
+        if stats["gold"] >= 2 or key in race_medalist_ids
     ]
 
     if not medalists:
@@ -2210,6 +2210,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
     bronze_ids: set[str] = set()
     race_country_medals: dict[str, set[str]] = {}
     race_athlete_medals: dict[str, set[str]] = {}
+    race_medalist_name_nat: set[tuple[str, str]] = set()
     for entry in flower_entries:
         rank_val = entry["rank"]
         medal = MEDAL_RANK_MAP.get(rank_val)
@@ -2218,6 +2219,9 @@ def handle_post_race(args: argparse.Namespace) -> int:
         nat = entry.get("nat", "")
         if nat:
             race_country_medals.setdefault(nat, set()).add(medal)
+        name = entry.get("name", "")
+        if name:
+            race_medalist_name_nat.add((name, nat))
         ibu_id = entry.get("ibu_id", "")
         if not ibu_id:
             continue
@@ -2324,7 +2328,19 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 print()
 
         # Athlete medal table
-        if not is_relay and sorted_athletes:
+        race_medalist_ids = gold_ids | silver_ids | bronze_ids
+        ranked_athletes = [
+            (rank, stats)
+            for rank, stats in enumerate(sorted_athletes, 1)
+            if stats["gold"] >= 1
+            or (stats.get("ibu_id") and str(stats.get("ibu_id")) in race_medalist_ids)
+            or (
+                str(stats.get("name") or ""),
+                str(stats.get("nat") or ""),
+            )
+            in race_medalist_name_nat
+        ]
+        if not is_relay and ranked_athletes:
             sec += 1
             print(
                 _format_section_title(
@@ -2338,12 +2354,12 @@ def handle_post_race(args: argparse.Namespace) -> int:
             ath_rows = []
             ath_row_styles = []
             ath_keys = []
-            for idx, stats in enumerate(sorted_athletes, 1):
+            for rank, stats in ranked_athletes:
                 total = stats["gold"] + stats["silver"] + stats["bronze"]
                 ibu_id = stats["ibu_id"]
                 ath_rows.append(
                     [
-                        str(idx),
+                        str(rank),
                         stats["name"],
                         stats["nat"],
                         medal_gender,
@@ -2395,6 +2411,16 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     None,
                     None,
                 ],
+            )
+            print()
+        elif not is_relay:
+            sec += 1
+            print(
+                _format_section_title(
+                    f"{sec}. {medal_scope} medal table by athlete"
+                    f" — {cat_name} {disc_name}: none",
+                    args,
+                )
             )
             print()
 

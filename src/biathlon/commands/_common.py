@@ -9,6 +9,7 @@ from typing import Any, Callable
 
 from ..api import BiathlonError, get_analytic_results
 from ..constants import (
+    DISCIPLINE_NAMES,
     EVENT_TYPE_LABELS,
     EVENT_TYPE_OWG,
     EVENT_TYPE_WC,
@@ -120,6 +121,15 @@ def is_mixed_relay(discipline: str, category: str) -> bool:
     return discipline == "RL" and category == "MX"
 
 
+def _discipline_display_name(discipline: str, category: str) -> str:
+    """Return discipline display label from code + category."""
+    disc = str(discipline or "").upper()
+    cat = str(category or "").upper()
+    if disc == "RL" and cat == "MX":
+        return "Mixed Relay"
+    return DISCIPLINE_NAMES.get(disc, disc or "?")
+
+
 def _select_race_interactive(candidates: list[tuple[str, dict]]) -> tuple[str, dict]:
     """Prompt user to select from multiple races.
 
@@ -157,16 +167,20 @@ def _select_race_interactive(candidates: list[tuple[str, dict]]) -> tuple[str, d
         event_label = EVENT_TYPE_LABELS.get(event_type, event_type)
         cat = comp.get("catId") or comp.get("CatId") or "?"
         disc = comp.get("DisciplineId") or "?"
+        disc_label = _discipline_display_name(str(disc), str(cat))
         venue = sport_evt.get("Organizer") or sport_evt.get("ShortDescription") or ""
         start_raw = comp.get("StartTime") or comp.get("StartDate") or ""
         start = _format_start_for_display(str(start_raw))
 
         cat_label = {"SW": "Women", "SM": "Men", "MX": "Mixed"}.get(cat, cat)
+        race_label = (
+            f"{cat_label} {disc_label}"
+            if cat_label == "Mixed"
+            else f"{cat_label}'s {disc_label}"
+        )
         status = comp.get("StatusText") or ""
         status_part = f" | Status: {status}" if status else ""
-        print(
-            f"  {idx}. [{event_label}] {cat_label}'s {disc} - {venue}", file=sys.stderr
-        )
+        print(f"  {idx}. [{event_label}] {race_label} - {venue}", file=sys.stderr)
         print(f"     Start: {start} | ID: {race_id}{status_part}\n", file=sys.stderr)
 
     # Get user selection
