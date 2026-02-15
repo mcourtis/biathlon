@@ -7,7 +7,7 @@ import datetime
 import sys
 
 from ..api import get_current_season_id, get_events, get_races, get_seasons
-from ..formatting import is_pretty_output, get_output_format, render_table
+from ..formatting import OutputFormat, get_output_format, is_pretty_output, render_table
 from ..utils import get_race_label, parse_date
 
 
@@ -243,7 +243,7 @@ def handle_events(args: argparse.Namespace) -> int:
 
 
 def _handle_events_summary(
-    events: list[dict], pretty: bool, output_format: str, date_only
+    events: list[dict], pretty: bool, output_format: OutputFormat, date_only
 ) -> int:
     """Handle --summary flag for events command."""
     headers = [
@@ -350,7 +350,7 @@ def _handle_events_with_races(
     events: list[dict],
     args,
     pretty: bool,
-    output_format: str,
+    output_format: OutputFormat,
     date_only,
     date_with_time,
 ) -> int:
