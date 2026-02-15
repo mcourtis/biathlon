@@ -10,6 +10,7 @@ from importlib.metadata import version, PackageNotFoundError
 
 from .api import BiathlonError
 from .commands import (
+    handle_achievements,
     handle_athlete_id,
     handle_athlete_info,
     handle_athlete_results,
@@ -502,6 +503,51 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_output_format_arg(ceremony_parser)
     ceremony_parser.set_defaults(func=handle_ceremony)
+
+    # --- achievements ---
+    achievements_parser = subparsers.add_parser(
+        "achievements",
+        help="Show achievements medal table (default: women athletes, World Cup, current season)",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
+    achievements_parser.add_argument(
+        "--men", action="store_true", help="Show men (default: women)"
+    )
+    achievements_parser.add_argument(
+        "--country",
+        action="store_true",
+        help="Rank by country (default: by athlete)",
+    )
+    achievements_parser.add_argument(
+        "--nationality",
+        default="",
+        help="Filter by nationality code (e.g., FRA, NOR, GER)",
+    )
+    scope_group = achievements_parser.add_mutually_exclusive_group()
+    scope_group.add_argument(
+        "--olympics",
+        action="store_true",
+        help="Use Olympics scope (default: World Cup)",
+    )
+    scope_group.add_argument(
+        "--world",
+        action="store_true",
+        help="Use World Championships scope (default: World Cup)",
+    )
+    achievements_parser.add_argument(
+        "--season",
+        default="",
+        help="Season id (default: current season, use 'all' to aggregate all seasons)",
+    )
+    achievements_parser.add_argument(
+        "--limit",
+        type=int,
+        default=50,
+        help="Limit output rows (default: 50, 0 for all)",
+    )
+    add_output_format_arg(achievements_parser)
+    achievements_parser.set_defaults(func=handle_achievements)
 
     # --- shooting ---
     shooting_parser = subparsers.add_parser(

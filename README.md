@@ -128,6 +128,17 @@ biathlon ceremony
 biathlon ceremony --athlete
 ```
 
+Show achievements medal tables:
+
+```bash
+biathlon achievements
+biathlon achievements --men
+biathlon achievements --country
+biathlon achievements --nationality FRA
+biathlon achievements --olympics
+biathlon achievements --world --season all
+```
+
 Cumulate season statistics:
 
 ```bash

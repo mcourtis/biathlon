@@ -17,6 +17,7 @@ from .cumulate import (
 )
 from .standings import handle_standings
 from .ceremony import handle_ceremony
+from .achievements import handle_achievements
 from .athlete import (
     handle_athlete_results,
     handle_athlete_results_scan,
@@ -49,6 +50,7 @@ __all__ = [
     "handle_cumulate_remontada",
     "handle_standings",
     "handle_ceremony",
+    "handle_achievements",
     "handle_athlete_results",
     "handle_athlete_results_scan",
     "handle_athlete_info",
