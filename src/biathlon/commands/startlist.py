@@ -2364,7 +2364,7 @@ def _fetch_olympic_season_medals(
                 if team_rank is None:
                     continue
                 ibu_id = _row_ibu_id(res)
-                name = res.get("ShortName") or res.get("Name") or ""
+                name = res.get("Name") or res.get("ShortName") or ""
                 key = ibu_id or f"{name}|{nat}"
                 if not key:
                     continue
@@ -2404,7 +2404,7 @@ def _fetch_olympic_season_medals(
                 if res.get("IsTeam"):
                     continue
                 ibu_id = _row_ibu_id(res)
-                name = res.get("ShortName") or res.get("Name") or ""
+                name = res.get("Name") or res.get("ShortName") or ""
                 nat = str(res.get("Nat") or "")
                 key = ibu_id or f"{name}|{nat}"
                 if not key:
@@ -2510,7 +2510,7 @@ def _fetch_olympic_season_medals(
             team_rank = team_ranks.get(nat)
             if team_rank is None:
                 continue
-            name = res.get("ShortName") or res.get("Name") or ""
+            name = res.get("Name") or res.get("ShortName") or ""
             key = ibu_id
             if key not in athlete_stats:
                 athlete_stats[key] = {
@@ -2557,6 +2557,18 @@ def _get_all_olympic_medals(
     all_country: list[dict] = []
     merged_athletes: dict[str, dict] = {}
 
+    def _prefer_name(current: str, candidate: str) -> str:
+        cur = str(current or "").strip()
+        cand = str(candidate or "").strip()
+        if not cand:
+            return cur
+        if not cur:
+            return cand
+        # Prefer longer names to avoid abbreviated variants like "J. DOE".
+        if len(cand) > len(cur):
+            return cand
+        return cur
+
     def _merge(athlete_stats: dict[str, dict]) -> None:
         for key, data in athlete_stats.items():
             if key not in merged_athletes:
@@ -2589,8 +2601,9 @@ def _get_all_olympic_medals(
             merged_athletes[key]["silver_relay"] += data.get("silver_relay", 0)
             merged_athletes[key]["bronze_relay"] += data.get("bronze_relay", 0)
             merged_athletes[key]["races_relay"] += data.get("races_relay", 0)
-            if not merged_athletes[key]["name"] and data["name"]:
-                merged_athletes[key]["name"] = data["name"]
+            merged_athletes[key]["name"] = _prefer_name(
+                merged_athletes[key]["name"], data["name"]
+            )
 
     with ThreadPoolExecutor(
         max_workers=_max_workers(len(OLYMPIC_SEASON_IDS))

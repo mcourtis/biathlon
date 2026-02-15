@@ -61,6 +61,13 @@ class Color:
         return cls.rgb(text, cls.OCEAN_BLUE, bold=True)
 
     @classmethod
+    def highlight_plain(cls, text: str) -> str:
+        """Apply highlight color without bold."""
+        if not cls.enabled():
+            return text
+        return cls.rgb(text, cls.OCEAN_BLUE, bold=False)
+
+    @classmethod
     def section_title(cls, text: str) -> str:
         """Apply section title style."""
         if not cls.enabled():
@@ -336,6 +343,8 @@ def render_table(
             return Color.dim(text)
         if style == "highlight":
             return Color.highlight(text)
+        if style == "highlight_plain":
+            return Color.highlight_plain(text)
         if style == "gold":
             return Color.gold(text)
         if style == "silver":

@@ -8,9 +8,15 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
 from ..api import BiathlonError, get_analytic_results
-from ..constants import EVENT_TYPE_OWG, EVENT_TYPE_WC, EVENT_TYPE_WCH, RELAY_DISCIPLINES
+from ..constants import (
+    EVENT_TYPE_LABELS,
+    EVENT_TYPE_OWG,
+    EVENT_TYPE_WC,
+    EVENT_TYPE_WCH,
+    RELAY_DISCIPLINES,
+)
 from ..formatting import Color, is_pretty_output
-from ..utils import get_first_time, parse_time_seconds
+from ..utils import get_first_time, parse_start_datetime, parse_time_seconds
 
 
 # Leader marker characters
@@ -131,18 +137,36 @@ def _select_race_interactive(candidates: list[tuple[str, dict]]) -> tuple[str, d
 
     # Display options
     print("\nMultiple races found:\n", file=sys.stderr)
+
+    def _format_start_for_display(start_raw: str) -> str:
+        dt = parse_start_datetime(start_raw)
+        if dt is not None:
+            local_dt = dt.astimezone()
+            tz_name = local_dt.tzname() or ""
+            base = local_dt.strftime("%Y-%m-%d %H:%M")
+            return f"{base} {tz_name}".strip()
+        text = str(start_raw or "").strip()
+        if text.endswith("Z"):
+            text = text[:-1]
+        return text.replace("T", " ")
+
     for idx, (race_id, payload) in enumerate(candidates, 1):
         comp = payload.get("Competition") or {}
         sport_evt = payload.get("SportEvt") or {}
+        event_type = detect_event_type(sport_evt)
+        event_label = EVENT_TYPE_LABELS.get(event_type, event_type)
         cat = comp.get("catId") or comp.get("CatId") or "?"
         disc = comp.get("DisciplineId") or "?"
         venue = sport_evt.get("Organizer") or sport_evt.get("ShortDescription") or ""
-        start = comp.get("StartTime") or ""
+        start_raw = comp.get("StartTime") or comp.get("StartDate") or ""
+        start = _format_start_for_display(str(start_raw))
 
         cat_label = {"SW": "Women", "SM": "Men", "MX": "Mixed"}.get(cat, cat)
         status = comp.get("StatusText") or ""
         status_part = f" | Status: {status}" if status else ""
-        print(f"  {idx}. {cat_label}'s {disc} - {venue}", file=sys.stderr)
+        print(
+            f"  {idx}. [{event_label}] {cat_label}'s {disc} - {venue}", file=sys.stderr
+        )
         print(f"     Start: {start} | ID: {race_id}{status_part}\n", file=sys.stderr)
 
     # Get user selection
