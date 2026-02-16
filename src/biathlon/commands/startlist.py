@@ -3450,25 +3450,31 @@ def _render_olympic_individual_sections(
                 athlete_counts[full_name][medal_type] += 1
                 athlete_counts[full_name]["races"] += 1
 
-    sorted_athletes = sorted(
-        (
-            (k, v)
-            for k, v in athlete_counts.items()
-            if v["gold"] > 0
-            or (
-                v["family_name"] in highlight_athletes
-                and (v["gold"] + v["silver"] + v["bronze"]) > 0
-            )
-        ),
-        key=lambda x: (
-            x[1]["gold"],
-            x[1]["silver"],
-            x[1]["bronze"],
-            x[1]["gold"] + x[1]["silver"] + x[1]["bronze"],
-            x[1]["races"],
-        ),
-        reverse=True,
-    )
+    def _discipline_athlete_sort_key(item: tuple[str, dict]) -> tuple[int, ...]:
+        counts = item[1]
+        return (
+            counts["gold"],
+            counts["silver"],
+            counts["bronze"],
+            counts["gold"] + counts["silver"] + counts["bronze"],
+            counts["races"],
+        )
+
+    discipline_all_medalists = [
+        (full_name, counts)
+        for full_name, counts in athlete_counts.items()
+        if (counts["gold"] + counts["silver"] + counts["bronze"]) > 0
+    ]
+    discipline_all_medalists.sort(key=_discipline_athlete_sort_key, reverse=True)
+    discipline_rank_by_name = {
+        full_name: idx for idx, (full_name, _) in enumerate(discipline_all_medalists, 1)
+    }
+
+    sorted_athletes = [
+        (full_name, counts)
+        for full_name, counts in discipline_all_medalists
+        if counts["gold"] > 0 or counts["family_name"] in highlight_athletes
+    ]
 
     if not sorted_athletes:
         print(
@@ -3487,11 +3493,12 @@ def _render_olympic_individual_sections(
         )
         athlete_rows: list[list[str]] = []
         row_styles: list[str] = []
-        for idx, (full_name, counts) in enumerate(sorted_athletes, 1):
+        for full_name, counts in sorted_athletes:
             total = counts["gold"] + counts["silver"] + counts["bronze"]
+            rank = discipline_rank_by_name[full_name]
             athlete_rows.append(
                 [
-                    str(idx),
+                    str(rank),
                     full_name,
                     str(counts["nat"]),
                     str(counts["gender"]),
@@ -3526,40 +3533,47 @@ def _render_olympic_individual_sections(
         print()
 
     # Section 5: Athlete medal table (all Olympic disciplines)
-    medalists = [
+    def _all_olympic_athlete_sort_key(item: tuple[str, dict]) -> tuple[int, ...]:
+        stats = item[1]
+        return (
+            -stats["gold"],
+            -stats.get("gold_ind", 0),
+            -stats.get("gold_relay", 0),
+            -stats["silver"],
+            -stats.get("silver_ind", 0),
+            -stats.get("silver_relay", 0),
+            -stats["bronze"],
+            -stats.get("bronze_ind", 0),
+            -stats.get("bronze_relay", 0),
+            -(stats["gold"] + stats["silver"] + stats["bronze"]),
+            -(
+                stats.get("gold_ind", 0)
+                + stats.get("silver_ind", 0)
+                + stats.get("bronze_ind", 0)
+            ),
+            -(
+                stats.get("gold_relay", 0)
+                + stats.get("silver_relay", 0)
+                + stats.get("bronze_relay", 0)
+            ),
+            stats["races"],
+        )
+
+    olympic_all_medalists = [
         (key, stats)
         for key, stats in all_athlete_stats.items()
-        if stats["gold"] >= 2
-        or (
-            key in startlist_ids
-            and (stats["gold"] + stats["silver"] + stats["bronze"]) > 0
-        )
+        if (stats["gold"] + stats["silver"] + stats["bronze"]) > 0
     ]
-    medalists.sort(
-        key=lambda x: (
-            -x[1]["gold"],
-            -x[1].get("gold_ind", 0),
-            -x[1].get("gold_relay", 0),
-            -x[1]["silver"],
-            -x[1].get("silver_ind", 0),
-            -x[1].get("silver_relay", 0),
-            -x[1]["bronze"],
-            -x[1].get("bronze_ind", 0),
-            -x[1].get("bronze_relay", 0),
-            -(x[1]["gold"] + x[1]["silver"] + x[1]["bronze"]),
-            -(
-                x[1].get("gold_ind", 0)
-                + x[1].get("silver_ind", 0)
-                + x[1].get("bronze_ind", 0)
-            ),
-            -(
-                x[1].get("gold_relay", 0)
-                + x[1].get("silver_relay", 0)
-                + x[1].get("bronze_relay", 0)
-            ),
-            x[1]["races"],
-        ),
-    )
+    olympic_all_medalists.sort(key=_all_olympic_athlete_sort_key)
+    olympic_rank_by_athlete = {
+        key: idx for idx, (key, _) in enumerate(olympic_all_medalists, 1)
+    }
+
+    medalists = [
+        (key, stats)
+        for key, stats in olympic_all_medalists
+        if stats["gold"] >= 2 or key in startlist_ids
+    ]
 
     if not medalists:
         print(
@@ -3579,12 +3593,13 @@ def _render_olympic_individual_sections(
         highlight_ids = startlist_ids
         all_rows = []
         all_row_styles = []
-        for idx, (key, stats) in enumerate(medalists, 1):
+        for key, stats in medalists:
             gold = stats["gold"]
             silver = stats["silver"]
             bronze = stats["bronze"]
             total = gold + silver + bronze
             races = stats["races"]
+            rank = olympic_rank_by_athlete[key]
             gold_ind = stats.get("gold_ind", 0)
             silver_ind = stats.get("silver_ind", 0)
             bronze_ind = stats.get("bronze_ind", 0)
@@ -3597,7 +3612,7 @@ def _render_olympic_individual_sections(
             races_relay = stats.get("races_relay", 0)
             all_rows.append(
                 [
-                    str(idx),
+                    str(rank),
                     stats["name"],
                     stats["nat"],
                     stats["gender"],

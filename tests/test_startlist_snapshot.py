@@ -513,3 +513,164 @@ def test_render_wc_section1_first_race_snapshot_prints_none(monkeypatch, capsys)
     )
 
     assert "1. Missing from top 25 World Cup standings: none" in capsys.readouterr().out
+
+
+def test_olympic_athlete_tables_keep_global_ranks_for_startlist_athletes(
+    monkeypatch, capsys
+):
+    podiums = [
+        {
+            "year": "2018",
+            "venue": "Pyeongchang",
+            "gold": "ALPHA One (NOR)",
+            "silver": "BETA One (GER)",
+            "bronze": "DELTA One (FRA)",
+            "gold_nat": "NOR",
+            "silver_nat": "GER",
+            "bronze_nat": "FRA",
+            "gold_athletes": [
+                {"full_name": "ALPHA One", "name": "ALPHA", "nat": "NOR", "gender": "F"}
+            ],
+            "silver_athletes": [
+                {"full_name": "BETA One", "name": "BETA", "nat": "GER", "gender": "F"}
+            ],
+            "bronze_athletes": [
+                {"full_name": "DELTA One", "name": "DELTA", "nat": "FRA", "gender": "F"}
+            ],
+        },
+        {
+            "year": "2022",
+            "venue": "Beijing",
+            "gold": "GAMMA One (FRA)",
+            "silver": "BETA One (GER)",
+            "bronze": "EPSILON One (ITA)",
+            "gold_nat": "FRA",
+            "silver_nat": "GER",
+            "bronze_nat": "ITA",
+            "gold_athletes": [
+                {"full_name": "GAMMA One", "name": "GAMMA", "nat": "FRA", "gender": "F"}
+            ],
+            "silver_athletes": [
+                {"full_name": "BETA One", "name": "BETA", "nat": "GER", "gender": "F"}
+            ],
+            "bronze_athletes": [
+                {
+                    "full_name": "EPSILON One",
+                    "name": "EPSILON",
+                    "nat": "ITA",
+                    "gender": "F",
+                }
+            ],
+        },
+        {
+            "year": "2026",
+            "venue": "Antholz",
+            "gold": "OMEGA One (CZE)",
+            "silver": "TARGET One (SWE)",
+            "bronze": "ZETA One (USA)",
+            "gold_nat": "CZE",
+            "silver_nat": "SWE",
+            "bronze_nat": "USA",
+            "gold_athletes": [
+                {"full_name": "OMEGA One", "name": "OMEGA", "nat": "CZE", "gender": "F"}
+            ],
+            "silver_athletes": [
+                {
+                    "full_name": "TARGET One",
+                    "name": "TARGET",
+                    "nat": "SWE",
+                    "gender": "F",
+                }
+            ],
+            "bronze_athletes": [
+                {"full_name": "ZETA One", "name": "ZETA", "nat": "USA", "gender": "F"}
+            ],
+        },
+    ]
+
+    all_athlete_stats = {
+        "A": {
+            "name": "ALPHA One",
+            "nat": "NOR",
+            "gender": "F",
+            "gold": 3,
+            "silver": 0,
+            "bronze": 0,
+            "races": 3,
+        },
+        "B": {
+            "name": "BETA One",
+            "nat": "GER",
+            "gender": "F",
+            "gold": 2,
+            "silver": 0,
+            "bronze": 0,
+            "races": 2,
+        },
+        "C": {
+            "name": "CHARLIE One",
+            "nat": "FRA",
+            "gender": "F",
+            "gold": 1,
+            "silver": 2,
+            "bronze": 0,
+            "races": 3,
+        },
+        "D": {
+            "name": "DELTA One",
+            "nat": "ITA",
+            "gender": "F",
+            "gold": 1,
+            "silver": 1,
+            "bronze": 0,
+            "races": 2,
+        },
+        "S1": {
+            "name": "TARGET One",
+            "nat": "SWE",
+            "gender": "F",
+            "gold": 1,
+            "silver": 0,
+            "bronze": 0,
+            "races": 1,
+        },
+    }
+
+    monkeypatch.setattr(
+        startlist,
+        "_get_past_olympic_individual_podiums",
+        lambda *_args, **_kwargs: podiums,
+    )
+    monkeypatch.setattr(
+        startlist,
+        "_get_all_olympic_medals",
+        lambda *_args, **_kwargs: ([], all_athlete_stats),
+    )
+
+    ctx = {
+        "payload": {
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "IBUId": "S1",
+                    "Name": "TARGET One",
+                    "FamilyName": "TARGET",
+                    "Nat": "SWE",
+                }
+            ]
+        },
+        "race_disc": "PU",
+        "cat_id": "SW",
+        "startlist_ids": {"S1"},
+        "is_snapshot": False,
+    }
+    args = argparse.Namespace(format="tsv")
+
+    startlist._render_olympic_individual_sections(ctx, args, section_offset=3)
+    out = capsys.readouterr().out
+
+    assert "7. Athlete medal table (Women Pursuit):" in out
+    assert "5\tTARGET One\tSWE\tF\t0\t1\t0\t1\t1" in out
+
+    assert "8. Athlete medal table (Women, all Olympic disciplines):" in out
+    assert "5\tTARGET One\tSWE\tF\t1\t0\t0\t1\t1\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0" in out
