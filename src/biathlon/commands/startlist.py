@@ -7,6 +7,7 @@ import datetime
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from typing import Any, Callable
 
 from ..api import (
@@ -121,6 +122,7 @@ COUNTRY_CODE_TO_NAME = {
     "SLO": "Slovenia",
     "SRB": "Serbia",
     "SVK": "Slovakia",
+    "SUI": "Switzerland",
     "SWE": "Sweden",
     "TCH": "Czechoslovakia",
     "UKR": "Ukraine",
@@ -135,6 +137,31 @@ def _country_display(value: str) -> str:
     if not code:
         return ""
     return COUNTRY_CODE_TO_NAME.get(code, str(value))
+
+
+@lru_cache(maxsize=None)
+def _event_country_display(event_id: str, season_id: str) -> str:
+    """Resolve event host country display name from Events metadata."""
+    if not event_id or not season_id:
+        return ""
+    for level in (1, 2, 3, 4, 5, 6):
+        try:
+            events = get_events(season_id, level)
+        except BiathlonError:
+            continue
+        for event in events:
+            if str(event.get("EventId") or "") != event_id:
+                continue
+            raw = str(
+                event.get("Nat")
+                or event.get("Nation")
+                or event.get("CountryId")
+                or event.get("Country")
+                or ""
+            ).strip()
+            if raw:
+                return _country_display(raw)
+    return ""
 
 
 # IBU World Cup points distribution (positions 1-40)
@@ -2548,7 +2575,8 @@ def _fetch_olympic_podium(
         rank = int(rank_str)
         name = res.get("Name") or res.get("ShortName") or ""
         nat = res.get("Nat") or ""
-        display = f"{name} ({nat})" if nat and nat not in name else name
+        # Show country names without trailing "(NAT)" codes in section 2.
+        display = name or _country_display(nat)
         if rank == 1:
             gold = display
             gold_nat = nat
@@ -2571,7 +2599,7 @@ def _fetch_olympic_podium(
             if res.get("Nat") == nation:
                 leg = res.get("Leg") or 0
                 family_name = res.get("FamilyName") or ""
-                full_name = res.get("ShortName") or res.get("Name") or family_name
+                full_name = res.get("Name") or res.get("ShortName") or family_name
                 nat = res.get("Nat") or ""
                 # Determine gender based on category and leg
                 # Mixed relay (MX): legs 1-2 are women, legs 3-4 are men
@@ -2602,10 +2630,21 @@ def _fetch_olympic_podium(
     bronze_athletes = get_team_athletes(bronze_nat) if bronze_nat else []
 
     venue = (payload.get("SportEvt") or {}).get("Organizer") or ""
+    country_raw = str(
+        (payload.get("SportEvt") or {}).get("CountryId")
+        or (payload.get("SportEvt") or {}).get("Country")
+        or (payload.get("Competition") or {}).get("CountryId")
+        or (payload.get("Competition") or {}).get("Country")
+        or ""
+    ).strip()
+    country = _country_display(country_raw) if country_raw else ""
+    if not country:
+        country = _event_country_display(event_id, season_id)
     year = _season_to_olympic_year(season_id)
     return {
         "year": year,
         "venue": venue,
+        "country": country,
         "gold": gold,
         "silver": silver,
         "bronze": bronze,

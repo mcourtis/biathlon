@@ -326,6 +326,7 @@ def render_table(
     rows: list[list[str]],
     pretty: bool | None = None,
     row_styles: list[str] | None = None,
+    row_separators: set[int] | None = None,
     cell_formatters: list[Callable | None] | None = None,
     alignments: list[str] | None = None,
     highlight_headers: list[int] | None = None,
@@ -333,6 +334,7 @@ def render_table(
     show_headers: bool = True,
     column_separators: set[int] | None = None,
     group_headers: list[tuple[int, int, str]] | None = None,
+    group_headers_position: Literal["above", "below", "inline"] = "above",
     output_format: OutputFormat | None = None,
 ) -> None:
     """Render tabular data as aligned text, TSV, or Markdown.
@@ -343,6 +345,8 @@ def render_table(
         pretty: Deprecated compatibility switch. True -> aligned, False -> TSV.
         output_format: Explicit output mode ("pretty", "tsv", "markdown").
         row_styles: Optional list of style names per row ("dim", "highlight", or "").
+        row_separators: Optional set of row indices before which a horizontal separator
+            is drawn (pretty mode only).
         cell_formatters: Optional list of functions (one per column) to format cell values.
             Each function takes (value, row_index) and returns formatted string.
         alignments: Optional list of alignment directives ("left", "right", "center") per column.
@@ -350,8 +354,10 @@ def render_table(
         show_headers: If False, skip printing the header row (default True).
         column_separators: Optional set of column indices before which a vertical separator is drawn.
         group_headers: Optional list of (start_col, end_col, label) tuples to print a
-            group header line above the column headers. Each label is centered over
+            group header line above or below the column headers. Each label is centered over
             the span of columns [start_col, end_col).
+        group_headers_position: Position for the optional group header line
+            ("above", "below", or "inline").
     """
     mode: OutputFormat
     if output_format is not None:
@@ -470,39 +476,123 @@ def render_table(
         # Bold headers by default
         return f"{Color.BOLD}{text}{Color.RESET}"
 
-    if show_headers:
-        if group_headers:
-            # Build a group header line above the column headers.
-            # Compute position of each column in the rendered line.
-            col_positions = []  # (start_char, end_char) for each column
-            pos = 0
-            for i in range(len(headers)):
-                if i > 0:
-                    pos += 3 if i in sep else 2  # " | " or "  "
-                col_start = pos
-                pos += widths[i]
-                col_positions.append((col_start, pos))
-            line_len = pos
-            group_line = [" "] * line_len
-            for start_col, end_col, label in group_headers:
-                span_start = col_positions[start_col][0]
-                span_end = col_positions[end_col - 1][1]
-                span_width = span_end - span_start
-                # Center the label within the span
-                pad = span_width - len(label)
-                left_pad = pad // 2
-                # Place label characters
-                for ci, ch in enumerate(label):
-                    group_line[span_start + left_pad + ci] = ch
-            raw_line = "".join(group_line).rstrip()
-            # Apply bold to the group labels
-            for start_col, end_col, label in group_headers:
-                raw_line = raw_line.replace(
-                    label, f"{Color.BOLD}{label}{Color.RESET}", 1
+    def _render_group_header_line() -> None:
+        if not group_headers:
+            return
+        # Compute character span for each column in the rendered line.
+        col_positions = []  # (start_char, end_char) for each column
+        pos = 0
+        for i in range(len(headers)):
+            if i > 0:
+                pos += 3 if i in sep else 2  # " | " or "  "
+            col_start = pos
+            pos += widths[i]
+            col_positions.append((col_start, pos))
+        line_len = pos
+        group_line = [" "] * line_len
+        for start_col, end_col, label in group_headers:
+            span_start = col_positions[start_col][0]
+            span_end = col_positions[end_col - 1][1]
+            span_width = span_end - span_start
+            # Center the label within the span
+            pad = span_width - len(label)
+            left_pad = pad // 2
+            for ci, ch in enumerate(label):
+                group_line[span_start + left_pad + ci] = ch
+        raw_line = "".join(group_line).rstrip()
+
+        def _style_group_label(label: str) -> str:
+            key = label.strip().lower()
+            if key == "gold":
+                return Color.gold(label)
+            if key == "silver":
+                return Color.silver(label)
+            if key == "bronze":
+                return Color.bronze(label)
+            return f"{Color.BOLD}{label}{Color.RESET}"
+
+        for _start_col, _end_col, label in group_headers:
+            raw_line = raw_line.replace(label, _style_group_label(label), 1)
+        print(raw_line)
+
+    def _render_inline_group_header_line() -> None:
+        if not group_headers:
+            return
+
+        group_cols: set[int] = set()
+        for start_col, end_col, _label in group_headers:
+            for col_idx in range(start_col, end_col):
+                group_cols.add(col_idx)
+
+        # Compute positions and keep separator markers (" | " / "  ") in place.
+        col_positions = []  # (start_char, end_char) for each column
+        pos = 0
+        for i in range(len(headers)):
+            if i > 0:
+                pos += 3 if i in sep else 2
+            col_start = pos
+            pos += widths[i]
+            col_positions.append((col_start, pos))
+
+        base_parts = [" " * widths[i] for i in range(len(headers))]
+        line_chars = list(_join(base_parts))
+
+        # Place non-group headers (e.g. Year / Venue / Country) on the same line.
+        non_group_segments: list[tuple[str, str]] = []
+        for idx, header in enumerate(headers):
+            if idx in group_cols:
+                continue
+            header_text = str(header)
+            alignment = "left"
+            if alignments and idx < len(alignments) and alignments[idx]:
+                alignment = alignments[idx]
+            segment = _pad_cell(header_text, widths[idx], alignment)
+            start_char, _end_char = col_positions[idx]
+            for ci, ch in enumerate(segment):
+                line_chars[start_char + ci] = ch
+            if header_text.strip():
+                non_group_segments.append(
+                    (segment, f"{Color.BOLD}{segment}{Color.RESET}")
                 )
-            print(raw_line)
-        header_parts = [fmt_header(i, h) for i, h in enumerate(headers)]
-        print(_join(header_parts))
+
+        # Overlay centered group labels across their spans.
+        for start_col, end_col, label in group_headers:
+            span_start = col_positions[start_col][0]
+            span_end = col_positions[end_col - 1][1]
+            span_width = span_end - span_start
+            pad = max(0, span_width - len(label))
+            left_pad = pad // 2
+            for ci, ch in enumerate(label):
+                line_chars[span_start + left_pad + ci] = ch
+
+        raw_line = "".join(line_chars).rstrip()
+
+        def _style_group_label(label: str) -> str:
+            key = label.strip().lower()
+            if key == "gold":
+                return Color.gold(label)
+            if key == "silver":
+                return Color.silver(label)
+            if key == "bronze":
+                return Color.bronze(label)
+            return f"{Color.BOLD}{label}{Color.RESET}"
+
+        for segment, styled in non_group_segments:
+            raw_line = raw_line.replace(segment, styled, 1)
+        for _start_col, _end_col, label in group_headers:
+            raw_line = raw_line.replace(label, _style_group_label(label), 1)
+        print(raw_line)
+
+    if show_headers:
+        if group_headers and group_headers_position == "above":
+            _render_group_header_line()
+        if group_headers and group_headers_position == "inline":
+            _render_inline_group_header_line()
+        else:
+            header_parts = [fmt_header(i, h) for i, h in enumerate(headers)]
+            print(_join(header_parts))
+            if group_headers and group_headers_position == "below":
+                _render_group_header_line()
         if sep:
             dash_parts = ["-" * widths[i] for i in range(len(headers))]
             pieces = []
@@ -512,6 +602,14 @@ def render_table(
                 pieces.append(part)
             print("".join(pieces))
     for idx in range(len(rows)):
+        if row_separators and idx in row_separators and sep:
+            dash_parts = ["-" * widths[i] for i in range(len(headers))]
+            pieces = []
+            for i, part in enumerate(dash_parts):
+                if i > 0:
+                    pieces.append("-+-" if i in sep else "--")
+                pieces.append(part)
+            print("".join(pieces))
         print(fmt_row(idx))
 
 

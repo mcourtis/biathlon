@@ -1,6 +1,7 @@
 """Tests for formatting functions."""
 
 import argparse
+import re
 
 
 from biathlon.formatting import (
@@ -119,3 +120,45 @@ class TestRenderTableMarkdown:
             output_format="markdown",
         )
         assert capsys.readouterr().out == ("| Col |\n| --- |\n| A\\|B<br>C |\n")
+
+
+class TestRenderTablePretty:
+    def test_group_headers_inline_renders_on_single_header_line(self, capsys):
+        render_table(
+            ["Year", "Venue", "Country", "", "", ""],
+            [["2022", "Beijing", "China", "NORWAY", "LAEGREID", "FRANCE"]],
+            output_format="pretty",
+            column_separators={3, 5},
+            group_headers=[(3, 5, "GOLD"), (5, 6, "SILVER")],
+            group_headers_position="inline",
+        )
+
+        out = capsys.readouterr().out
+        # Strip ANSI escapes to assert textual layout only.
+        clean = re.sub(r"\x1b\[[0-9;]*m", "", out)
+        lines = [line for line in clean.splitlines() if line.strip()]
+
+        assert len(lines) >= 3
+        assert "Year" in lines[0]
+        assert "Venue" in lines[0]
+        assert "Country" in lines[0]
+        assert "GOLD" in lines[0]
+        assert "SILVER" in lines[0]
+
+    def test_row_separators_add_horizontal_rule_between_rows(self, capsys):
+        render_table(
+            ["Date", "Venue", "Country"],
+            [
+                ["2025-12-14", "Kontiolahti", "Finland"],
+                ["2025-03-01", "Oslo", "Norway"],
+            ],
+            output_format="pretty",
+            column_separators={1},
+            row_separators={1},
+        )
+
+        out = capsys.readouterr().out
+        clean = re.sub(r"\x1b\[[0-9;]*m", "", out)
+        lines = [line for line in clean.splitlines() if line.strip()]
+        rule_lines = [line for line in lines if "-+-" in line]
+        assert len(rule_lines) == 2
