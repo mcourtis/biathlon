@@ -644,7 +644,7 @@ def _build_relay_milestone_blocks(
         for leg in (1, 2, 3, 4):
             leg_entry = legs.get(leg)
             athlete_name = str(leg_entry.get("name") or "-") if leg_entry else "-"
-            headers.append(f"L{leg} {athlete_name}")
+            headers.append(athlete_name)
             athlete_ids.append(str(leg_entry.get("ibu_id") or "") if leg_entry else "")
 
         rows: list[list[str]] = []

@@ -442,10 +442,10 @@ def test_build_relay_milestone_blocks_rank_rows_and_highlights():
     assert blocks[2]["team_name"] == "Sweden"
     assert blocks[0]["headers"] == [
         "Milestone Type",
-        "L1 A1",
-        "L2 A2",
-        "L3 A3",
-        "L4 A4",
+        "A1",
+        "A2",
+        "A3",
+        "A4",
     ]
 
     assert [row[0] for row in blocks[0]["rows"]] == [
@@ -498,6 +498,6 @@ def test_build_relay_milestone_blocks_missing_leg_uses_placeholder():
     )
 
     assert len(blocks) == 1
-    assert blocks[0]["headers"][-1] == "L4 -"
+    assert blocks[0]["headers"][-1] == "-"
     for row in blocks[0]["rows"]:
         assert row[-1] == "-"
