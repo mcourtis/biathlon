@@ -37,6 +37,8 @@ class Color:
     OTHER = (215, 215, 215)
     GREEN = (0, 200, 0)
     RED = (220, 60, 60)
+    DARK_BLUE = (0, 70, 150)
+    LIGHT_BLUE = (102, 178, 255)
 
     @classmethod
     def enabled(cls) -> bool:
@@ -131,6 +133,16 @@ class Color:
         max_r = 240
         r = int(base_r + (max_r - base_r) * min(1.0, max(0.0, intensity)))
         return cls.rgb(text, (r, 50, 50), bold=intensity > 0.5)
+
+    @classmethod
+    def dark_blue(cls, text: str, bold: bool = False) -> str:
+        """Apply dark blue style."""
+        return cls.rgb(text, cls.DARK_BLUE, bold=bold)
+
+    @classmethod
+    def light_blue(cls, text: str, bold: bool = False) -> str:
+        """Apply light blue style."""
+        return cls.rgb(text, cls.LIGHT_BLUE, bold=bold)
 
     @classmethod
     def accuracy(cls, text: str, pct: float) -> str:

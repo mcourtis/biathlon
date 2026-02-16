@@ -23,6 +23,7 @@ from ..utils import get_first_time, parse_start_datetime, parse_time_seconds
 # Leader marker characters
 GENERAL_LEADER_MARKER = "\u25cb"  # placeholder for yellow circle
 DISCIPLINE_LEADER_MARKER = "\u25cc"  # placeholder for red circle
+U23_LEADER_MARKER = "\u25ce"  # placeholder for dark blue circle
 LEADER_MARKER_DOT = "\u25cf"
 
 
@@ -33,15 +34,20 @@ def _format_leader_markers(
 ) -> str:
     """Replace leader marker placeholders with colored dots.
 
-    Extracts trailing GENERAL_LEADER_MARKER / DISCIPLINE_LEADER_MARKER tokens
+    Extracts trailing GENERAL_LEADER_MARKER / DISCIPLINE_LEADER_MARKER /
+    U23_LEADER_MARKER tokens
     from *cell_str*, applies *base_formatter* to the remaining text, then
-    appends gold/red filled dots.
+    appends gold/red/dark-blue filled dots.
     """
     text = cell_str.rstrip()
     pad_len = len(cell_str) - len(text)
     tokens = text.split()
     markers: list[str] = []
-    while tokens and tokens[-1] in {GENERAL_LEADER_MARKER, DISCIPLINE_LEADER_MARKER}:
+    while tokens and tokens[-1] in {
+        GENERAL_LEADER_MARKER,
+        DISCIPLINE_LEADER_MARKER,
+        U23_LEADER_MARKER,
+    }:
         markers.insert(0, tokens.pop())
     base = " ".join(tokens)
     if base_formatter:
@@ -51,8 +57,10 @@ def _format_leader_markers(
         for marker in markers:
             if marker == GENERAL_LEADER_MARKER:
                 colored.append(Color.gold(LEADER_MARKER_DOT))
-            else:
+            elif marker == DISCIPLINE_LEADER_MARKER:
                 colored.append(Color.red(LEADER_MARKER_DOT))
+            elif marker == U23_LEADER_MARKER:
+                colored.append(Color.dark_blue(LEADER_MARKER_DOT, bold=True))
         base = f"{base} {' '.join(colored)}" if base else " ".join(colored)
     return f"{base}{' ' * pad_len}"
 

@@ -65,3 +65,17 @@ def test_standings_country_accepts_country_sort_options():
     assert args.command == "standings"
     assert args.country is True
     assert args.sort == "women-nations"
+
+
+def test_standings_accepts_u23_flag():
+    parser = build_parser()
+    args = parser.parse_args(["standings", "--u23"])
+    assert args.command == "standings"
+    assert args.u23 is True
+
+
+def test_standings_accepts_uppercase_u23_flag():
+    parser = build_parser()
+    args = parser.parse_args(["standings", "--U23"])
+    assert args.command == "standings"
+    assert args.u23 is True

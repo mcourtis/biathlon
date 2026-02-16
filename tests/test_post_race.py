@@ -501,3 +501,101 @@ def test_build_relay_milestone_blocks_missing_leg_uses_placeholder():
     assert blocks[0]["headers"][-1] == "-"
     for row in blocks[0]["rows"]:
         assert row[-1] == "-"
+
+
+def test_find_best_u23_leader_prefers_explicit_row_marker():
+    rows = [
+        {"Rank": "1", "IBUId": "A", "Name": "Alpha", "Nat": "NOR", "Score": 300},
+        {
+            "Rank": "2",
+            "IBUId": "B",
+            "Name": "Bravo",
+            "Nat": "SWE",
+            "Score": 250,
+            "BestU23": 1,
+        },
+    ]
+
+    leader = post_race._find_best_u23_leader(rows, {"A"})
+
+    assert leader["id"] == "B"
+    assert leader["name"] == "Bravo"
+    assert leader["nat"] == "SWE"
+
+
+def test_find_best_u23_leader_falls_back_to_u23_ids():
+    rows = [
+        {"Rank": "1", "IBUId": "A", "Name": "Alpha", "Nat": "NOR", "Score": 300},
+        {"Rank": "2", "IBUId": "B", "Name": "Bravo", "Nat": "SWE", "Score": 250},
+        {"Rank": "3", "IBUId": "C", "Name": "Charlie", "Nat": "FRA", "Score": 220},
+    ]
+
+    leader = post_race._find_best_u23_leader(rows, {"B", "C"})
+
+    assert leader["id"] == "B"
+
+
+def test_build_athlete_age_map_appends_u23(monkeypatch):
+    bios = {
+        "A": {"BirthDate": "2004-01-01"},
+        "B": {"Age": "24"},
+    }
+
+    def fake_get_athlete_bio(ibu_id: str) -> dict:
+        if ibu_id == "C":
+            raise BiathlonError("boom")
+        return bios.get(ibu_id, {})
+
+    monkeypatch.setattr(post_race, "get_athlete_bio", fake_get_athlete_bio)
+
+    age_map, u23_ids = post_race._build_athlete_age_map(
+        {"A", "B", "C"}, datetime.date(2025, 12, 1)
+    )
+
+    assert age_map["A"].endswith("(U23)")
+    assert age_map["B"] == "24"
+    assert age_map["C"] == "-"
+    assert u23_ids == {"A"}
+
+
+def test_build_standings_rows_includes_age_column():
+    rows = [
+        {
+            "Rank": "1",
+            "IBUId": "A",
+            "Name": "Alpha",
+            "Nat": "NOR",
+            "Score": 300,
+            "RnkDiff": -1,
+        },
+        {
+            "Rank": "2",
+            "IBUId": "B",
+            "Name": "Bravo",
+            "Nat": "SWE",
+            "Score": 250,
+            "RnkDiff": 0,
+        },
+    ]
+
+    table_rows, row_styles = post_race._build_standings_rows(
+        rows,
+        top_n=10,
+        race_points_by_id={"A": 90, "B": 75},
+        participating_ids={"A"},
+        age_display_by_id={"A": "22 (U23)", "B": "24"},
+    )
+
+    assert table_rows[0] == ["1", "Alpha", "22 (U23)", "NOR", "+90", "300", "+1"]
+    assert table_rows[1] == ["2", "Bravo", "24", "SWE", "+75", "250", "="]
+    assert row_styles == ["", "dim"]
+
+
+def test_make_name_formatter_supports_u23_marker():
+    formatter = post_race._make_name_formatter()
+    value = f"Alice {post_race.U23_LEADER_MARKER}"
+
+    out = formatter(value, 0)
+
+    assert post_race.U23_LEADER_MARKER not in out
+    assert "●" in out

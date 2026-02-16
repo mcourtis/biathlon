@@ -479,6 +479,13 @@ def build_parser() -> argparse.ArgumentParser:
         default=25,
         help="Limit output rows (default: 25, 0 for all)",
     )
+    standings_parser.add_argument(
+        "--u23",
+        "--U23",
+        action="store_true",
+        dest="u23",
+        help="Show U23 athletes only (athlete standings mode)",
+    )
     add_output_format_arg(standings_parser)
     standings_parser.set_defaults(func=handle_standings)
 

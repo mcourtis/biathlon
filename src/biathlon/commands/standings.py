@@ -3,14 +3,26 @@
 from __future__ import annotations
 
 import argparse
+import datetime
 import sys
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-from ..api import BiathlonError, get_cups, get_cup_results, get_current_season_id
+from ..api import (
+    BiathlonError,
+    get_athlete_bio,
+    get_cups,
+    get_cup_results,
+    get_current_season_id,
+    get_events,
+    get_races,
+)
 from ..constants import GENDER_TO_CAT
 from ..formatting import Color, is_pretty_output, get_output_format, render_table
+from ..utils import parse_date
 from ._common import (
     DISCIPLINE_LEADER_MARKER,
     GENERAL_LEADER_MARKER,
+    U23_LEADER_MARKER,
     _format_leader_markers,
 )
 
@@ -90,8 +102,128 @@ def _get_cup_ids_by_discipline(
         if cup.get("CatId") == cat_id and cup.get("Level") == level:
             disc = cup.get("DisciplineId")
             if disc:
-                cup_ids[disc] = str(cup.get("CupId"))
+                cup_ids.setdefault(disc, str(cup.get("CupId")))
     return cup_ids
+
+
+def _parse_birth_date_value(value: object) -> datetime.date | None:
+    """Parse a birth date from a bio field value."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+
+    parsed = parse_date(text)
+    if parsed is not None:
+        return parsed
+
+    compact = text.replace(" ", "")
+    for fmt in ("%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        try:
+            return datetime.datetime.strptime(compact, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _extract_birth_date(bio: dict) -> datetime.date | None:
+    """Return athlete birth date from a bio payload."""
+    for key in ("BirthDate", "Birthdate", "DateOfBirth", "DOB", "Birthday"):
+        parsed = _parse_birth_date_value(bio.get(key))
+        if parsed is not None:
+            return parsed
+
+    for item in bio.get("Personal", []):
+        label = str(item.get("Description") or "").strip().lower()
+        if not label:
+            continue
+        if "birth" in label or "born" in label:
+            parsed = _parse_birth_date_value(item.get("Value"))
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _extract_age_text(bio: dict) -> str | None:
+    """Extract age text from athlete bio payload."""
+    personal = {
+        str(item.get("Description") or "").strip().lower(): item.get("Value")
+        for item in bio.get("Personal", [])
+        if item.get("Description")
+    }
+    value = bio.get("Age") or personal.get("age")
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if "," in text:
+        text = text.split(",", 1)[0].strip()
+    return text or None
+
+
+def _age_on_date(birth_date: datetime.date, reference_date: datetime.date) -> int:
+    """Return age in full years at reference date."""
+    years = reference_date.year - birth_date.year
+    if (reference_date.month, reference_date.day) < (birth_date.month, birth_date.day):
+        years -= 1
+    return years
+
+
+def _find_first_race_date(
+    season_id: str, gender: str, level: int
+) -> datetime.date | None:
+    """Return first individual-race date for season/gender/level."""
+    cat_id = GENDER_TO_CAT.get(gender.lower())
+    if not cat_id:
+        return None
+
+    earliest: datetime.date | None = None
+    for event in get_events(season_id, level):
+        event_id = str(event.get("EventId") or "").strip()
+        if not event_id:
+            continue
+        try:
+            races = get_races(event_id)
+        except BiathlonError:
+            continue
+        for race in races:
+            race_cat = str(race.get("catId") or race.get("CatId") or "").strip().upper()
+            if race_cat != cat_id:
+                continue
+            discipline = str(race.get("DisciplineId") or "").strip().upper()
+            if discipline not in DISCIPLINES:
+                continue
+            start_raw = race.get("StartTime") or race.get("StartDate")
+            start_date = parse_date(str(start_raw) if start_raw else None)
+            if start_date is None:
+                continue
+            if earliest is None or start_date < earliest:
+                earliest = start_date
+    return earliest
+
+
+def _prefetch_bios(ibu_ids: list[str]) -> dict[str, dict]:
+    """Fetch athlete bios concurrently."""
+    unique_ids = [ibu_id for ibu_id in dict.fromkeys(ibu_ids) if ibu_id]
+    if not unique_ids:
+        return {}
+
+    bios: dict[str, dict] = {}
+    max_workers = min(16, max(1, len(unique_ids)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        future_map = {
+            executor.submit(get_athlete_bio, ibu_id): ibu_id for ibu_id in unique_ids
+        }
+        for future in as_completed(future_map):
+            ibu_id = future_map[future]
+            try:
+                payload = future.result()
+            except BiathlonError:
+                payload = {}
+            except Exception:
+                payload = {}
+            bios[ibu_id] = payload if isinstance(payload, dict) else {}
+    return bios
 
 
 def _find_leaders(athlete_list: list[dict]) -> dict[str, str | None]:
@@ -139,6 +271,86 @@ def _parse_score(row: dict) -> int:
             return int(float(text))
         except ValueError:
             return 0
+
+
+def _flag_is_true(value: object) -> bool:
+    """Return True when *value* looks like a true/active flag."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value == 1
+    if isinstance(value, float):
+        return value == 1.0
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "y", "x"}
+
+
+def _rank_is_one(value: object) -> bool:
+    """Return True when *value* is rank 1."""
+    text = str(value).strip().rstrip(".")
+    return text == "1"
+
+
+def _collect_text_tokens(value: object) -> list[str]:
+    """Collect normalized string tokens from nested payload data."""
+    tokens: list[str] = []
+    stack: list[object] = [value]
+    while stack:
+        current = stack.pop()
+        if current is None:
+            continue
+        if isinstance(current, dict):
+            for key, nested in current.items():
+                key_text = str(key).strip().lower()
+                if key_text:
+                    tokens.append(key_text)
+                stack.append(nested)
+            continue
+        if isinstance(current, (list, tuple, set)):
+            stack.extend(current)
+            continue
+        text = str(current).strip().lower()
+        if text:
+            tokens.append(text)
+    return tokens
+
+
+def _bibs_indicate_u23(value: object) -> bool:
+    """Return True when bib metadata indicates a best-U23 marker."""
+    tokens = _collect_text_tokens(value)
+    if not tokens:
+        return False
+    if any("u23" in token or "u-23" in token or "u 23" in token for token in tokens):
+        return True
+    if any("u25" in token or "u-25" in token or "u 25" in token for token in tokens):
+        return True
+    if any("young" in token for token in tokens):
+        return True
+    return any("blue" in token for token in tokens)
+
+
+def _is_best_u23_row(row: dict) -> bool:
+    """Return True when a standings row is marked as best U23."""
+    for key, value in row.items():
+        key_text = str(key).strip().lower()
+        if any(tag in key_text for tag in ("u23", "u-23", "u25", "u-25")):
+            if _flag_is_true(value) or _rank_is_one(value):
+                return True
+        if (
+            "young" in key_text
+            and any(tag in key_text for tag in ("best", "leader", "bib"))
+            and (_flag_is_true(value) or _rank_is_one(value))
+        ):
+            return True
+        if "bib" in key_text and _bibs_indicate_u23(value):
+            return True
+    return False
+
+
+def _row_athlete_id(row: dict) -> str:
+    """Return athlete identifier from a standings row."""
+    value = row.get("IBUId") or row.get("IbuId") or row.get("ibuId") or row.get("Id")
+    return str(value or "").strip()
 
 
 def _country_key_and_display(row: dict) -> tuple[str, str]:
@@ -231,6 +443,7 @@ def handle_standings(args: argparse.Namespace) -> int:
     gender = "men" if args.men else "women"
     sort_by_raw = str(getattr(args, "sort", "") or "").strip()
     country_mode = bool(getattr(args, "country", False))
+    u23_only = bool(getattr(args, "u23", False))
     try:
         level = int(args.level) if args.level else 1
     except ValueError:
@@ -238,6 +451,13 @@ def handle_standings(args: argparse.Namespace) -> int:
         return 1
 
     if country_mode:
+        if u23_only:
+            print(
+                "error: --u23 is only available for athlete standings (without --country)",
+                file=sys.stderr,
+            )
+            return 1
+
         country_sort_col: str | None
         if not sort_by_raw:
             country_sort_col = "men_nations" if gender == "men" else "women_nations"
@@ -470,10 +690,11 @@ def handle_standings(args: argparse.Namespace) -> int:
     # Build athlete data from total standings
     athletes: dict[str, dict] = {}
     for row in total_rows:
-        ibu_id = row.get("IBUId") or row.get("Id") or row.get("Name")
+        ibu_id = _row_athlete_id(row) or row.get("Name")
         if not ibu_id:
             continue
         athletes[ibu_id] = {
+            "ibu_id": str(ibu_id),
             "name": row.get("Name") or row.get("ShortName") or "",
             "nat": row.get("Nat") or "",
             "total": _parse_score(row),
@@ -481,6 +702,8 @@ def handle_standings(args: argparse.Namespace) -> int:
             "PU": 0,
             "IN": 0,
             "MS": 0,
+            "row_best_u23": _is_best_u23_row(row),
+            "is_best_u23": False,
         }
 
     # Fetch discipline scores
@@ -494,7 +717,7 @@ def handle_standings(args: argparse.Namespace) -> int:
             continue
         disc_rows = disc_payload.get("Rows") or disc_payload.get("Results") or []
         for row in disc_rows:
-            ibu_id = row.get("IBUId") or row.get("Id") or row.get("Name")
+            ibu_id = _row_athlete_id(row) or row.get("Name")
             if ibu_id and ibu_id in athletes:
                 athletes[ibu_id][disc] = _parse_score(row)
 
@@ -514,13 +737,88 @@ def handle_standings(args: argparse.Namespace) -> int:
         for disc_pos, athlete in enumerate(athlete_list, start=1):
             athlete["disc_position"] = disc_pos
 
-    # Apply display limit
+    # Mark best U23 athlete(s): under 23 at season's first individual race.
+    first_race_date: datetime.date | None
+    try:
+        first_race_date = _find_first_race_date(season_id, gender, level)
+    except BiathlonError:
+        first_race_date = None
+
     limit_n = getattr(args, "limit", 25) or 0
+
+    # For regular standings, only rows that can be displayed need bio lookups.
+    # For --u23 (or unlimited output), we need all athletes to classify/filter.
+    if u23_only or limit_n <= 0:
+        bio_target = athlete_list
+    else:
+        bio_target = athlete_list[:limit_n]
+    bio_map = _prefetch_bios(
+        [str(athlete.get("ibu_id") or "") for athlete in bio_target]
+    )
+
+    for athlete in athlete_list:
+        athlete["is_u23"] = False
+        athlete["age_display"] = "-"
+        bio = bio_map.get(athlete["ibu_id"], {})
+        if first_race_date is not None:
+            birth_date = _extract_birth_date(bio)
+            if birth_date is not None:
+                age_years = _age_on_date(birth_date, first_race_date)
+                athlete["age_display"] = str(age_years)
+                athlete["is_u23"] = age_years < 23
+                continue
+        age_text = _extract_age_text(bio)
+        if age_text:
+            athlete["age_display"] = age_text
+
+    # Fallback for payloads where API already exposes U23 marker fields.
+    if not any(athlete.get("is_u23") for athlete in athlete_list):
+        for athlete in athlete_list:
+            athlete["is_u23"] = bool(athlete["row_best_u23"])
+
+    for athlete in athlete_list:
+        if not athlete.get("is_u23"):
+            continue
+        age_display = str(athlete.get("age_display") or "").strip()
+        if not age_display or age_display == "-":
+            athlete["age_display"] = "(U23)"
+        elif "(U23)" not in age_display:
+            athlete["age_display"] = f"{age_display} (U23)"
+
+    best_u23_score = max(
+        (
+            int(athlete.get(athlete_sort_col) or 0)
+            for athlete in athlete_list
+            if athlete.get("is_u23")
+        ),
+        default=0,
+    )
+    best_u23_ids: set[str] = {
+        athlete["ibu_id"]
+        for athlete in athlete_list
+        if athlete.get("is_u23")
+        and int(athlete.get(athlete_sort_col) or 0) == best_u23_score
+        and best_u23_score > 0
+    }
+    for athlete in athlete_list:
+        athlete["is_best_u23"] = athlete["ibu_id"] in best_u23_ids
+
+    # Keep full-standings leaders for --u23 mode so yellow/red markers apply
+    # only when a U23 athlete is also an actual overall leader.
+    full_standings_leaders = _find_leaders(athlete_list)
+
+    if u23_only:
+        athlete_list = [athlete for athlete in athlete_list if athlete.get("is_u23")]
+        if not athlete_list:
+            print("no U23 athletes found in standings", file=sys.stderr)
+            return 1
+
+    # Apply display limit
     if limit_n > 0:
         athlete_list = athlete_list[:limit_n]
 
     # Find leaders for coloring
-    leaders = _find_leaders(athlete_list)
+    leaders = full_standings_leaders if u23_only else _find_leaders(athlete_list)
     total_leader = leaders["total"]
 
     # Find athletes who lead any discipline but not total (for slight gold)
@@ -542,25 +840,29 @@ def handle_standings(args: argparse.Namespace) -> int:
     render_rows = []
     row_styles = []
     for athlete in athlete_list:
-        name = athlete["name"]
+        base_name = athlete["name"]
+        name = base_name
         # Total leader gets gold row style
-        if name == total_leader:
+        if base_name == total_leader:
             row_styles.append("gold")
         else:
             row_styles.append("")
         # Append leader marker placeholders to name
         if pretty:
             markers = []
-            if name == total_leader:
+            if base_name == total_leader:
                 markers.append(GENERAL_LEADER_MARKER)
-            for _disc in athlete_led_disciplines.get(name, []):
+            for _disc in athlete_led_disciplines.get(base_name, []):
                 markers.append(DISCIPLINE_LEADER_MARKER)
+            if athlete["is_best_u23"]:
+                markers.append(U23_LEADER_MARKER)
             if markers:
                 name = name + " " + " ".join(markers)
         render_row = [
             athlete["position"],
             name,
             athlete["nat"],
+            athlete["age_display"],
             athlete["total"],
             athlete["SP"] or "-",
             athlete["PU"] or "-",
@@ -575,6 +877,7 @@ def handle_standings(args: argparse.Namespace) -> int:
         "Position",
         "Name",
         "Country",
+        "Age",
         "Total",
         "Sprint",
         "Pursuit",
@@ -585,19 +888,33 @@ def handle_standings(args: argparse.Namespace) -> int:
         disc_label = DISCIPLINE_LABELS.get(athlete_sort_col, athlete_sort_col)
         headers.insert(1, f"{disc_label}Position")
 
+    def _highlight_athlete_cell(
+        cell_str: str, row_idx: int, *, bold_secondary: bool
+    ) -> str:
+        """Apply athlete highlight color for a given cell.
+
+        Priority:
+        1. Total leader -> gold
+        2. Discipline leader -> light gold
+        3. Best U23 -> dark blue
+        """
+        if not Color.enabled():
+            return cell_str
+        athlete = athlete_list[row_idx]
+        name = athlete["name"]
+        if name == total_leader:
+            return Color.gold(cell_str)
+        if name in discipline_leaders:
+            return Color.rgb(cell_str, Color.LIGHT_GOLD, bold=bold_secondary)
+        if athlete["is_best_u23"]:
+            return Color.dark_blue(cell_str, bold=bold_secondary)
+        return cell_str
+
     def make_slight_gold_formatter():
-        """Formatter for Rank, Name, Country columns - gold for total leader, light gold for discipline leaders."""
+        """Formatter for Rank/Country columns."""
 
         def formatter(cell_str: str, row_idx: int) -> str:
-            if not Color.enabled():
-                return cell_str
-            athlete = athlete_list[row_idx]
-            name = athlete["name"]
-            if name == total_leader:
-                return Color.gold(cell_str)
-            if name in discipline_leaders:
-                return Color.rgb(cell_str, Color.LIGHT_GOLD, bold=False)
-            return cell_str
+            return _highlight_athlete_cell(cell_str, row_idx, bold_secondary=False)
 
         return formatter
 
@@ -618,8 +935,10 @@ def handle_standings(args: argparse.Namespace) -> int:
         return formatter
 
     def make_name_formatter():
-        """Formatter for Name column - leader markers + light gold for discipline leaders."""
-        base = make_slight_gold_formatter()
+        """Formatter for Name column - colored + bold athletes + leader markers."""
+
+        def base(cell_str: str, row_idx: int) -> str:
+            return _highlight_athlete_cell(cell_str, row_idx, bold_secondary=True)
 
         def formatter(cell_str: str, row_idx: int) -> str:
             return _format_leader_markers(cell_str, row_idx, base)
@@ -636,6 +955,7 @@ def handle_standings(args: argparse.Namespace) -> int:
             [
                 make_name_formatter(),  # Name
                 make_slight_gold_formatter(),  # Country
+                make_slight_gold_formatter(),  # Age
                 None,  # Total - no special formatting
                 make_disc_formatter("SP"),
                 make_disc_formatter("PU"),
@@ -661,9 +981,9 @@ def handle_standings(args: argparse.Namespace) -> int:
         else None
     )
     if sorting_by_discipline:
-        athlete_column_separators = {4, 5}
+        athlete_column_separators = {5, 6}
     else:
-        athlete_column_separators = {3, 4}
+        athlete_column_separators = {4, 5}
 
     render_table(
         headers,

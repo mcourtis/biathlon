@@ -10,6 +10,7 @@ def _args(**overrides) -> argparse.Namespace:
         "season": "2526",
         "men": False,
         "country": False,
+        "u23": False,
         "level": "1",
         "sort": "",
         "limit": 25,
@@ -207,6 +208,13 @@ def test_standings_country_mode_rejects_legacy_country_sort(capsys):
     assert "women-nations" in capsys.readouterr().err
 
 
+def test_standings_country_mode_rejects_u23_flag(capsys):
+    rc = standings.handle_standings(_args(country=True, u23=True))
+
+    assert rc == 1
+    assert "--u23 is only available for athlete standings" in capsys.readouterr().err
+
+
 def test_standings_country_mode_pretty_adds_leader_markers(monkeypatch):
     _mock_country_cups(monkeypatch)
     payloads = {
@@ -311,6 +319,9 @@ def _mock_athlete_cups(monkeypatch) -> None:
             {"CupId": "MS_SW", "CatId": "SW", "Level": 1, "DisciplineId": "MS"},
         ],
     )
+    monkeypatch.setattr(standings, "get_events", lambda season_id, level: [])
+    monkeypatch.setattr(standings, "get_races", lambda event_id: [])
+    monkeypatch.setattr(standings, "get_athlete_bio", lambda ibu_id: {})
 
 
 def test_standings_athlete_mode_sets_column_separators(monkeypatch):
@@ -347,8 +358,437 @@ def test_standings_athlete_mode_sets_column_separators(monkeypatch):
 
     rc_total = standings.handle_standings(_args(sort="total", format=""))
     assert rc_total == 0
-    assert captured["kwargs"]["column_separators"] == {3, 4}
+    assert captured["kwargs"]["column_separators"] == {4, 5}
 
     rc_disc = standings.handle_standings(_args(sort="sprint", format=""))
     assert rc_disc == 0
-    assert captured["kwargs"]["column_separators"] == {4, 5}
+    assert captured["kwargs"]["column_separators"] == {5, 6}
+
+
+def test_standings_athlete_mode_pretty_adds_u23_marker(monkeypatch):
+    _mock_athlete_cups(monkeypatch)
+    payloads = {
+        "TS_SW": {
+            "Rows": [
+                {
+                    "IBUId": "A",
+                    "Name": "A One",
+                    "Nat": "NOR",
+                    "Score": 200,
+                    "Bibs": {"General": "Yellow"},
+                },
+                {
+                    "IBUId": "B",
+                    "Name": "B Two",
+                    "Nat": "FRA",
+                    "Score": 180,
+                    "Bibs": {"U23": "Blue"},
+                },
+            ]
+        },
+        "SP_SW": {"Rows": []},
+        "PU_SW": {"Rows": []},
+        "IN_SW": {"Rows": []},
+        "MS_SW": {"Rows": []},
+    }
+    monkeypatch.setattr(
+        standings, "get_cup_results", lambda cup_id: payloads.get(cup_id, {"Rows": []})
+    )
+    monkeypatch.setattr(standings.Color, "enabled", classmethod(lambda cls: True))
+
+    captured: dict = {}
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured["headers"] = headers
+        captured["rows"] = rows
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(standings, "render_table", fake_render_table)
+
+    rc = standings.handle_standings(_args(sort="total", format=""))
+
+    assert rc == 0
+    assert "(U23)" in captured["rows"][1][3]
+    assert standings.U23_LEADER_MARKER in captured["rows"][1][1]
+
+    name_formatter = captured["kwargs"]["cell_formatters"][1]
+    assert name_formatter is not None
+
+    formatted = name_formatter(captured["rows"][1][1], 1)
+    assert "●" in formatted
+    dark_blue_prefix = (
+        f"\x1b[38;2;{standings.Color.DARK_BLUE[0]};"
+        f"{standings.Color.DARK_BLUE[1]};{standings.Color.DARK_BLUE[2]}m"
+    )
+    assert dark_blue_prefix in formatted
+
+
+def test_standings_athlete_mode_pretty_adds_u23_marker_from_dob(monkeypatch):
+    _mock_athlete_cups(monkeypatch)
+    monkeypatch.setattr(
+        standings,
+        "get_events",
+        lambda season_id, level: [{"EventId": "E1"}],
+    )
+    monkeypatch.setattr(
+        standings,
+        "get_races",
+        lambda event_id: [
+            {
+                "RaceId": "R1",
+                "catId": "SW",
+                "DisciplineId": "SP",
+                "StartTime": "2025-11-30T10:00:00Z",
+            }
+        ],
+    )
+    payloads = {
+        "TS_SW": {
+            "Rows": [
+                {"IBUId": "A", "Name": "A One", "Nat": "NOR", "Score": 200},
+                {"IBUId": "B", "Name": "B Two", "Nat": "FRA", "Score": 180},
+            ]
+        },
+        "SP_SW": {"Rows": []},
+        "PU_SW": {"Rows": []},
+        "IN_SW": {"Rows": []},
+        "MS_SW": {"Rows": []},
+    }
+    monkeypatch.setattr(
+        standings, "get_cup_results", lambda cup_id: payloads.get(cup_id, {"Rows": []})
+    )
+    monkeypatch.setattr(
+        standings,
+        "get_athlete_bio",
+        lambda ibu_id: (
+            {"BirthDate": "2003-12-01"}
+            if ibu_id == "B"
+            else {"BirthDate": "2002-01-01"}
+        ),
+    )
+    monkeypatch.setattr(standings.Color, "enabled", classmethod(lambda cls: True))
+
+    captured: dict = {}
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured["rows"] = rows
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(standings, "render_table", fake_render_table)
+
+    rc = standings.handle_standings(_args(sort="total", format=""))
+
+    assert rc == 0
+    assert standings.U23_LEADER_MARKER in captured["rows"][1][1]
+
+    position_formatter = captured["kwargs"]["cell_formatters"][0]
+    name_formatter = captured["kwargs"]["cell_formatters"][1]
+    country_formatter = captured["kwargs"]["cell_formatters"][2]
+    assert position_formatter is not None
+    assert name_formatter is not None
+    assert country_formatter is not None
+
+    dark_blue_prefix = (
+        f"\x1b[38;2;{standings.Color.DARK_BLUE[0]};"
+        f"{standings.Color.DARK_BLUE[1]};{standings.Color.DARK_BLUE[2]}m"
+    )
+    assert dark_blue_prefix in position_formatter(str(captured["rows"][1][0]), 1)
+    assert dark_blue_prefix in country_formatter(str(captured["rows"][1][2]), 1)
+
+    formatted = name_formatter(captured["rows"][1][1], 1)
+    assert dark_blue_prefix in formatted
+
+
+def test_standings_athlete_mode_u23_leader_keeps_leader_text_color(monkeypatch):
+    _mock_athlete_cups(monkeypatch)
+    monkeypatch.setattr(
+        standings,
+        "get_events",
+        lambda season_id, level: [{"EventId": "E1"}],
+    )
+    monkeypatch.setattr(
+        standings,
+        "get_races",
+        lambda event_id: [
+            {
+                "RaceId": "R1",
+                "catId": "SW",
+                "DisciplineId": "SP",
+                "StartTime": "2025-11-30T10:00:00Z",
+            }
+        ],
+    )
+    payloads = {
+        "TS_SW": {
+            "Rows": [
+                {"IBUId": "A", "Name": "A One", "Nat": "NOR", "Score": 200},
+                {"IBUId": "B", "Name": "B Two", "Nat": "FRA", "Score": 180},
+            ]
+        },
+        "SP_SW": {
+            "Rows": [
+                {"IBUId": "A", "Score": 120},
+                {"IBUId": "B", "Score": 100},
+            ]
+        },
+        "PU_SW": {"Rows": []},
+        "IN_SW": {"Rows": []},
+        "MS_SW": {"Rows": []},
+    }
+    monkeypatch.setattr(
+        standings, "get_cup_results", lambda cup_id: payloads.get(cup_id, {"Rows": []})
+    )
+    monkeypatch.setattr(
+        standings,
+        "get_athlete_bio",
+        lambda ibu_id: (
+            {"BirthDate": "2004-01-15"}
+            if ibu_id == "A"
+            else {"BirthDate": "2000-01-01"}
+        ),
+    )
+    monkeypatch.setattr(standings.Color, "enabled", classmethod(lambda cls: True))
+
+    captured: dict = {}
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured["rows"] = rows
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(standings, "render_table", fake_render_table)
+
+    rc = standings.handle_standings(_args(sort="total", format=""))
+
+    assert rc == 0
+    assert "(U23)" in captured["rows"][0][3]
+    assert standings.U23_LEADER_MARKER in captured["rows"][0][1]
+    assert standings.GENERAL_LEADER_MARKER in captured["rows"][0][1]
+    assert standings.DISCIPLINE_LEADER_MARKER in captured["rows"][0][1]
+
+    position_formatter = captured["kwargs"]["cell_formatters"][0]
+    name_formatter = captured["kwargs"]["cell_formatters"][1]
+    country_formatter = captured["kwargs"]["cell_formatters"][2]
+    assert position_formatter is not None
+    assert name_formatter is not None
+    assert country_formatter is not None
+
+    gold_prefix = (
+        f"\x1b[1m\x1b[38;2;{standings.Color.GOLD[0]};"
+        f"{standings.Color.GOLD[1]};{standings.Color.GOLD[2]}m"
+    )
+    dark_blue_prefix = (
+        f"\x1b[38;2;{standings.Color.DARK_BLUE[0]};"
+        f"{standings.Color.DARK_BLUE[1]};{standings.Color.DARK_BLUE[2]}m"
+    )
+    red_prefix = "\x1b[1m\x1b[38;2;240;50;50m"
+
+    # Text keeps leader color (gold), not dark blue.
+    assert gold_prefix in position_formatter(str(captured["rows"][0][0]), 0)
+    assert gold_prefix in country_formatter(str(captured["rows"][0][2]), 0)
+
+    # Name cell includes both leader-colored and U23-colored dots.
+    formatted_name = name_formatter(captured["rows"][0][1], 0)
+    assert gold_prefix in formatted_name
+    assert dark_blue_prefix in formatted_name
+    assert red_prefix in formatted_name
+
+
+def test_standings_athlete_mode_u23_flag_filters_rows(monkeypatch):
+    _mock_athlete_cups(monkeypatch)
+    monkeypatch.setattr(
+        standings,
+        "get_events",
+        lambda season_id, level: [{"EventId": "E1"}],
+    )
+    monkeypatch.setattr(
+        standings,
+        "get_races",
+        lambda event_id: [
+            {
+                "RaceId": "R1",
+                "catId": "SW",
+                "DisciplineId": "SP",
+                "StartTime": "2025-11-30T10:00:00Z",
+            }
+        ],
+    )
+    payloads = {
+        "TS_SW": {
+            "Rows": [
+                {"IBUId": "A", "Name": "A One", "Nat": "NOR", "Score": 200},
+                {"IBUId": "B", "Name": "B Two", "Nat": "FRA", "Score": 180},
+                {"IBUId": "C", "Name": "C Three", "Nat": "SWE", "Score": 160},
+            ]
+        },
+        "SP_SW": {"Rows": []},
+        "PU_SW": {"Rows": []},
+        "IN_SW": {"Rows": []},
+        "MS_SW": {"Rows": []},
+    }
+    monkeypatch.setattr(
+        standings, "get_cup_results", lambda cup_id: payloads.get(cup_id, {"Rows": []})
+    )
+    monkeypatch.setattr(
+        standings,
+        "get_athlete_bio",
+        lambda ibu_id: (
+            {"BirthDate": "2004-01-15"}
+            if ibu_id == "A"
+            else (
+                {"BirthDate": "2003-09-01"}
+                if ibu_id == "B"
+                else {"BirthDate": "1999-01-01"}
+            )
+        ),
+    )
+
+    captured: dict = {}
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured["headers"] = headers
+        captured["rows"] = rows
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(standings, "render_table", fake_render_table)
+
+    rc = standings.handle_standings(_args(u23=True, format=""))
+
+    assert rc == 0
+    assert captured["headers"][:5] == ["Position", "Name", "Country", "Age", "Total"]
+    assert len(captured["rows"]) == 2
+    assert captured["rows"][0][1].startswith("A One")
+    assert captured["rows"][1][1].startswith("B Two")
+
+
+def test_standings_athlete_mode_u23_flag_errors_when_empty(monkeypatch, capsys):
+    _mock_athlete_cups(monkeypatch)
+    payloads = {
+        "TS_SW": {
+            "Rows": [
+                {"IBUId": "A", "Name": "A One", "Nat": "NOR", "Score": 200},
+                {"IBUId": "B", "Name": "B Two", "Nat": "FRA", "Score": 180},
+            ]
+        },
+        "SP_SW": {"Rows": []},
+        "PU_SW": {"Rows": []},
+        "IN_SW": {"Rows": []},
+        "MS_SW": {"Rows": []},
+    }
+    monkeypatch.setattr(
+        standings, "get_cup_results", lambda cup_id: payloads.get(cup_id, {"Rows": []})
+    )
+    monkeypatch.setattr(
+        standings,
+        "get_athlete_bio",
+        lambda ibu_id: {"BirthDate": "1998-01-01"},
+    )
+
+    rc = standings.handle_standings(_args(u23=True, format=""))
+
+    assert rc == 1
+    assert "no U23 athletes found" in capsys.readouterr().err
+
+
+def test_standings_athlete_mode_u23_flag_uses_overall_leaders_only(monkeypatch):
+    _mock_athlete_cups(monkeypatch)
+    monkeypatch.setattr(
+        standings,
+        "get_events",
+        lambda season_id, level: [{"EventId": "E1"}],
+    )
+    monkeypatch.setattr(
+        standings,
+        "get_races",
+        lambda event_id: [
+            {
+                "RaceId": "R1",
+                "catId": "SW",
+                "DisciplineId": "SP",
+                "StartTime": "2025-11-30T10:00:00Z",
+            }
+        ],
+    )
+    payloads = {
+        "TS_SW": {
+            "Rows": [
+                {"IBUId": "N", "Name": "N Leader", "Nat": "NOR", "Score": 900},
+                {"IBUId": "A", "Name": "A U23", "Nat": "GER", "Score": 200},
+                {"IBUId": "B", "Name": "B U23", "Nat": "SWE", "Score": 170},
+            ]
+        },
+        "SP_SW": {
+            "Rows": [
+                {"IBUId": "N", "Score": 320},
+                {"IBUId": "A", "Score": 110},
+                {"IBUId": "B", "Score": 90},
+            ]
+        },
+        "PU_SW": {"Rows": []},
+        "IN_SW": {"Rows": []},
+        "MS_SW": {"Rows": []},
+    }
+    monkeypatch.setattr(
+        standings, "get_cup_results", lambda cup_id: payloads.get(cup_id, {"Rows": []})
+    )
+    monkeypatch.setattr(
+        standings,
+        "get_athlete_bio",
+        lambda ibu_id: (
+            {"BirthDate": "2004-01-15"}
+            if ibu_id in {"A", "B"}
+            else {"BirthDate": "1995-01-01"}
+        ),
+    )
+    monkeypatch.setattr(standings.Color, "enabled", classmethod(lambda cls: True))
+
+    captured: dict = {}
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured["rows"] = rows
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(standings, "render_table", fake_render_table)
+
+    rc = standings.handle_standings(_args(u23=True, format=""))
+
+    assert rc == 0
+    assert len(captured["rows"]) == 2
+
+    first_name = captured["rows"][0][1]
+    second_name = captured["rows"][1][1]
+    assert first_name.startswith("A U23")
+    assert second_name.startswith("B U23")
+
+    # Best U23 gets only U23 marker (no general/discipline leader markers).
+    assert first_name.count(standings.U23_LEADER_MARKER) == 1
+    assert standings.GENERAL_LEADER_MARKER not in first_name
+    assert standings.DISCIPLINE_LEADER_MARKER not in first_name
+
+    # Non-best U23 has no markers.
+    assert standings.U23_LEADER_MARKER not in second_name
+    assert standings.GENERAL_LEADER_MARKER not in second_name
+    assert standings.DISCIPLINE_LEADER_MARKER not in second_name
+
+    position_formatter = captured["kwargs"]["cell_formatters"][0]
+    name_formatter = captured["kwargs"]["cell_formatters"][1]
+    country_formatter = captured["kwargs"]["cell_formatters"][2]
+    assert position_formatter is not None
+    assert name_formatter is not None
+    assert country_formatter is not None
+
+    dark_blue_prefix = (
+        f"\x1b[38;2;{standings.Color.DARK_BLUE[0]};"
+        f"{standings.Color.DARK_BLUE[1]};{standings.Color.DARK_BLUE[2]}m"
+    )
+    gold_prefix = (
+        f"\x1b[1m\x1b[38;2;{standings.Color.GOLD[0]};"
+        f"{standings.Color.GOLD[1]};{standings.Color.GOLD[2]}m"
+    )
+    red_prefix = "\x1b[1m\x1b[38;2;240;50;50m"
+
+    assert dark_blue_prefix in position_formatter(str(captured["rows"][0][0]), 0)
+    assert dark_blue_prefix in country_formatter(str(captured["rows"][0][2]), 0)
+    formatted_name = name_formatter(first_name, 0)
+    assert dark_blue_prefix in formatted_name
+    assert gold_prefix not in formatted_name
+    assert red_prefix not in formatted_name

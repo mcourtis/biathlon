@@ -13,6 +13,7 @@ from ..api import (
     BiathlonError,
     get_all_results,
     get_analytic_results,
+    get_athlete_bio,
     get_cup_results,
     get_events,
     get_race_results,
@@ -39,6 +40,7 @@ from ..formatting import (
     rank_style,
 )
 from ..utils import (
+    parse_date,
     parse_start_datetime,
     format_race_header,
     get_first_time,
@@ -48,6 +50,7 @@ from ..utils import (
 from ._common import (
     DISCIPLINE_LEADER_MARKER,
     GENERAL_LEADER_MARKER,
+    U23_LEADER_MARKER,
     _format_section_title,
     _has_completed_relay_results,
     _ordinal,
@@ -470,6 +473,247 @@ def _fetch_cup_rows(cup_id: str | None) -> list[dict]:
     return payload.get("Rows") or payload.get("Results") or []
 
 
+def _parse_score(row: dict) -> int:
+    """Return an integer score value from a standings row."""
+    value = row.get("Score")
+    if value in (None, ""):
+        value = row.get("Points")
+    if value in (None, ""):
+        value = row.get("TotalScore")
+    if value in (None, ""):
+        return 0
+    if isinstance(value, int):
+        return value
+    text = str(value).strip().replace(",", "")
+    if not text:
+        return 0
+    try:
+        return int(text)
+    except ValueError:
+        try:
+            return int(float(text))
+        except ValueError:
+            return 0
+
+
+def _flag_is_true(value: object) -> bool:
+    """Return True when *value* looks like an active flag."""
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value == 1
+    if isinstance(value, float):
+        return value == 1.0
+    text = str(value).strip().lower()
+    return text in {"1", "true", "yes", "y", "x"}
+
+
+def _rank_is_one(value: object) -> bool:
+    """Return True when *value* is rank 1."""
+    text = str(value).strip().rstrip(".")
+    return text == "1"
+
+
+def _collect_text_tokens(value: object) -> list[str]:
+    """Collect normalized string tokens from nested payload values."""
+    tokens: list[str] = []
+    stack: list[object] = [value]
+    while stack:
+        current = stack.pop()
+        if current is None:
+            continue
+        if isinstance(current, dict):
+            for key, nested in current.items():
+                key_text = str(key).strip().lower()
+                if key_text:
+                    tokens.append(key_text)
+                stack.append(nested)
+            continue
+        if isinstance(current, (list, tuple, set)):
+            stack.extend(current)
+            continue
+        text = str(current).strip().lower()
+        if text:
+            tokens.append(text)
+    return tokens
+
+
+def _bibs_indicate_u23(value: object) -> bool:
+    """Return True when bib metadata indicates a best-U23 marker."""
+    tokens = _collect_text_tokens(value)
+    if not tokens:
+        return False
+    if any("u23" in token or "u-23" in token or "u 23" in token for token in tokens):
+        return True
+    if any("u25" in token or "u-25" in token or "u 25" in token for token in tokens):
+        return True
+    if any("young" in token for token in tokens):
+        return True
+    return any("blue" in token for token in tokens)
+
+
+def _is_best_u23_row(row: dict) -> bool:
+    """Return True when a standings row is marked as best U23."""
+    for key, value in row.items():
+        key_text = str(key).strip().lower()
+        if any(tag in key_text for tag in ("u23", "u-23", "u25", "u-25")):
+            if _flag_is_true(value) or _rank_is_one(value):
+                return True
+        if (
+            "young" in key_text
+            and any(tag in key_text for tag in ("best", "leader", "bib"))
+            and (_flag_is_true(value) or _rank_is_one(value))
+        ):
+            return True
+        if "bib" in key_text and _bibs_indicate_u23(value):
+            return True
+    return False
+
+
+def _parse_birth_date_value(value: object) -> datetime.date | None:
+    """Parse a birth date from common API value formats."""
+    text = str(value or "").strip()
+    if not text:
+        return None
+
+    parsed = parse_date(text)
+    if parsed is not None:
+        return parsed
+
+    compact = text.replace(" ", "")
+    for fmt in ("%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        try:
+            return datetime.datetime.strptime(compact, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _extract_birth_date(bio: dict) -> datetime.date | None:
+    """Return athlete birth date from a bio payload."""
+    for key in ("BirthDate", "Birthdate", "DateOfBirth", "DOB", "Birthday"):
+        parsed = _parse_birth_date_value(bio.get(key))
+        if parsed is not None:
+            return parsed
+
+    for item in bio.get("Personal", []):
+        label = str(item.get("Description") or "").strip().lower()
+        if not label:
+            continue
+        if "birth" in label or "born" in label:
+            parsed = _parse_birth_date_value(item.get("Value"))
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _extract_age_text(bio: dict) -> str | None:
+    """Extract age text from athlete bio payload."""
+    personal = {
+        str(item.get("Description") or "").strip().lower(): item.get("Value")
+        for item in bio.get("Personal", [])
+        if item.get("Description")
+    }
+    value = bio.get("Age") or personal.get("age")
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if "," in text:
+        text = text.split(",", 1)[0].strip()
+    return text or None
+
+
+def _age_on_date(birth_date: datetime.date, reference_date: datetime.date) -> int:
+    """Return age in full years at *reference_date*."""
+    years = reference_date.year - birth_date.year
+    if (reference_date.month, reference_date.day) < (birth_date.month, birth_date.day):
+        years -= 1
+    return years
+
+
+def _extract_age_years(text: str) -> int | None:
+    match = re.search(r"\d{1,2}", text or "")
+    if not match:
+        return None
+    return int(match.group(0))
+
+
+def _build_athlete_age_map(
+    ibu_ids: set[str], reference_date: datetime.date
+) -> tuple[dict[str, str], set[str]]:
+    """Return (IBU id -> age display, U23 ids) for athlete ids."""
+    unique_ids = [ibu_id for ibu_id in dict.fromkeys(ibu_ids) if ibu_id]
+    if not unique_ids:
+        return {}, set()
+
+    age_display_by_id: dict[str, str] = {}
+    u23_ids: set[str] = set()
+    max_workers = min(16, max(1, len(unique_ids)))
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        futures = {
+            executor.submit(get_athlete_bio, ibu_id): ibu_id for ibu_id in unique_ids
+        }
+        for future in futures:
+            ibu_id = futures[future]
+            try:
+                bio = future.result()
+            except BiathlonError:
+                bio = {}
+            except Exception:
+                bio = {}
+
+            age_display = "-"
+            is_u23 = False
+            birth_date = _extract_birth_date(bio)
+            if birth_date is not None:
+                age_years = _age_on_date(birth_date, reference_date)
+                age_display = str(age_years)
+                is_u23 = age_years < 23
+            else:
+                age_text = _extract_age_text(bio)
+                if age_text:
+                    age_display = age_text
+                    age_years = _extract_age_years(age_text)
+                    if age_years is not None:
+                        is_u23 = age_years < 23
+
+            if is_u23:
+                u23_ids.add(ibu_id)
+                if age_display == "-":
+                    age_display = "(U23)"
+                elif "(U23)" not in age_display:
+                    age_display = f"{age_display} (U23)"
+
+            age_display_by_id[ibu_id] = age_display
+
+    return age_display_by_id, u23_ids
+
+
+def _find_best_u23_leader(rows: list[dict], u23_ids: set[str]) -> dict[str, str]:
+    """Return best-U23 leader metadata from standings rows."""
+    candidates: list[dict] = [row for row in rows if _is_best_u23_row(row)]
+    if not candidates:
+        candidates = [row for row in rows if _row_ibu_id(row) in u23_ids]
+    if not candidates:
+        return {"id": "", "name": "", "nat": ""}
+
+    def _sort_key(row: dict) -> tuple[int, int, str]:
+        rank_val = _parse_rank(
+            row.get("Rank") or row.get("Standing") or row.get("ResultOrder")
+        )
+        rank = rank_val if rank_val is not None else 10**9
+        return (rank, -_parse_score(row), _row_ibu_id(row))
+
+    best = min(candidates, key=_sort_key)
+    return {
+        "id": _row_ibu_id(best),
+        "name": str(best.get("Name") or best.get("ShortName") or ""),
+        "nat": str(best.get("Nat") or ""),
+    }
+
+
 def _extract_rank_and_change(row: dict | None) -> tuple[int | None, str]:
     if not row:
         return None, "-"
@@ -681,6 +925,7 @@ def _leader_marker_suffix(
     nat: str,
     general_leader: dict[str, str],
     discipline_leader: dict[str, str],
+    u23_leader: dict[str, str],
     enabled: bool,
     mode: str = "any",
 ) -> str:
@@ -703,6 +948,8 @@ def _leader_marker_suffix(
         markers.append(GENERAL_LEADER_MARKER)
     if mode in {"any", "discipline"} and matches(discipline_leader):
         markers.append(DISCIPLINE_LEADER_MARKER)
+    if mode in {"any", "u23"} and matches(u23_leader):
+        markers.append(U23_LEADER_MARKER)
     if not markers:
         return ""
     return " " + " ".join(markers)
@@ -711,6 +958,7 @@ def _leader_marker_suffix(
 def _make_leader_name_decorator(
     general_leader: dict[str, str],
     discipline_leader: dict[str, str],
+    u23_leader: dict[str, str],
     enabled: bool,
     mode: str,
 ) -> Callable[[str, str, str], str]:
@@ -721,6 +969,7 @@ def _make_leader_name_decorator(
             nat,
             general_leader,
             discipline_leader,
+            u23_leader,
             enabled,
             mode,
         )
@@ -739,6 +988,7 @@ def _make_name_formatter(
         while tokens and tokens[-1] in {
             GENERAL_LEADER_MARKER,
             DISCIPLINE_LEADER_MARKER,
+            U23_LEADER_MARKER,
         }:
             markers.insert(0, tokens.pop())
         base = " ".join(tokens)
@@ -751,13 +1001,26 @@ def _make_name_formatter(
             for marker in markers:
                 if marker == GENERAL_LEADER_MARKER:
                     colored.append(Color.gold("●"))
-                else:
+                elif marker == DISCIPLINE_LEADER_MARKER:
                     colored.append(Color.red("●"))
+                else:
+                    colored.append(Color.dark_blue("●", bold=True))
             base = f"{base} {' '.join(colored)}" if base else " ".join(colored)
 
         return base
 
     return _formatter
+
+
+def _base_name_without_markers(text: str) -> str:
+    tokens = str(text or "").split()
+    while tokens and tokens[-1] in {
+        GENERAL_LEADER_MARKER,
+        DISCIPLINE_LEADER_MARKER,
+        U23_LEADER_MARKER,
+    }:
+        tokens.pop()
+    return " ".join(tokens)
 
 
 def _format_change_cell(cell_str: str, _row_idx: int) -> str:
@@ -789,6 +1052,7 @@ def _build_standings_rows(
     race_points_by_id: dict[str, int],
     name_decorator: Callable[[str, str, str], str] | None = None,
     participating_ids: set[str] | None = None,
+    age_display_by_id: dict[str, str] | None = None,
 ) -> tuple[list[list[str]], list[str]]:
     entries = []
     for row in rows:
@@ -810,6 +1074,7 @@ def _build_standings_rows(
                 "rank": rank_val,
                 "name": name,
                 "nat": nat,
+                "age": (age_display_by_id or {}).get(ibu_id, "-"),
                 "race_points": race_points,
                 "total_points": total_points,
                 "change": change,
@@ -825,6 +1090,7 @@ def _build_standings_rows(
             [
                 str(entry["rank"]),
                 str(entry["name"]),
+                str(entry["age"]),
                 str(entry["nat"]),
                 _format_race_points(entry["race_points"]),
                 _format_points(entry["total_points"]),
@@ -2080,6 +2346,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
     race_points_by_id: dict[str, int] = {}
     general_leader = {"id": "", "name": "", "nat": ""}
     discipline_leader = {"id": "", "name": "", "nat": ""}
+    best_u23_leader = {"id": "", "name": "", "nat": ""}
     cat_id = ""
     season_id = ""
     if is_wc_race and not is_relay and _is_individual_like_discipline(discipline):
@@ -2129,9 +2396,27 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 "nat": disc_rows[0].get("Nat") or "",
             }
 
+    age_display_by_id: dict[str, str] = {}
+    u23_ids: set[str] = set()
+    if is_wc_race:
+        reference_date = (
+            target_start_dt.date()
+            if target_start_dt is not None
+            else datetime.datetime.now(datetime.timezone.utc).date()
+        )
+        age_ibu_ids = {str(entry.get("ibu_id") or "") for entry in entries}
+        age_ibu_ids.update(_row_ibu_id(row) for row in total_rows)
+        age_ibu_ids.update(_row_ibu_id(row) for row in disc_rows)
+        age_display_by_id, u23_ids = _build_athlete_age_map(age_ibu_ids, reference_date)
+        best_u23_leader = _find_best_u23_leader(total_rows or disc_rows, u23_ids)
+
     mark_leaders = pretty
     decorate_any = _make_leader_name_decorator(
-        general_leader, discipline_leader, mark_leaders, "any"
+        general_leader,
+        discipline_leader,
+        best_u23_leader,
+        mark_leaders,
+        "any",
     )
     name_formatter_plain = _make_name_formatter()
     name_nat_to_id = {
@@ -2140,6 +2425,17 @@ def handle_post_race(args: argparse.Namespace) -> int:
         if entry.get("ibu_id")
     }
     participating_ids = {entry["ibu_id"] for entry in entries if entry.get("ibu_id")}
+
+    def _age_for_entry(name: str, nat: str, ibu_id: str = "") -> str:
+        if not age_display_by_id:
+            return "-"
+        resolved_id = ibu_id
+        if not resolved_id:
+            base_name = _base_name_without_markers(name)
+            resolved_id = name_nat_to_id.get((base_name, nat), "")
+        if not resolved_id:
+            return "-"
+        return age_display_by_id.get(resolved_id, "-")
 
     print()
     print(_format_section_title(format_race_header(payload, race_id), args))
@@ -2150,11 +2446,10 @@ def handle_post_race(args: argparse.Namespace) -> int:
     sec += 1
     if flower_entries:
         if is_wc_race:
-            headers = (
-                ["Rank", "Team", "Nat", "Points"]
-                if is_relay
-                else ["Rank", "Athlete", "Nat", "Points"]
-            )
+            if is_relay:
+                headers = ["Rank", "Team", "Nat", "Points"]
+            else:
+                headers = ["Rank", "Athlete", "Age", "Nat", "Points"]
         else:
             headers = (
                 ["Rank", "Team", "Nat"] if is_relay else ["Rank", "Athlete", "Nat"]
@@ -2172,8 +2467,10 @@ def handle_post_race(args: argparse.Namespace) -> int:
             row = [
                 entry["rank"],
                 decorate_any(entry["name"], entry["nat"], entry["ibu_id"]),
-                entry["nat"],
             ]
+            if is_wc_race and not is_relay:
+                row.append(_age_for_entry(entry["name"], entry["nat"], entry["ibu_id"]))
+            row.append(entry["nat"])
             if is_wc_race:
                 row.append(
                     _format_race_points(
@@ -2194,7 +2491,13 @@ def handle_post_race(args: argparse.Namespace) -> int:
             name_formatter = _make_name_formatter(row_styles)
             nat_formatter = None
         rank_formatter = _make_row_style_formatter(row_styles)
-        cell_fmts = [rank_formatter, name_formatter, nat_formatter]
+        cell_fmts: list[Callable[[str, int], str] | None] = [
+            rank_formatter,
+            name_formatter,
+        ]
+        if is_wc_race and not is_relay:
+            cell_fmts.append(None)
+        cell_fmts.append(nat_formatter)
         if is_wc_race:
             cell_fmts.append(None)
         print(_format_section_title(f"{sec}. Results:", args))
@@ -2225,6 +2528,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     race_points_by_id,
                     decorate_any,
                     participating_ids=participating_ids,
+                    age_display_by_id=age_display_by_id,
                 )
                 total_name_formatter = _make_name_formatter(total_row_styles)
                 print(
@@ -2233,12 +2537,21 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     )
                 )
                 render_table(
-                    ["Rank", "Athlete", "Nat", "Race Pts", "Total Pts", "Change"],
+                    [
+                        "Rank",
+                        "Athlete",
+                        "Age",
+                        "Nat",
+                        "Race Pts",
+                        "Total Pts",
+                        "Change",
+                    ],
                     total_standings_rows,
                     output_format=output_format,
                     cell_formatters=[
                         None,
                         total_name_formatter,
+                        None,
                         None,
                         _format_race_points_cell,
                         None,
@@ -2264,6 +2577,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     race_points_by_id,
                     decorate_any,
                     participating_ids=participating_ids,
+                    age_display_by_id=age_display_by_id,
                 )
                 disc_name_formatter = _make_name_formatter(disc_row_styles)
                 print(
@@ -2272,12 +2586,21 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     )
                 )
                 render_table(
-                    ["Rank", "Athlete", "Nat", "Race Pts", "Total Pts", "Change"],
+                    [
+                        "Rank",
+                        "Athlete",
+                        "Age",
+                        "Nat",
+                        "Race Pts",
+                        "Total Pts",
+                        "Change",
+                    ],
                     disc_standings_rows,
                     output_format=output_format,
                     cell_formatters=[
                         None,
                         disc_name_formatter,
+                        None,
                         None,
                         _format_race_points_cell,
                         None,
@@ -2593,6 +2916,17 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 race_milestones = [
                     [_ordinal(row[0]), row[1], row[2]] for row in race_milestones
                 ]
+            if is_wc_race:
+                if is_relay:
+                    race_milestones = [
+                        row[:3] + [_age_for_entry(row[2], row[3]), row[3]]
+                        for row in race_milestones
+                    ]
+                else:
+                    race_milestones = [
+                        row[:2] + [_age_for_entry(row[1], row[2]), row[2]]
+                        for row in race_milestones
+                    ]
             label = (
                 f"{sec}. World Cup + WCH + OWG race milestones:"
                 if use_major
@@ -2600,18 +2934,38 @@ def handle_post_race(args: argparse.Namespace) -> int:
             )
             print(_format_section_title(label, args))
             if is_relay:
+                relay_headers = (
+                    ["Milestone", "Type", "Athlete", "Age", "Nat"]
+                    if is_wc_race
+                    else ["Milestone", "Type", "Athlete", "Nat"]
+                )
+                relay_cell_fmts = (
+                    [None, None, name_formatter_plain, None, None]
+                    if is_wc_race
+                    else [None, None, name_formatter_plain, None]
+                )
                 render_table(
-                    ["Milestone", "Type", "Athlete", "Nat"],
+                    relay_headers,
                     race_milestones,
                     output_format=output_format,
-                    cell_formatters=[None, None, name_formatter_plain, None],
+                    cell_formatters=relay_cell_fmts,
                 )
             else:
+                athlete_headers = (
+                    ["Milestone", "Athlete", "Age", "Nat"]
+                    if is_wc_race
+                    else ["Milestone", "Athlete", "Nat"]
+                )
+                athlete_cell_fmts = (
+                    [None, name_formatter_plain, None, None]
+                    if is_wc_race
+                    else [None, name_formatter_plain, None]
+                )
                 render_table(
-                    ["Milestone", "Athlete", "Nat"],
+                    athlete_headers,
                     race_milestones,
                     output_format=output_format,
-                    cell_formatters=[None, name_formatter_plain, None],
+                    cell_formatters=athlete_cell_fmts,
                 )
             print()
         else:
@@ -2742,6 +3096,8 @@ def handle_post_race(args: argparse.Namespace) -> int:
         if lap_rows:
             print(_format_section_title(f"{sec}. Top 6 fastest laps:", args))
             headers = ["Time", "Athlete", "Nat", "Lap"]
+            if is_wc_race:
+                headers.insert(2, "Age")
             if is_relay:
                 headers.insert(3, "Leg")
             rows = []
@@ -2749,10 +3105,18 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 ibu_id = name_nat_to_id.get((lap_row["name"], lap_row["nat"]), "")
                 name = decorate_any(lap_row["name"], lap_row["nat"], ibu_id)
                 data = [lap_row["time"], name, lap_row["nat"], lap_row["lap"]]
+                if is_wc_race:
+                    data.insert(
+                        2,
+                        _age_for_entry(lap_row["name"], lap_row["nat"], ibu_id),
+                    )
                 if is_relay:
                     data.insert(3, lap_row["leg"] or "-")
                 rows.append(data)
-            cell_formatters = [None, name_formatter_plain, None, None]
+            cell_formatters = [None, name_formatter_plain]
+            if is_wc_race:
+                cell_formatters.append(None)
+            cell_formatters.extend([None, None])
             if is_relay:
                 cell_formatters.insert(3, None)
             render_table(
@@ -2817,12 +3181,25 @@ def handle_post_race(args: argparse.Namespace) -> int:
             for row in leg_times:
                 ibu_id = name_nat_to_id.get((row[1], row[2]), "")
                 name = decorate_any(row[1], row[2], ibu_id)
-                rows.append([row[4], name, row[2], row[3]])
+                data = [row[4], name, row[2], row[3]]
+                if is_wc_race:
+                    data.insert(2, _age_for_entry(row[1], row[2], ibu_id))
+                rows.append(data)
+            headers = (
+                ["Time", "Athlete", "Age", "Nat", "Leg"]
+                if is_wc_race
+                else ["Time", "Athlete", "Nat", "Leg"]
+            )
+            cell_formatters = (
+                [None, name_formatter_plain, None, None, None]
+                if is_wc_race
+                else [None, name_formatter_plain, None, None]
+            )
             render_table(
-                ["Time", "Athlete", "Nat", "Leg"],
+                headers,
                 rows,
                 output_format=output_format,
-                cell_formatters=[None, name_formatter_plain, None, None],
+                cell_formatters=cell_formatters,
             )
             print()
         else:
@@ -2860,12 +3237,25 @@ def handle_post_race(args: argparse.Namespace) -> int:
             for row in leg_course_rows:
                 ibu_id = name_nat_to_id.get((row[1], row[2]), "")
                 name = decorate_any(row[1], row[2], ibu_id)
-                rows.append([row[4], name, row[2], row[3]])
+                data = [row[4], name, row[2], row[3]]
+                if is_wc_race:
+                    data.insert(2, _age_for_entry(row[1], row[2], ibu_id))
+                rows.append(data)
+            headers = (
+                ["Time", "Athlete", "Age", "Nat", "Leg"]
+                if is_wc_race
+                else ["Time", "Athlete", "Nat", "Leg"]
+            )
+            cell_formatters = (
+                [None, name_formatter_plain, None, None, None]
+                if is_wc_race
+                else [None, name_formatter_plain, None, None]
+            )
             render_table(
-                ["Time", "Athlete", "Nat", "Leg"],
+                headers,
                 rows,
                 output_format=output_format,
-                cell_formatters=[None, name_formatter_plain, None, None],
+                cell_formatters=cell_formatters,
             )
             print()
         else:
@@ -2916,17 +3306,25 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 _format_section_title(f"{sec}. Top 6 fastest shooters (0 miss):", args)
             )
             headers = ["Time", "Athlete", "Nat", "Stage"]
+            if is_wc_race:
+                headers.insert(2, "Age")
             rows = []
             for row in zero_miss_rows:
                 ibu_id = name_nat_to_id.get((row[1], row[2]), "")
                 name = decorate_any(row[1], row[2], ibu_id)
                 data = [row[3], name, row[2], row[4] or "-"]
+                if is_wc_race:
+                    data.insert(2, _age_for_entry(row[1], row[2], ibu_id))
                 rows.append(data)
+            cell_formatters = [None, name_formatter_plain]
+            if is_wc_race:
+                cell_formatters.append(None)
+            cell_formatters.extend([None, None])
             render_table(
                 headers,
                 rows,
                 output_format=output_format,
-                cell_formatters=[None, name_formatter_plain, None, None],
+                cell_formatters=cell_formatters,
             )
             print()
         else:
@@ -3080,6 +3478,19 @@ def handle_post_race(args: argparse.Namespace) -> int:
             in race_medalist_name_nat
         ]
         if not is_relay and ranked_athletes:
+            if is_wc_race:
+                extra_age_ids = {
+                    str(stats.get("ibu_id") or "")
+                    for _rank, stats in ranked_athletes
+                    if str(stats.get("ibu_id") or "")
+                    and str(stats.get("ibu_id") or "") not in age_display_by_id
+                }
+                if extra_age_ids:
+                    extra_age_map, extra_u23_ids = _build_athlete_age_map(
+                        extra_age_ids, reference_date
+                    )
+                    age_display_by_id.update(extra_age_map)
+                    u23_ids.update(extra_u23_ids)
             sec += 1
             print(
                 _format_section_title(
@@ -3096,19 +3507,20 @@ def handle_post_race(args: argparse.Namespace) -> int:
             for rank, stats in ranked_athletes:
                 total = stats["gold"] + stats["silver"] + stats["bronze"]
                 ibu_id = stats["ibu_id"]
-                ath_rows.append(
-                    [
-                        str(rank),
-                        stats["name"],
-                        stats["nat"],
-                        medal_gender,
-                        str(stats["gold"]),
-                        str(stats["silver"]),
-                        str(stats["bronze"]),
-                        str(total),
-                        str(stats.get("races", 0)),
-                    ]
-                )
+                row = [
+                    str(rank),
+                    stats["name"],
+                    stats["nat"],
+                    medal_gender,
+                    str(stats["gold"]),
+                    str(stats["silver"]),
+                    str(stats["bronze"]),
+                    str(total),
+                    str(stats.get("races", 0)),
+                ]
+                if is_wc_race:
+                    row.insert(2, _age_for_entry(stats["name"], stats["nat"], ibu_id))
+                ath_rows.append(row)
                 if ibu_id and ibu_id in gold_ids:
                     ath_row_styles.append("gold")
                 elif ibu_id and ibu_id in silver_ids:
@@ -3123,33 +3535,41 @@ def handle_post_race(args: argparse.Namespace) -> int:
             ath_name_fmt = _make_medal_cell_formatter(
                 ath_row_styles, race_athlete_medals, ath_keys
             )
-            render_table(
+            headers = [
+                "#",
+                "Athlete",
+                "Nat",
+                "Gender",
+                Color.gold("Gold"),
+                Color.silver("Silver"),
+                Color.bronze("Bronze"),
+                "Total",
+                "Races",
+            ]
+            if is_wc_race:
+                headers.insert(2, "Age")
+            column_separators = {5} if is_wc_race else {4}
+            cell_formatters = [None, ath_name_fmt]
+            if is_wc_race:
+                cell_formatters.append(None)
+            cell_formatters.extend(
                 [
-                    "#",
-                    "Athlete",
-                    "Nat",
-                    "Gender",
-                    Color.gold("Gold"),
-                    Color.silver("Silver"),
-                    Color.bronze("Bronze"),
-                    "Total",
-                    "Races",
-                ],
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ]
+            )
+            render_table(
+                headers,
                 ath_rows,
                 output_format=output_format,
                 row_styles=ath_row_styles,
-                column_separators={4},
-                cell_formatters=[
-                    None,
-                    ath_name_fmt,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                    None,
-                ],
+                column_separators=column_separators,
+                cell_formatters=cell_formatters,
             )
             print()
         elif not is_relay:
