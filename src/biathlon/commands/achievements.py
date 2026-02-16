@@ -894,10 +894,15 @@ def _enrich_athlete_rows_with_age(
         if not best_u23_key and is_u23:
             best_u23_key = _stats_row_key(row, by_country=False)
 
-    if known_best_u23_ids:
+    matching_known_best_u23_ids = {
+        ibu_id
+        for ibu_id in {str(row.get("ibu_id") or "") for row in rows}
+        if ibu_id and ibu_id in known_best_u23_ids
+    }
+    if matching_known_best_u23_ids:
         for row in rows:
             ibu_id = str(row.get("ibu_id") or "")
-            row["is_best_u23"] = bool(ibu_id and ibu_id in known_best_u23_ids)
+            row["is_best_u23"] = bool(ibu_id and ibu_id in matching_known_best_u23_ids)
     else:
         for row in rows:
             row["is_best_u23"] = (

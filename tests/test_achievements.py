@@ -179,6 +179,18 @@ def _mock_world_cup_dataset(monkeypatch) -> None:
         "get_athlete_bio",
         lambda ibu_id: {"Gender": "W" if ibu_id.startswith("W") else "M"},
     )
+    monkeypatch.setattr(
+        achievements,
+        "_build_wc_standings_context",
+        lambda season_id, category: {
+            "age_display_by_id": {},
+            "u23_ids": set(),
+            "best_u23_ids": set(),
+            "markers_by_id": {},
+            "markers_by_name_nat": {},
+            "reference_date": None,
+        },
+    )
 
 
 def test_achievements_default_women_athlete_table(monkeypatch, capsys):
@@ -705,7 +717,7 @@ def test_achievements_pretty_falls_back_when_standings_markers_do_not_match_rows
         lambda season_id, category: {
             "age_display_by_id": {},
             "u23_ids": set(),
-            "best_u23_ids": set(),
+            "best_u23_ids": {"X1"},
             "markers_by_id": {"X1": [achievements.GENERAL_LEADER_MARKER]},
             "markers_by_name_nat": {
                 ("Unknown Athlete", "XXX"): [achievements.GENERAL_LEADER_MARKER]
