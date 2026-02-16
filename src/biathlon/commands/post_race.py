@@ -675,9 +675,9 @@ def _build_athlete_age_map(
                 age_text = _extract_age_text(bio)
                 if age_text:
                     age_display = age_text
-                    age_years = _extract_age_years(age_text)
-                    if age_years is not None:
-                        is_u23 = age_years < 23
+                    parsed_age_years = _extract_age_years(age_text)
+                    if parsed_age_years is not None:
+                        is_u23 = parsed_age_years < 23
 
             if is_u23:
                 u23_ids.add(ibu_id)

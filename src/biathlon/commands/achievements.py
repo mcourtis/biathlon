@@ -653,9 +653,9 @@ def _build_athlete_age_map(
                 age_text = _extract_age_text(bio)
                 if age_text:
                     age_display = age_text
-                    age_years = _extract_age_years(age_text)
-                    if age_years is not None:
-                        is_u23 = age_years < 23
+                    parsed_age_years = _extract_age_years(age_text)
+                    if parsed_age_years is not None:
+                        is_u23 = parsed_age_years < 23
 
             if is_u23:
                 u23_ids.add(ibu_id)
@@ -1354,6 +1354,8 @@ def handle_achievements(args: argparse.Namespace) -> int:
             leader_markers = _leader_markers_from_standings_context(
                 rows, standings_context
             )
+            if not leader_markers:
+                leader_markers = _leader_markers_for_rows(rows, by_country=False)
         else:
             leader_markers = _leader_markers_for_rows(rows, by_country=by_country)
 

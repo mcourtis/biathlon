@@ -683,3 +683,48 @@ def test_achievements_pretty_uses_standings_context_for_markers_and_u23(monkeypa
 
     dana_row = next(row for row in captured["rows"] if row[1].startswith("Dana"))
     assert dana_row[4] == "22 (U23)"
+
+
+def test_achievements_pretty_falls_back_when_standings_markers_do_not_match_rows(
+    monkeypatch,
+):
+    _mock_world_cup_dataset(monkeypatch)
+    monkeypatch.setattr(
+        achievements,
+        "get_athlete_bio",
+        lambda ibu_id: (
+            {"BirthDate": "2004-01-01"}
+            if ibu_id == "W1"
+            else {"BirthDate": "1998-01-01"}
+        ),
+    )
+    monkeypatch.setattr(achievements.Color, "enabled", classmethod(lambda cls: True))
+    monkeypatch.setattr(
+        achievements,
+        "_build_wc_standings_context",
+        lambda season_id, category: {
+            "age_display_by_id": {},
+            "u23_ids": set(),
+            "best_u23_ids": set(),
+            "markers_by_id": {"X1": [achievements.GENERAL_LEADER_MARKER]},
+            "markers_by_name_nat": {
+                ("Unknown Athlete", "XXX"): [achievements.GENERAL_LEADER_MARKER]
+            },
+            "reference_date": None,
+        },
+    )
+
+    captured: dict = {}
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured["headers"] = headers
+        captured["rows"] = rows
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(achievements, "render_table", fake_render_table)
+
+    rc = achievements.handle_achievements(_args(format=""))
+
+    assert rc == 0
+    assert achievements.GENERAL_LEADER_MARKER in captured["rows"][0][1]
+    assert achievements.U23_LEADER_MARKER in captured["rows"][0][1]
