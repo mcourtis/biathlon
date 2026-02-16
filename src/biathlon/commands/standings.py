@@ -85,7 +85,7 @@ def _get_cup_ids_by_discipline(
     if not cat_id:
         raise BiathlonError(f"Unknown gender: {gender}")
 
-    cup_ids = {}
+    cup_ids: dict[str, str] = {}
     for cup in get_cups(season_id):
         if cup.get("CatId") == cat_id and cup.get("Level") == level:
             disc = cup.get("DisciplineId")
@@ -94,13 +94,19 @@ def _get_cup_ids_by_discipline(
     return cup_ids
 
 
-def _find_leaders(athlete_list: list[dict]) -> dict:
+def _find_leaders(athlete_list: list[dict]) -> dict[str, str | None]:
     """Find the leader (highest score) for total and each discipline."""
-    leaders = {"total": None, "SP": None, "PU": None, "IN": None, "MS": None}
+    leaders: dict[str, str | None] = {
+        "total": None,
+        "SP": None,
+        "PU": None,
+        "IN": None,
+        "MS": None,
+    }
 
     for key in leaders:
         max_score = 0
-        leader_name = None
+        leader_name: str | None = None
         for athlete in athlete_list:
             score = athlete.get(key, 0)
             if score > max_score:
@@ -163,7 +169,7 @@ def _country_key_and_display(row: dict) -> tuple[str, str]:
 
 def _get_country_cup_ids(season_id: str, level: int) -> dict[str, list[str]]:
     """Return cup ids for country-mode standings."""
-    cup_ids = {
+    cup_ids: dict[str, list[str]] = {
         "women_nations": [],
         "men_nations": [],
         "women_relay": [],
@@ -232,19 +238,20 @@ def handle_standings(args: argparse.Namespace) -> int:
         return 1
 
     if country_mode:
+        country_sort_col: str | None
         if not sort_by_raw:
-            sort_col = "men_nations" if gender == "men" else "women_nations"
+            country_sort_col = "men_nations" if gender == "men" else "women_nations"
         else:
-            sort_col = COUNTRY_SORT_COLUMNS.get(sort_by_raw.lower())
-        if sort_col is None:
+            country_sort_col = COUNTRY_SORT_COLUMNS.get(sort_by_raw.lower())
+        if country_sort_col is None:
             print(
                 "error: when using --country, sort must be one of women-nations, men-nations, women-relay, men-relay, mixed-relay",
                 file=sys.stderr,
             )
             return 1
 
-        cup_ids = _get_country_cup_ids(season_id, level)
-        if not any(cup_ids.values()):
+        country_cup_ids = _get_country_cup_ids(season_id, level)
+        if not any(country_cup_ids.values()):
             print(
                 "no country standings cup found (women/men nations + relay standings)",
                 file=sys.stderr,
@@ -275,23 +282,23 @@ def handle_standings(args: argparse.Namespace) -> int:
                     entry["country"] = display_country
                 entry[target_key] += _parse_score(row)
 
-        for cup_id in cup_ids["women_nations"]:
+        for cup_id in country_cup_ids["women_nations"]:
             payload = get_cup_results(cup_id)
             rows = payload.get("Rows") or payload.get("Results") or []
             merge_rows(rows, "women_nations")
-        for cup_id in cup_ids["men_nations"]:
+        for cup_id in country_cup_ids["men_nations"]:
             payload = get_cup_results(cup_id)
             rows = payload.get("Rows") or payload.get("Results") or []
             merge_rows(rows, "men_nations")
-        for cup_id in cup_ids["women_relay"]:
+        for cup_id in country_cup_ids["women_relay"]:
             payload = get_cup_results(cup_id)
             rows = payload.get("Rows") or payload.get("Results") or []
             merge_rows(rows, "women_relay")
-        for cup_id in cup_ids["men_relay"]:
+        for cup_id in country_cup_ids["men_relay"]:
             payload = get_cup_results(cup_id)
             rows = payload.get("Rows") or payload.get("Results") or []
             merge_rows(rows, "men_relay")
-        for cup_id in cup_ids["mixed_relay"]:
+        for cup_id in country_cup_ids["mixed_relay"]:
             payload = get_cup_results(cup_id)
             rows = payload.get("Rows") or payload.get("Results") or []
             merge_rows(rows, "mixed_relay")
@@ -313,7 +320,7 @@ def handle_standings(args: argparse.Namespace) -> int:
 
         country_list.sort(
             key=lambda c: (
-                -int(c[sort_col]),
+                -int(c[country_sort_col]),
                 -int(c["nations_total"]),
                 -int(c["relay_total"]),
                 str(c["country"]),
@@ -418,7 +425,7 @@ def handle_standings(args: argparse.Namespace) -> int:
             "men_relay": "Men Relay",
             "mixed_relay": "Mixed Relay",
         }
-        sort_header_name = sort_header_map.get(sort_col)
+        sort_header_name = sort_header_map.get(country_sort_col)
         highlight_headers = (
             [headers.index(sort_header_name)]
             if pretty and sort_header_name and sort_header_name in headers
@@ -437,8 +444,8 @@ def handle_standings(args: argparse.Namespace) -> int:
         return 0
 
     # Validate athlete-mode sort column
-    sort_col = SORT_COLUMNS.get(sort_by_raw.lower() if sort_by_raw else "total")
-    if not sort_col:
+    athlete_sort_col = SORT_COLUMNS.get(sort_by_raw.lower() if sort_by_raw else "total")
+    if athlete_sort_col is None:
         valid = ", ".join(SORT_COLUMNS.keys())
         print(
             f"error: sort must be one of {valid} (or use --country with women-nations/men-nations/women-relay/men-relay/mixed-relay)",
@@ -446,10 +453,10 @@ def handle_standings(args: argparse.Namespace) -> int:
         )
         return 1
 
-    cup_ids = _get_cup_ids_by_discipline(season_id, gender, level)
+    athlete_cup_ids = _get_cup_ids_by_discipline(season_id, gender, level)
 
     # Get total standings first
-    total_cup_id = cup_ids.get("TS")
+    total_cup_id = athlete_cup_ids.get("TS")
     if not total_cup_id:
         print("no total standings cup found", file=sys.stderr)
         return 1
@@ -478,7 +485,7 @@ def handle_standings(args: argparse.Namespace) -> int:
 
     # Fetch discipline scores
     for disc in DISCIPLINES:
-        disc_cup_id = cup_ids.get(disc)
+        disc_cup_id = athlete_cup_ids.get(disc)
         if not disc_cup_id:
             continue
         try:
@@ -500,9 +507,9 @@ def handle_standings(args: argparse.Namespace) -> int:
         athlete["position"] = pos
 
     # Re-sort by discipline if requested
-    sorting_by_discipline = sort_col != "total"
+    sorting_by_discipline = athlete_sort_col != "total"
     if sorting_by_discipline:
-        athlete_list.sort(key=lambda a: (-a[sort_col], -a["total"]))
+        athlete_list.sort(key=lambda a: (-a[athlete_sort_col], -a["total"]))
         # Assign discipline position
         for disc_pos, athlete in enumerate(athlete_list, start=1):
             athlete["disc_position"] = disc_pos
@@ -521,10 +528,12 @@ def handle_standings(args: argparse.Namespace) -> int:
     # Build name -> list of led disciplines (in fixed order)
     athlete_led_disciplines: dict[str, list[str]] = {}
     for disc in DISCIPLINES:
-        if leaders[disc]:
-            athlete_led_disciplines.setdefault(leaders[disc], []).append(disc)
-            if leaders[disc] != total_leader:
-                discipline_leaders.add(leaders[disc])
+        leader_name = leaders.get(disc)
+        if leader_name is None:
+            continue
+        athlete_led_disciplines.setdefault(leader_name, []).append(disc)
+        if leader_name != total_leader:
+            discipline_leaders.add(leader_name)
 
     pretty = is_pretty_output(args)
     output_format = get_output_format(args)
@@ -548,7 +557,7 @@ def handle_standings(args: argparse.Namespace) -> int:
                 markers.append(DISCIPLINE_LEADER_MARKER)
             if markers:
                 name = name + " " + " ".join(markers)
-        row = [
+        render_row = [
             athlete["position"],
             name,
             athlete["nat"],
@@ -559,8 +568,8 @@ def handle_standings(args: argparse.Namespace) -> int:
             athlete["MS"] or "-",
         ]
         if sorting_by_discipline:
-            row.insert(1, athlete["disc_position"])
-        render_rows.append(row)
+            render_row.insert(1, athlete["disc_position"])
+        render_rows.append(render_row)
 
     headers = [
         "Position",
@@ -573,7 +582,7 @@ def handle_standings(args: argparse.Namespace) -> int:
         "MassStart",
     ]
     if sorting_by_discipline:
-        disc_label = DISCIPLINE_LABELS.get(sort_col, sort_col)
+        disc_label = DISCIPLINE_LABELS.get(athlete_sort_col, athlete_sort_col)
         headers.insert(1, f"{disc_label}Position")
 
     def make_slight_gold_formatter():
@@ -645,7 +654,7 @@ def handle_standings(args: argparse.Namespace) -> int:
         "IN": "Individual",
         "MS": "MassStart",
     }
-    sort_header_name = sort_header_map.get(sort_col)
+    sort_header_name = sort_header_map.get(athlete_sort_col)
     highlight_headers = (
         [headers.index(sort_header_name)]
         if pretty and sort_header_name and sort_header_name in headers
