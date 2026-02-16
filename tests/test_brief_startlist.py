@@ -326,6 +326,9 @@ def test_render_team_startlist_section2a_current_season_podiums(monkeypatch, cap
             }
         ],
     )
+    monkeypatch.setattr(
+        brief, "_fetch_relay_wc_standings", lambda *_a, **_k: ("Men Relay", [])
+    )
     monkeypatch.setattr(brief, "_get_all_olympic_medals", lambda *_a, **_k: ([], {}))
 
     args = argparse.Namespace(format="tsv")
@@ -409,6 +412,9 @@ def test_render_team_startlist_section2a_season_separator_pretty(monkeypatch, ca
             },
         ],
     )
+    monkeypatch.setattr(
+        brief, "_fetch_relay_wc_standings", lambda *_a, **_k: ("Men Relay", [])
+    )
     monkeypatch.setattr(brief, "_get_all_olympic_medals", lambda *_a, **_k: ([], {}))
 
     args = argparse.Namespace(format="pretty")
@@ -429,6 +435,55 @@ def test_render_team_startlist_section2a_season_separator_pretty(monkeypatch, ca
     assert "-+-" in lines[idx_2025_dec + 1]
     # No separator within the same season even if calendar year changes.
     assert idx_2024_dec == idx_2025_mar + 1
+
+
+def test_render_team_startlist_adds_relay_wc_standings_section(monkeypatch, capsys):
+    payload = {
+        "Competition": {"DisciplineId": "RL", "catId": "SM"},
+        "SportEvt": {"Description": "Olympic Winter Games", "SeasonId": "2526"},
+        "Results": [
+            {
+                "IsTeam": False,
+                "IBUId": "A1",
+                "FamilyName": "Laegreid",
+                "Name": "Sturla Holm Laegreid",
+                "Nat": "NOR",
+            }
+        ],
+    }
+    team_entries = [
+        {"bib": "1", "name": "Norway", "nat": "NOR"},
+        {"bib": "2", "name": "France", "nat": "FRA"},
+    ]
+
+    monkeypatch.setattr(
+        brief, "detect_event_type", lambda _sport_evt: brief.EVENT_TYPE_OWG
+    )
+    monkeypatch.setattr(brief, "_get_past_olympic_relay_podiums", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        brief, "_get_current_season_relay_podiums", lambda *_a, **_k: []
+    )
+    monkeypatch.setattr(brief, "_get_all_olympic_medals", lambda *_a, **_k: ([], {}))
+    monkeypatch.setattr(
+        brief,
+        "_fetch_relay_wc_standings",
+        lambda *_a, **_k: (
+            "Men Relay",
+            [
+                {"Rank": "1", "Name": "NORWAY", "Nat": "NOR", "Score": "220"},
+                {"Standing": "2", "Name": "FRANCE", "Nat": "FRA", "Points": "198"},
+            ],
+        ),
+    )
+
+    args = argparse.Namespace(format="tsv")
+    rc = brief._render_team_startlist(payload, "RACE1", team_entries, args)
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Men Relay World Cup Standings (Top 10)" in out
+    assert "1\tNORWAY\tNOR\t220" in out
+    assert "2\tFRANCE\tFRA\t198" in out
 
 
 def test_get_current_season_relay_podiums_includes_previous_and_country_fallback(

@@ -46,6 +46,7 @@ from .startlist import (
     _country_display,
     _event_country_display,
     _extract_venue_name,
+    _fetch_relay_wc_standings,
     _find_all_startlist_races,
     _get_all_olympic_medals,
     _get_past_olympic_relay_podiums,
@@ -1494,8 +1495,10 @@ def _render_team_startlist(
     all_country_medals: list[dict] = []
     all_athlete_stats: dict[str, dict] = {}
     season_athlete_info: dict[str, dict[str, str]] = {}
+    relay_wc_label = ""
+    relay_wc_rows: list[dict] = []
 
-    with ThreadPoolExecutor(max_workers=4) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         podiums_future = executor.submit(
             _get_past_olympic_relay_podiums, discipline, category
         )
@@ -1520,6 +1523,13 @@ def _render_team_startlist(
             if is_provisional
             else None
         )
+        relay_wc_future = executor.submit(
+            _fetch_relay_wc_standings,
+            season_id,
+            category,
+            discipline,
+            10,
+        )
 
         podiums = podiums_future.result()
         if current_podiums_future is not None:
@@ -1528,6 +1538,7 @@ def _render_team_startlist(
             all_country_medals, all_athlete_stats = medals_future.result()
         if season_info_future is not None:
             season_athlete_info = season_info_future.result()
+        relay_wc_label, relay_wc_rows = relay_wc_future.result()
 
     print()
     print(_format_section_title(format_race_header(payload, race_id), args))
@@ -1569,6 +1580,26 @@ def _render_team_startlist(
         column_separators={3} if has_rosters else {2},
     )
     print()
+
+    relay_title = f"{(relay_wc_label or 'Relay')} World Cup Standings (Top 10)"
+    if relay_wc_rows:
+        _print_section_title(relay_title)
+        relay_rows: list[list[str]] = []
+        for idx, row in enumerate(relay_wc_rows):
+            rank = row.get("Rank") or row.get("Standing") or idx + 1
+            name = row.get("Name") or row.get("ShortName") or ""
+            nat = row.get("Nat") or ""
+            score = row.get("Score") or row.get("Points") or 0
+            relay_rows.append([str(rank).rstrip("."), str(name), str(nat), str(score)])
+        render_table(
+            ["Rank", "Team", "Nat", "Points"],
+            relay_rows,
+            output_format=output_format,
+            column_separators={3},
+        )
+        print()
+    else:
+        _print_section_title(f"{relay_title} (none)")
 
     # Shared relay podium formatting for sections 2 and 2a.
     startlist_athletes = _get_startlist_athletes(payload)

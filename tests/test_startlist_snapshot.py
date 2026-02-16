@@ -463,6 +463,44 @@ def test_filter_results_before_cutoff_uses_season_fast_path(monkeypatch):
     assert calls == ["BT2526SAME"]
 
 
+def test_fetch_relay_wc_standings_women_relay(monkeypatch):
+    monkeypatch.setattr(
+        startlist,
+        "_get_cup_ids_for_race",
+        lambda season_id, cat_id, disc: ("TS_CUP", "RL_CUP"),
+    )
+    monkeypatch.setattr(
+        startlist,
+        "_fetch_standings",
+        lambda cup_id, limit=10: (
+            [{"Rank": "1", "Name": "NORWAY", "Nat": "NOR", "Score": "210"}]
+            if cup_id == "RL_CUP"
+            else []
+        ),
+    )
+
+    label, rows = startlist._fetch_relay_wc_standings("2526", "SW", "RL")
+
+    assert label == "Women Relay"
+    assert rows == [{"Rank": "1", "Name": "NORWAY", "Nat": "NOR", "Score": "210"}]
+
+
+def test_fetch_relay_wc_standings_mixed_relay(monkeypatch):
+    monkeypatch.setattr(startlist, "_find_mixed_relay_cup", lambda *_a, **_k: "MX_CUP")
+    monkeypatch.setattr(
+        startlist,
+        "_fetch_standings",
+        lambda cup_id, limit=10: [{"Rank": "1", "Name": "NORWAY"}]
+        if cup_id == "MX_CUP"
+        else [],
+    )
+
+    label, rows = startlist._fetch_relay_wc_standings("2526", "MX", "MR")
+
+    assert label == "Mixed Relay"
+    assert rows == [{"Rank": "1", "Name": "NORWAY"}]
+
+
 def test_render_wc_section1_skips_relays(capsys):
     ctx = {
         "race_disc": "RL",

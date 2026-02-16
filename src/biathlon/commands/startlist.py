@@ -1607,6 +1607,44 @@ def _find_mixed_relay_cup(season_id: str, discipline: str) -> str | None:
     return None
 
 
+def _relay_wc_standings_label(category: str, discipline: str) -> str:
+    """Return a display label for relay World Cup standings."""
+    cat_id = str(category or "").upper()
+    disc_id = str(discipline or "").upper()
+    if _is_mixed_relay(disc_id, cat_id):
+        if disc_id == "RL":
+            return "Mixed Relay"
+        return DISCIPLINE_NAMES.get(disc_id, "Mixed Relay")
+    cat_name = CATEGORY_DISPLAY_NAMES.get(cat_id, cat_id)
+    disc_name = DISCIPLINE_NAMES.get(disc_id, disc_id)
+    return f"{cat_name} {disc_name}".strip() or "Relay"
+
+
+def _fetch_relay_wc_standings(
+    season_id: str,
+    category: str,
+    discipline: str,
+    limit: int = 10,
+) -> tuple[str, list[dict]]:
+    """Fetch World Cup standings rows for the corresponding relay cup."""
+    label = _relay_wc_standings_label(category, discipline)
+    cat_id = str(category or "").upper()
+    disc_id = str(discipline or "").upper()
+    if not season_id or not _is_relay_disc(disc_id):
+        return label, []
+
+    cup_id: str | None = None
+    if _is_mixed_relay(disc_id, cat_id):
+        cup_id = _find_mixed_relay_cup(season_id, disc_id)
+    elif cat_id in CAT_TO_GENDER:
+        _, relay_cup_id = _get_cup_ids_for_race(season_id, cat_id, disc_id)
+        cup_id = relay_cup_id
+
+    if not cup_id:
+        return label, []
+    return label, _fetch_standings(cup_id, limit=limit)
+
+
 def _fetch_standings(cup_id: str, limit: int = 5) -> list[dict]:
     """Fetch top N standings entries from a cup."""
     if not cup_id:
@@ -3824,36 +3862,38 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
             print(_format_section_title("4. Standings Watch: no close battles", args))
             print()
 
-    elif is_mixed:
-        # Section 2: Mixed Relay Cup Standings
-        mixed_cup_id = _find_mixed_relay_cup(season_id, race_disc)
-        if mixed_cup_id:
-            try:
-                cup_payload = get_cup_results(mixed_cup_id)
-                rows = cup_payload.get("Rows") or cup_payload.get("Results") or []
-                if rows:
-                    print(
-                        _format_section_title(
-                            "2. Mixed Relay Cup Standings (Top 10):", args
-                        )
-                    )
-                    table_rows = []
-                    for row in rows[:10]:
-                        rank = row.get("Rank") or ""
-                        name = row.get("Name") or row.get("ShortName") or ""
-                        nat = row.get("Nat") or ""
-                        score = row.get("Score") or 0
-                        table_rows.append(
-                            [str(rank).rstrip("."), name, nat, str(score)]
-                        )
-                    render_table(
-                        ["Rank", "Team/Athlete", "Nat", "Points"],
-                        table_rows,
-                        output_format=output_format,
-                    )
-                    print()
-            except BiathlonError:
-                pass
+    elif is_relay:
+        # Section 2: Relay World Cup standings context
+        relay_label, relay_rows = _fetch_relay_wc_standings(
+            season_id,
+            cat_id,
+            race_disc,
+            limit=10,
+        )
+        relay_title = f"2. {relay_label} World Cup Standings (Top 10):"
+        if relay_rows:
+            print(_format_section_title(relay_title, args))
+            table_rows = []
+            for idx, row in enumerate(relay_rows):
+                rank = row.get("Rank") or row.get("Standing") or idx + 1
+                name = row.get("Name") or row.get("ShortName") or ""
+                nat = row.get("Nat") or ""
+                score = row.get("Score") or row.get("Points") or 0
+                table_rows.append([str(rank).rstrip("."), name, nat, str(score)])
+            render_table(
+                ["Rank", "Team", "Nat", "Points"],
+                table_rows,
+                output_format=output_format,
+                column_separators={3},
+            )
+            print()
+        else:
+            print(
+                _format_section_title(
+                    f"{relay_title.removesuffix(':')}: no data available", args
+                )
+            )
+            print()
 
     # Section 4b: Pursuit contenders (start delay < 1 min) - only for pursuit races
     if race_disc == "PU":
