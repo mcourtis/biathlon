@@ -1,5 +1,6 @@
 """Tests for startlist pre-race snapshot helpers."""
 
+import argparse
 import datetime
 
 from biathlon.api import BiathlonError
@@ -148,3 +149,85 @@ def test_find_all_startlist_races_keeps_startlist_only(monkeypatch):
     races = startlist._find_all_startlist_races()
 
     assert [race_id for race_id, _payload in races] == ["RACE_B"]
+
+
+def test_filter_results_before_cutoff_uses_season_fast_path(monkeypatch):
+    cutoff = _dt("2026-01-10T10:00:00Z")
+    calls: list[str] = []
+
+    def fake_get_race_results(race_id: str) -> dict:
+        calls.append(race_id)
+        if race_id == "BT2526SAME":
+            return {"Competition": {"StartTime": "2026-01-02T10:00:00Z"}}
+        raise BiathlonError("unexpected lookup")
+
+    monkeypatch.setattr(startlist, "get_race_results", fake_get_race_results)
+
+    rows = [
+        {"RaceId": "BT2425OLD"},
+        {"RaceId": "BT2627FUT"},
+        {"RaceId": "BT2526SAME"},
+    ]
+    cache = {"BT2526TARGET": cutoff}
+
+    filtered = startlist._filter_results_before_cutoff(
+        rows,
+        "BT2526TARGET",
+        cutoff,
+        cache,
+    )
+
+    assert [row["RaceId"] for row in filtered] == ["BT2425OLD", "BT2526SAME"]
+    assert calls == ["BT2526SAME"]
+
+
+def test_render_wc_section1_skips_relays(capsys):
+    ctx = {
+        "race_disc": "RL",
+        "cat_id": "SW",
+        "season_id": "2526",
+        "startlist_ids": {"A"},
+        "age_cache": {},
+        "is_mixed": False,
+    }
+    args = argparse.Namespace(format="tsv", leader_markers=False)
+
+    startlist._render_wc_standings_sections(
+        ctx,
+        args,
+        [],
+        [],
+        None,
+        "Relay",
+        lambda name, _ibu_id: name,
+        lambda cell, _row_idx: cell,
+    )
+
+    assert capsys.readouterr().out == ""
+
+
+def test_render_wc_section1_first_race_snapshot_prints_none(monkeypatch, capsys):
+    ctx = {
+        "race_disc": "SP",
+        "cat_id": "SW",
+        "season_id": "2526",
+        "startlist_ids": {"A"},
+        "age_cache": {},
+        "is_mixed": False,
+    }
+    args = argparse.Namespace(format="tsv", leader_markers=False)
+
+    monkeypatch.setattr(startlist, "_render_standings_section", lambda *a, **k: None)
+
+    startlist._render_wc_standings_sections(
+        ctx,
+        args,
+        [],
+        [],
+        [],
+        "Sprint",
+        lambda name, _ibu_id: name,
+        lambda cell, _row_idx: cell,
+    )
+
+    assert "1. Missing from top 25 World Cup standings: none" in capsys.readouterr().out

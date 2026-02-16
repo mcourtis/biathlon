@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import datetime
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
@@ -53,6 +54,8 @@ WC_WIN_MILESTONE_STEP = 5
 DISCIPLINES = {"SP", "PU", "IN", "MS", "SI"}
 INDIVIDUAL_EQUIVALENT_DISCIPLINES = {"IN", "SI"}
 MAJOR_EVENT_LEVELS = (1, 2, 3)
+RACE_SEASON_RE = re.compile(r"^BT(?P<season>\d{4})")
+SEASON_TEXT_RE = re.compile(r"^(?P<s1>\d{2})\s*/\s*(?P<s2>\d{2})$")
 OLYMPIC_SEASON_IDS = [
     "2526",
     "2122",
@@ -1597,6 +1600,47 @@ def _get_wc_points(position: int, mass_start: bool = False) -> int:
     return WC_POINTS.get(position, 0)
 
 
+def _season_id_from_race_id(race_id: str) -> str:
+    match = RACE_SEASON_RE.match(str(race_id or "").strip().upper())
+    if not match:
+        return ""
+    return str(match.group("season") or "")
+
+
+def _normalize_season_id(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) == 4 and text.isdigit():
+        return text
+    match = SEASON_TEXT_RE.match(text)
+    if match:
+        return f"{match.group('s1')}{match.group('s2')}"
+    return ""
+
+
+def _season_id_from_result(result: dict) -> str:
+    season_id = _normalize_season_id(result.get("SeasonId"))
+    if season_id:
+        return season_id
+    season = _normalize_season_id(result.get("Season"))
+    if season:
+        return season
+    race_id = str(result.get("RaceId") or "")
+    if race_id:
+        return _season_id_from_race_id(race_id)
+    return ""
+
+
+def _season_sort_key(season_id: str) -> int | None:
+    text = _normalize_season_id(season_id)
+    if len(text) != 4 or not text.isdigit():
+        return None
+    start_yy = int(text[:2])
+    century = 1900 if start_yy >= 90 else 2000
+    return century + start_yy
+
+
 def _start_dt_from_competition(comp: dict | None) -> datetime.datetime | None:
     if not isinstance(comp, dict):
         return None
@@ -1651,12 +1695,22 @@ def _is_result_before_cutoff(
     target_race_id: str,
     cutoff_dt: datetime.datetime | None,
     race_start_cache: dict[str, datetime.datetime | None],
+    target_season_key: int | None,
 ) -> bool:
     race_id = str(result.get("RaceId") or "")
     if race_id and race_id == target_race_id:
         return False
     if cutoff_dt is None:
         return True
+
+    # Fast path for rows from clearly older/newer seasons.
+    result_season_key = _season_sort_key(_season_id_from_result(result))
+    if target_season_key is not None and result_season_key is not None:
+        if result_season_key < target_season_key:
+            return True
+        if result_season_key > target_season_key:
+            return False
+
     start_dt = _resolve_result_start_datetime(result, race_start_cache)
     if start_dt is None:
         return False
@@ -1669,6 +1723,7 @@ def _filter_results_before_cutoff(
     cutoff_dt: datetime.datetime | None,
     race_start_cache: dict[str, datetime.datetime | None],
 ) -> list[dict]:
+    target_season_key = _season_sort_key(_season_id_from_race_id(target_race_id))
     return [
         row
         for row in rows
@@ -1677,6 +1732,7 @@ def _filter_results_before_cutoff(
             target_race_id,
             cutoff_dt,
             race_start_cache,
+            target_season_key,
         )
     ]
 
@@ -2102,7 +2158,7 @@ def _render_wc_standings_sections(
     is_mixed = ctx.get("is_mixed", False)
 
     # Section 1: Missing from top 25 World Cup standings (individual races only)
-    if not is_mixed and cat_id in {"SW", "SM"}:
+    if race_disc in DISCIPLINES and not is_mixed and cat_id in {"SW", "SM"}:
         missing_rows = []
         wc_rows = (
             wc_rows_for_missing
