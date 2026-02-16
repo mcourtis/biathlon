@@ -7,7 +7,7 @@ import datetime
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any
+from typing import Any, Callable
 
 from ..api import (
     BiathlonError,
@@ -35,14 +35,19 @@ from ..formatting import (
     rank_style,
     render_table,
 )
-from ..utils import parse_start_datetime
+from ..utils import parse_date, parse_start_datetime
 from ._common import (
+    DISCIPLINE_LEADER_MARKER,
+    GENERAL_LEADER_MARKER,
+    U23_LEADER_MARKER,
+    _format_leader_markers,
     _max_workers,
     _parse_rank,
     _row_ibu_id,
     detect_event_type,
     is_mixed_relay,
 )
+from . import standings as standings_cmd
 
 
 MEDAL_BY_RANK = {1: "gold", 2: "silver", 3: "bronze"}
@@ -53,6 +58,72 @@ WC_TITLE_FIELDS = [
     ("IN", "Individual", "individual"),
     ("MS", "Mass Start", "mass_start"),
 ]
+
+
+def _parse_birth_date_value(value: object) -> datetime.date | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+
+    parsed = parse_date(text)
+    if parsed is not None:
+        return parsed
+
+    compact = text.replace(" ", "")
+    for fmt in ("%d.%m.%Y", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
+        try:
+            return datetime.datetime.strptime(compact, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def _extract_birth_date(bio: dict) -> datetime.date | None:
+    for key in ("BirthDate", "Birthdate", "DateOfBirth", "DOB", "Birthday"):
+        parsed = _parse_birth_date_value(bio.get(key))
+        if parsed is not None:
+            return parsed
+
+    for item in bio.get("Personal", []):
+        label = str(item.get("Description") or "").strip().lower()
+        if not label:
+            continue
+        if "birth" in label or "born" in label:
+            parsed = _parse_birth_date_value(item.get("Value"))
+            if parsed is not None:
+                return parsed
+    return None
+
+
+def _extract_age_text(bio: dict) -> str | None:
+    personal = {
+        str(item.get("Description") or "").strip().lower(): item.get("Value")
+        for item in bio.get("Personal", [])
+        if item.get("Description")
+    }
+    value = bio.get("Age") or personal.get("age")
+    if value in (None, ""):
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    if "," in text:
+        text = text.split(",", 1)[0].strip()
+    return text or None
+
+
+def _age_on_date(birth_date: datetime.date, reference_date: datetime.date) -> int:
+    years = reference_date.year - birth_date.year
+    if (reference_date.month, reference_date.day) < (birth_date.month, birth_date.day):
+        years -= 1
+    return years
+
+
+def _extract_age_years(text: str) -> int | None:
+    match = re.search(r"\d{1,2}", text or "")
+    if not match:
+        return None
+    return int(match.group(0))
 
 
 def _normalize_season_arg(value: str) -> str:
@@ -297,6 +368,9 @@ def _empty_athlete(name: str, nat: str, category: str, ibu_id: str) -> dict[str,
         "nat": nat,
         "gender": "F" if category == "SW" else "M",
         "ibu_id": ibu_id,
+        "age": "-",
+        "is_u23": False,
+        "is_best_u23": False,
         "races": 0,
         "races_ind": 0,
         "races_relay": 0,
@@ -396,6 +470,7 @@ def _sort_stats_rows(rows: list[dict], label_key: str) -> list[dict]:
             -row["bronze"],
             -row.get("bronze_ind", 0),
             row.get("races", 0),
+            row.get("races_ind", 0),
             str(row.get(label_key, "")),
         ),
     )
@@ -530,16 +605,435 @@ def _aggregate_achievements(
     return _sort_stats_rows(rows, "name"), races_used
 
 
+def _reference_date_for_races(race_meta: list[dict]) -> datetime.date:
+    dates = [
+        meta["start_dt"].date()
+        for meta in race_meta
+        if isinstance(meta.get("start_dt"), datetime.datetime)
+    ]
+    if dates:
+        return max(dates)
+    return datetime.date.today()
+
+
+def _build_athlete_age_map(
+    ibu_ids: set[str], reference_date: datetime.date
+) -> tuple[dict[str, str], set[str]]:
+    unique_ids = [ibu_id for ibu_id in dict.fromkeys(ibu_ids) if ibu_id]
+    if not unique_ids:
+        return {}, set()
+
+    age_display_by_id: dict[str, str] = {}
+    u23_ids: set[str] = set()
+    with ThreadPoolExecutor(
+        max_workers=_max_workers(len(unique_ids), cap=16)
+    ) as executor:
+        future_map = {
+            executor.submit(get_athlete_bio, ibu_id): ibu_id for ibu_id in unique_ids
+        }
+        for future in as_completed(future_map):
+            ibu_id = future_map[future]
+            try:
+                bio = future.result()
+            except BiathlonError:
+                bio = {}
+            except Exception:
+                bio = {}
+            if not isinstance(bio, dict):
+                bio = {}
+
+            age_display = "-"
+            is_u23 = False
+            birth_date = _extract_birth_date(bio)
+            if birth_date is not None:
+                age_years = _age_on_date(birth_date, reference_date)
+                age_display = str(age_years)
+                is_u23 = age_years < 23
+            else:
+                age_text = _extract_age_text(bio)
+                if age_text:
+                    age_display = age_text
+                    age_years = _extract_age_years(age_text)
+                    if age_years is not None:
+                        is_u23 = age_years < 23
+
+            if is_u23:
+                u23_ids.add(ibu_id)
+                if age_display == "-":
+                    age_display = "(U23)"
+                elif "(U23)" not in age_display:
+                    age_display = f"{age_display} (U23)"
+
+            age_display_by_id[ibu_id] = age_display
+    return age_display_by_id, u23_ids
+
+
+def _build_wc_standings_context(season_id: str, category: str) -> dict[str, Any]:
+    """Return marker + age metadata aligned with standings command semantics."""
+    context: dict[str, Any] = {
+        "age_display_by_id": {},
+        "u23_ids": set(),
+        "best_u23_ids": set(),
+        "markers_by_id": {},
+        "markers_by_name_nat": {},
+        "reference_date": None,
+    }
+    if not season_id:
+        return context
+
+    gender = "men" if category == "SM" else "women"
+    try:
+        athlete_cup_ids = standings_cmd._get_cup_ids_by_discipline(
+            season_id, gender, level=1
+        )
+    except Exception:
+        return context
+
+    total_cup_id = str(athlete_cup_ids.get("TS") or "")
+    if not total_cup_id:
+        return context
+
+    try:
+        total_payload = get_cup_results(total_cup_id)
+    except BiathlonError:
+        return context
+
+    total_rows = total_payload.get("Rows") or total_payload.get("Results") or []
+    if not total_rows:
+        return context
+
+    athletes: dict[str, dict[str, Any]] = {}
+    for row in total_rows:
+        athlete_id = _row_ibu_id(row) or str(row.get("Name") or "").strip()
+        if not athlete_id:
+            continue
+        athletes[athlete_id] = {
+            "ibu_id": str(_row_ibu_id(row) or ""),
+            "name": str(row.get("Name") or row.get("ShortName") or ""),
+            "nat": str(row.get("Nat") or ""),
+            "total": standings_cmd._parse_score(row),
+            "SP": 0,
+            "PU": 0,
+            "IN": 0,
+            "MS": 0,
+            "row_best_u23": standings_cmd._is_best_u23_row(row),
+            "is_best_u23": False,
+            "is_u23": False,
+            "age_display": "-",
+        }
+
+    if not athletes:
+        return context
+
+    for disc in standings_cmd.DISCIPLINES:
+        disc_cup_id = str(athlete_cup_ids.get(disc) or "")
+        if not disc_cup_id:
+            continue
+        try:
+            disc_payload = get_cup_results(disc_cup_id)
+        except BiathlonError:
+            continue
+        disc_rows = disc_payload.get("Rows") or disc_payload.get("Results") or []
+        for row in disc_rows:
+            athlete_id = _row_ibu_id(row) or str(row.get("Name") or "").strip()
+            if athlete_id and athlete_id in athletes:
+                athletes[athlete_id][disc] = standings_cmd._parse_score(row)
+
+    athlete_list = list(athletes.values())
+    try:
+        first_race_date = standings_cmd._find_first_race_date(
+            season_id, gender, level=1
+        )
+    except Exception:
+        first_race_date = None
+    context["reference_date"] = first_race_date
+
+    bio_map = standings_cmd._prefetch_bios(
+        [str(athlete.get("ibu_id") or "") for athlete in athlete_list]
+    )
+    for athlete in athlete_list:
+        athlete["is_u23"] = False
+        athlete["age_display"] = "-"
+        bio = bio_map.get(str(athlete.get("ibu_id") or ""), {})
+        if first_race_date is not None:
+            birth_date = standings_cmd._extract_birth_date(bio)
+            if birth_date is not None:
+                age_years = standings_cmd._age_on_date(birth_date, first_race_date)
+                athlete["age_display"] = str(age_years)
+                athlete["is_u23"] = age_years < 23
+                continue
+        age_text = standings_cmd._extract_age_text(bio)
+        if age_text:
+            athlete["age_display"] = age_text
+
+    if not any(bool(athlete.get("is_u23")) for athlete in athlete_list):
+        for athlete in athlete_list:
+            athlete["is_u23"] = bool(athlete.get("row_best_u23"))
+
+    for athlete in athlete_list:
+        if not athlete.get("is_u23"):
+            continue
+        age_display = str(athlete.get("age_display") or "").strip()
+        if not age_display or age_display == "-":
+            athlete["age_display"] = "(U23)"
+        elif "(U23)" not in age_display:
+            athlete["age_display"] = f"{age_display} (U23)"
+
+    best_u23_score = max(
+        (
+            int(athlete.get("total") or 0)
+            for athlete in athlete_list
+            if athlete.get("is_u23")
+        ),
+        default=0,
+    )
+    best_u23_ids = {
+        str(athlete.get("ibu_id") or "")
+        for athlete in athlete_list
+        if athlete.get("is_u23")
+        and int(athlete.get("total") or 0) == best_u23_score
+        and best_u23_score > 0
+        and str(athlete.get("ibu_id") or "")
+    }
+    for athlete in athlete_list:
+        athlete["is_best_u23"] = str(athlete.get("ibu_id") or "") in best_u23_ids
+
+    leaders = standings_cmd._find_leaders(athlete_list)
+    total_leader = leaders.get("total")
+    athlete_led_disciplines: dict[str, list[str]] = {}
+    for disc in standings_cmd.DISCIPLINES:
+        leader_name = leaders.get(disc)
+        if leader_name is None:
+            continue
+        athlete_led_disciplines.setdefault(leader_name, []).append(disc)
+
+    markers_by_id: dict[str, list[str]] = {}
+    markers_by_name_nat: dict[tuple[str, str], list[str]] = {}
+    age_display_by_id: dict[str, str] = {}
+    u23_ids: set[str] = set()
+    for athlete in athlete_list:
+        ibu_id = str(athlete.get("ibu_id") or "")
+        name = str(athlete.get("name") or "")
+        nat = str(athlete.get("nat") or "")
+        markers: list[str] = []
+        if name and name == total_leader:
+            markers.append(GENERAL_LEADER_MARKER)
+        for _disc in athlete_led_disciplines.get(name, []):
+            markers.append(DISCIPLINE_LEADER_MARKER)
+        if athlete.get("is_best_u23"):
+            markers.append(U23_LEADER_MARKER)
+        if markers:
+            if ibu_id:
+                markers_by_id[ibu_id] = markers
+            if name:
+                markers_by_name_nat[(name, nat)] = markers
+        if ibu_id:
+            age_display_by_id[ibu_id] = str(athlete.get("age_display") or "-")
+            if athlete.get("is_u23"):
+                u23_ids.add(ibu_id)
+
+    context["age_display_by_id"] = age_display_by_id
+    context["u23_ids"] = u23_ids
+    context["best_u23_ids"] = best_u23_ids
+    context["markers_by_id"] = markers_by_id
+    context["markers_by_name_nat"] = markers_by_name_nat
+    return context
+
+
+def _leader_markers_from_standings_context(
+    rows: list[dict], context: dict[str, Any]
+) -> dict[str, list[str]]:
+    marker_map: dict[str, list[str]] = {}
+    markers_by_id = context.get("markers_by_id") or {}
+    markers_by_name_nat = context.get("markers_by_name_nat") or {}
+    for row in rows:
+        key = _stats_row_key(row, by_country=False)
+        ibu_id = str(row.get("ibu_id") or "")
+        name = str(row.get("name") or "")
+        nat = str(row.get("nat") or "")
+        markers = []
+        if ibu_id and ibu_id in markers_by_id:
+            markers = list(markers_by_id[ibu_id])
+        elif (name, nat) in markers_by_name_nat:
+            markers = list(markers_by_name_nat[(name, nat)])
+        if markers:
+            marker_map[key] = markers
+    return marker_map
+
+
+def _enrich_athlete_rows_with_age(
+    rows: list[dict],
+    reference_date: datetime.date,
+    known_age_display_by_id: dict[str, str] | None = None,
+    known_u23_ids: set[str] | None = None,
+    known_best_u23_ids: set[str] | None = None,
+) -> None:
+    ibu_ids = {str(row.get("ibu_id") or "") for row in rows if row.get("ibu_id")}
+    known_age_display_by_id = known_age_display_by_id or {}
+    known_u23_ids = known_u23_ids or set()
+    known_best_u23_ids = known_best_u23_ids or set()
+    missing_ids = {
+        ibu_id for ibu_id in ibu_ids if ibu_id not in known_age_display_by_id
+    }
+    fallback_age_display_by_id, fallback_u23_ids = _build_athlete_age_map(
+        missing_ids, reference_date
+    )
+    age_display_by_id = {
+        **fallback_age_display_by_id,
+        **known_age_display_by_id,
+    }
+    u23_ids = set(fallback_u23_ids) | set(known_u23_ids)
+
+    best_u23_key = ""
+    for row in rows:
+        ibu_id = str(row.get("ibu_id") or "")
+        age_display = age_display_by_id.get(ibu_id, "-") if ibu_id else "-"
+        is_u23 = ibu_id in u23_ids if ibu_id else False
+        row["age"] = age_display
+        row["is_u23"] = is_u23
+        if not best_u23_key and is_u23:
+            best_u23_key = _stats_row_key(row, by_country=False)
+
+    if known_best_u23_ids:
+        for row in rows:
+            ibu_id = str(row.get("ibu_id") or "")
+            row["is_best_u23"] = bool(ibu_id and ibu_id in known_best_u23_ids)
+    else:
+        for row in rows:
+            row["is_best_u23"] = (
+                _stats_row_key(row, by_country=False) == best_u23_key
+                if best_u23_key
+                else False
+            )
+
+
+def _stats_row_key(row: dict, by_country: bool) -> str:
+    if by_country:
+        return str(row.get("country") or "")
+    ibu_id = str(row.get("ibu_id") or "")
+    if ibu_id:
+        return f"id:{ibu_id}"
+    return f"name:{row.get('name') or ''}|nat:{row.get('nat') or ''}"
+
+
+def _medal_sort_tuple(row: dict) -> tuple[int, int, int, int, int, int, int, int]:
+    return (
+        -int(row.get("gold") or 0),
+        -int(row.get("gold_ind") or 0),
+        -int(row.get("silver") or 0),
+        -int(row.get("silver_ind") or 0),
+        -int(row.get("bronze") or 0),
+        -int(row.get("bronze_ind") or 0),
+        int(row.get("races") or 0),
+        int(row.get("races_ind") or 0),
+    )
+
+
+def _section_sort_tuple(row: dict, section: str) -> tuple[int, int, int, int, int]:
+    if section == "ind":
+        return (
+            -int(row.get("gold_ind") or 0),
+            -int(row.get("silver_ind") or 0),
+            -int(row.get("bronze_ind") or 0),
+            int(row.get("races_ind") or 0),
+            int(row.get("races") or 0),
+        )
+    return (
+        -int(row.get("gold_relay") or 0),
+        -int(row.get("silver_relay") or 0),
+        -int(row.get("bronze_relay") or 0),
+        int(row.get("races_relay") or 0),
+        int(row.get("races") or 0),
+    )
+
+
+def _leaders_by_section(rows: list[dict], by_country: bool, section: str) -> set[str]:
+    section_key = "ind" if section == "ind" else "relay"
+    if max((_stats_total(row, section_key) for row in rows), default=0) <= 0:
+        return set()
+    best_sort = min((_section_sort_tuple(row, section) for row in rows))
+    return {
+        _stats_row_key(row, by_country=by_country)
+        for row in rows
+        if _section_sort_tuple(row, section) == best_sort
+    }
+
+
+def _leader_markers_for_rows(
+    rows: list[dict], by_country: bool
+) -> dict[str, list[str]]:
+    if not rows:
+        return {}
+
+    best_sort = min((_medal_sort_tuple(row) for row in rows))
+    general_leaders = {
+        _stats_row_key(row, by_country=by_country)
+        for row in rows
+        if _medal_sort_tuple(row) == best_sort
+    }
+    individual_leaders = _leaders_by_section(rows, by_country, "ind")
+    relay_leaders = _leaders_by_section(rows, by_country, "relay")
+
+    marker_map: dict[str, list[str]] = {}
+    for row in rows:
+        key = _stats_row_key(row, by_country=by_country)
+        markers: list[str] = []
+        if key in general_leaders:
+            markers.append(GENERAL_LEADER_MARKER)
+        if key in individual_leaders:
+            markers.append(DISCIPLINE_LEADER_MARKER)
+        if key in relay_leaders:
+            markers.append(DISCIPLINE_LEADER_MARKER)
+        if not by_country and bool(row.get("is_best_u23")):
+            markers.append(U23_LEADER_MARKER)
+        if markers:
+            marker_map[key] = markers
+    return marker_map
+
+
+def _apply_rank_style(text: str, style: str) -> str:
+    if style == "gold":
+        return Color.gold(text)
+    if style == "silver":
+        return Color.silver(text)
+    if style == "bronze":
+        return Color.bronze(text)
+    if style == "flowers":
+        return Color.flowers(text)
+    if style == "other":
+        return Color.other(text)
+    return text
+
+
+def _make_leader_cell_formatter(
+    row_styles: list[str] | None,
+) -> Callable[[str, int], str]:
+    def _base_formatter(cell_str: str, row_idx: int) -> str:
+        if not row_styles or row_idx >= len(row_styles):
+            return cell_str
+        return _apply_rank_style(cell_str, row_styles[row_idx])
+
+    def _formatter(cell_str: str, row_idx: int) -> str:
+        return _format_leader_markers(cell_str, row_idx, _base_formatter)
+
+    return _formatter
+
+
 def _country_rows(
     rows: list[dict],
     wc_title_map: dict[str, dict[str, Any]] | None = None,
     include_wc_titles: bool = False,
+    leader_markers: dict[str, list[str]] | None = None,
 ) -> list[list[str]]:
     out: list[list[str]] = []
     for idx, row in enumerate(rows, start=1):
+        country = str(row["country"])
+        markers = (leader_markers or {}).get(_stats_row_key(row, by_country=True), [])
+        if markers:
+            country = f"{country} {' '.join(markers)}"
         values = [
             str(idx),
-            str(row["country"]),
+            country,
             str(row["gold"]),
             str(row["silver"]),
             str(row["bronze"]),
@@ -574,14 +1068,20 @@ def _athlete_rows(
     rows: list[dict],
     wc_title_map: dict[str, dict[str, Any]] | None = None,
     include_wc_titles: bool = False,
+    leader_markers: dict[str, list[str]] | None = None,
 ) -> list[list[str]]:
     out: list[list[str]] = []
     for idx, row in enumerate(rows, start=1):
+        name = str(row["name"])
+        markers = (leader_markers or {}).get(_stats_row_key(row, by_country=False), [])
+        if markers:
+            name = f"{name} {' '.join(markers)}"
         values = [
             str(idx),
-            str(row["name"]),
+            name,
             str(row["nat"]),
             str(row["gender"]),
+            str(row.get("age") or "-"),
             str(row["gold"]),
             str(row["silver"]),
             str(row["bronze"]),
@@ -812,6 +1312,8 @@ def handle_achievements(args: argparse.Namespace) -> int:
     pretty = is_pretty_output(args)
     include_wc_titles = False
     wc_title_map: dict[str, dict[str, Any]] = {}
+    leader_markers: dict[str, list[str]] = {}
+    standings_context: dict[str, Any] = {}
     if scope == EVENT_TYPE_WC:
         completed_wc_seasons = [
             sid
@@ -825,6 +1327,35 @@ def handle_achievements(args: argparse.Namespace) -> int:
                 category,
                 by_country=by_country,
             )
+        if not by_country and len(season_ids) == 1 and season_input != "all":
+            standings_context = _build_wc_standings_context(season_ids[0], category)
+    if not by_country:
+        reference_date = standings_context.get("reference_date")
+        if not isinstance(reference_date, datetime.date):
+            reference_date = _reference_date_for_races(race_meta)
+        _enrich_athlete_rows_with_age(
+            rows,
+            reference_date,
+            known_age_display_by_id=dict(
+                standings_context.get("age_display_by_id") or {}
+            ),
+            known_u23_ids=set(standings_context.get("u23_ids") or set()),
+            known_best_u23_ids=set(standings_context.get("best_u23_ids") or set()),
+        )
+    if pretty:
+        if (
+            not by_country
+            and standings_context
+            and (
+                standings_context.get("markers_by_id")
+                or standings_context.get("markers_by_name_nat")
+            )
+        ):
+            leader_markers = _leader_markers_from_standings_context(
+                rows, standings_context
+            )
+        else:
+            leader_markers = _leader_markers_for_rows(rows, by_country=by_country)
 
     print()
     print(
@@ -839,6 +1370,7 @@ def handle_achievements(args: argparse.Namespace) -> int:
             rows,
             wc_title_map=wc_title_map,
             include_wc_titles=include_wc_titles,
+            leader_markers=leader_markers,
         )
         headers = [
             "#",
@@ -866,6 +1398,12 @@ def handle_achievements(args: argparse.Namespace) -> int:
             if pretty
             else None
         )
+        cell_formatters = (
+            [None, _make_leader_cell_formatter(row_styles)]
+            + [None] * (len(headers) - 2)
+            if pretty
+            else None
+        )
         column_separators = {2, 6, 10}
         group_headers = [(2, 6, "All"), (6, 10, "Individual"), (10, 14, "Relay")]
         if include_wc_titles:
@@ -876,6 +1414,7 @@ def handle_achievements(args: argparse.Namespace) -> int:
             data_rows,
             output_format=output_format,
             row_styles=row_styles,
+            cell_formatters=cell_formatters,
             column_separators=column_separators,
             group_headers=group_headers,
         )
@@ -884,12 +1423,14 @@ def handle_achievements(args: argparse.Namespace) -> int:
             rows,
             wc_title_map=wc_title_map,
             include_wc_titles=include_wc_titles,
+            leader_markers=leader_markers,
         )
         headers = [
             "#",
             "Athlete",
             "Nat",
             "Gender",
+            "Age",
             Color.gold("Gold"),
             Color.silver("Silver"),
             Color.bronze("Bronze"),
@@ -916,21 +1457,28 @@ def handle_achievements(args: argparse.Namespace) -> int:
             if pretty
             else None
         )
-        column_separators = {4, 8, 12, 16}
+        cell_formatters = (
+            [None, _make_leader_cell_formatter(row_styles)]
+            + [None] * (len(headers) - 2)
+            if pretty
+            else None
+        )
+        column_separators = {5, 9, 13, 17}
         group_headers = [
-            (4, 8, "All"),
-            (8, 12, "Individual"),
-            (12, 16, "Relay"),
-            (16, 19, "Races"),
+            (5, 9, "All"),
+            (9, 13, "Individual"),
+            (13, 17, "Relay"),
+            (17, 20, "Races"),
         ]
         if include_wc_titles:
-            column_separators.add(19)
-            group_headers.append((19, 24, "World Cup Titles"))
+            column_separators.add(20)
+            group_headers.append((20, 25, "World Cup Titles"))
         render_table(
             headers,
             data_rows,
             output_format=output_format,
             row_styles=row_styles,
+            cell_formatters=cell_formatters,
             column_separators=column_separators,
             group_headers=group_headers,
         )
