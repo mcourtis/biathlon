@@ -113,6 +113,14 @@ Show men sprint standings for season 2425:
 biathlon standings --season 2425 --men --sort sprint
 ```
 
+Show country standings (Nations Cup + Relay points):
+
+```bash
+biathlon standings --country
+biathlon standings --country --sort women-relay
+biathlon standings --country --sort women-nations
+```
+
 Show athlete information:
 
 ```bash

@@ -63,7 +63,9 @@ class CompactOptionalFormatter(argparse.RawTextHelpFormatter):
             return super()._format_action_invocation(action)
         opts = ", ".join(action.option_strings)
         if action.nargs != 0:
-            opts += f" {self._format_args(action, action.dest.upper())}"
+            arg_text = self._format_args(action, action.dest.upper())
+            if arg_text:
+                opts += f" {arg_text}"
         return opts
 
     def _format_action(self, action: argparse.Action) -> str:
@@ -455,12 +457,21 @@ def build_parser() -> argparse.ArgumentParser:
     )
     standings_parser.add_argument("--season", default="", help="Season id")
     standings_parser.add_argument("--men", action="store_true", help="Show men")
+    standings_parser.add_argument(
+        "--country",
+        action="store_true",
+        help="Show country standings (Nations Cup + Relay points)",
+    )
     standings_parser.add_argument("--level", default="1", help="Cup level")
     standings_parser.add_argument(
         "--sort",
-        default="total",
-        choices=["total", "sprint", "pursuit", "individual", "massstart"],
-        help="Sort by column",
+        default="",
+        metavar="",
+        help=(
+            "Sort by column\n"
+            "  - athlete: total/sprint/pursuit/individual/massstart\n"
+            "  - country: women-nations/men-nations/women-relay/men-relay/mixed-relay"
+        ),
     )
     standings_parser.add_argument(
         "--limit",

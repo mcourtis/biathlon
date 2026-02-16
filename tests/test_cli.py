@@ -57,3 +57,11 @@ def test_achievements_rejects_olympics_and_world_together():
     with pytest.raises(SystemExit) as exc_info:
         parser.parse_args(["achievements", "--olympics", "--world"])
     assert exc_info.value.code == 2
+
+
+def test_standings_country_accepts_country_sort_options():
+    parser = build_parser()
+    args = parser.parse_args(["standings", "--country", "--sort", "women-nations"])
+    assert args.command == "standings"
+    assert args.country is True
+    assert args.sort == "women-nations"
