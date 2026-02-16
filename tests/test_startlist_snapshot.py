@@ -115,6 +115,288 @@ def test_compute_wc_pre_race_standings_uses_strict_cutoff(monkeypatch):
     assert [row["IBUId"] for row in disc_rows] == ["A", "B"]
 
 
+def test_fetch_olympic_individual_podium_uses_strict_cutoff(monkeypatch):
+    cutoff = _dt("2026-02-15T12:00:00Z")
+    monkeypatch.setattr(
+        startlist,
+        "get_races",
+        lambda event_id: [
+            {
+                "RaceId": "RACE_BEFORE",
+                "DisciplineId": "PU",
+                "catId": "SW",
+                "StartTime": "2026-02-14T12:00:00Z",
+            },
+            {
+                "RaceId": "RACE_TARGET",
+                "DisciplineId": "PU",
+                "catId": "SW",
+                "StartTime": "2026-02-15T12:00:00Z",
+            },
+        ],
+    )
+
+    payloads = {
+        "RACE_BEFORE": {
+            "IsResult": True,
+            "SportEvt": {"Organizer": "Antholz"},
+            "Results": [
+                {"IsTeam": False, "Rank": "1", "Name": "Before Winner", "Nat": "NOR"},
+                {"IsTeam": False, "Rank": "2", "Name": "Before Second", "Nat": "SWE"},
+                {"IsTeam": False, "Rank": "3", "Name": "Before Third", "Nat": "GER"},
+            ],
+        },
+        "RACE_TARGET": {
+            "IsResult": True,
+            "SportEvt": {"Organizer": "Antholz"},
+            "Results": [
+                {"IsTeam": False, "Rank": "1", "Name": "Target Winner", "Nat": "FRA"},
+                {"IsTeam": False, "Rank": "2", "Name": "Target Second", "Nat": "ITA"},
+                {"IsTeam": False, "Rank": "3", "Name": "Target Third", "Nat": "SUI"},
+            ],
+        },
+    }
+    monkeypatch.setattr(
+        startlist, "get_race_results", lambda race_id: payloads[race_id]
+    )
+
+    podium = startlist._fetch_olympic_individual_podium("2526", "PU", "SW", cutoff)
+
+    assert podium is not None
+    assert podium["gold_nat"] == "NOR"
+    assert "Target Winner" not in podium["gold"]
+
+
+def test_fetch_olympic_individual_podium_can_include_cutoff(monkeypatch):
+    cutoff = _dt("2026-02-15T12:00:00Z")
+    monkeypatch.setattr(
+        startlist,
+        "get_races",
+        lambda event_id: [
+            {
+                "RaceId": "RACE_BEFORE",
+                "DisciplineId": "PU",
+                "catId": "SW",
+                "StartTime": "2026-02-14T12:00:00Z",
+            },
+            {
+                "RaceId": "RACE_TARGET",
+                "DisciplineId": "PU",
+                "catId": "SW",
+                "StartTime": "2026-02-15T12:00:00Z",
+            },
+        ],
+    )
+    payloads = {
+        "RACE_BEFORE": {
+            "IsResult": True,
+            "SportEvt": {"Organizer": "Antholz"},
+            "Results": [{"IsTeam": False, "Rank": "1", "Name": "Before", "Nat": "NOR"}],
+        },
+        "RACE_TARGET": {
+            "IsResult": True,
+            "SportEvt": {"Organizer": "Antholz"},
+            "Results": [{"IsTeam": False, "Rank": "1", "Name": "Target", "Nat": "ITA"}],
+        },
+    }
+    monkeypatch.setattr(
+        startlist, "get_race_results", lambda race_id: payloads[race_id]
+    )
+
+    podium = startlist._fetch_olympic_individual_podium(
+        "2526", "PU", "SW", cutoff, include_cutoff=True
+    )
+
+    assert podium is not None
+    assert podium["gold_nat"] == "ITA"
+
+
+def test_fetch_olympic_relay_podium_uses_strict_cutoff(monkeypatch):
+    cutoff = _dt("2026-02-22T12:00:00Z")
+    monkeypatch.setattr(
+        startlist,
+        "get_races",
+        lambda event_id: [
+            {
+                "RaceId": "RACE_BEFORE",
+                "DisciplineId": "RL",
+                "catId": "SW",
+                "StartTime": "2026-02-21T12:00:00Z",
+            },
+            {
+                "RaceId": "RACE_TARGET",
+                "DisciplineId": "RL",
+                "catId": "SW",
+                "StartTime": "2026-02-22T12:00:00Z",
+            },
+        ],
+    )
+
+    payloads = {
+        "RACE_BEFORE": {
+            "IsResult": True,
+            "SportEvt": {"Organizer": "Antholz"},
+            "Results": [
+                {"IsTeam": True, "Rank": "1", "Name": "Norway", "Nat": "NOR"},
+                {"IsTeam": True, "Rank": "2", "Name": "Sweden", "Nat": "SWE"},
+                {"IsTeam": True, "Rank": "3", "Name": "Germany", "Nat": "GER"},
+            ],
+        },
+        "RACE_TARGET": {
+            "IsResult": True,
+            "SportEvt": {"Organizer": "Antholz"},
+            "Results": [
+                {"IsTeam": True, "Rank": "1", "Name": "France", "Nat": "FRA"},
+                {"IsTeam": True, "Rank": "2", "Name": "Italy", "Nat": "ITA"},
+                {"IsTeam": True, "Rank": "3", "Name": "Switzerland", "Nat": "SUI"},
+            ],
+        },
+    }
+    monkeypatch.setattr(
+        startlist, "get_race_results", lambda race_id: payloads[race_id]
+    )
+
+    podium = startlist._fetch_olympic_podium("2526", "RL", "SW", cutoff)
+
+    assert podium is not None
+    assert podium["gold"] == "Norway (NOR)"
+
+
+def test_fetch_olympic_season_medals_uses_strict_cutoff(monkeypatch):
+    cutoff = _dt("2026-02-15T12:00:00Z")
+    monkeypatch.setattr(
+        startlist,
+        "get_races",
+        lambda event_id: [
+            {
+                "RaceId": "RACE_BEFORE",
+                "DisciplineId": "PU",
+                "catId": "SW",
+                "StartTime": "2026-02-14T12:00:00Z",
+            },
+            {
+                "RaceId": "RACE_TARGET",
+                "DisciplineId": "PU",
+                "catId": "SW",
+                "StartTime": "2026-02-15T12:00:00Z",
+            },
+        ],
+    )
+
+    payloads = {
+        "RACE_BEFORE": {
+            "IsResult": True,
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "Rank": "1",
+                    "IBUId": "A",
+                    "Name": "Alpha",
+                    "Nat": "NOR",
+                },
+                {
+                    "IsTeam": False,
+                    "Rank": "2",
+                    "IBUId": "B",
+                    "Name": "Beta",
+                    "Nat": "SWE",
+                },
+                {
+                    "IsTeam": False,
+                    "Rank": "3",
+                    "IBUId": "C",
+                    "Name": "Gamma",
+                    "Nat": "GER",
+                },
+            ],
+        },
+        "RACE_TARGET": {
+            "IsResult": True,
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "Rank": "1",
+                    "IBUId": "D",
+                    "Name": "Delta",
+                    "Nat": "FRA",
+                },
+                {
+                    "IsTeam": False,
+                    "Rank": "2",
+                    "IBUId": "E",
+                    "Name": "Epsilon",
+                    "Nat": "ITA",
+                },
+                {
+                    "IsTeam": False,
+                    "Rank": "3",
+                    "IBUId": "F",
+                    "Name": "Zeta",
+                    "Nat": "SUI",
+                },
+            ],
+        },
+    }
+    monkeypatch.setattr(
+        startlist, "get_race_results", lambda race_id: payloads[race_id]
+    )
+
+    country_medals, athlete_stats = startlist._fetch_olympic_season_medals(
+        "2526", "SW", cutoff
+    )
+
+    assert len(country_medals) == 1
+    assert country_medals[0]["gold"] == "NOR"
+    assert "A" in athlete_stats
+    assert "D" not in athlete_stats
+
+
+def test_fetch_olympic_season_medals_can_include_cutoff(monkeypatch):
+    cutoff = _dt("2026-02-15T12:00:00Z")
+    monkeypatch.setattr(
+        startlist,
+        "get_races",
+        lambda event_id: [
+            {
+                "RaceId": "RACE_BEFORE",
+                "DisciplineId": "PU",
+                "catId": "SW",
+                "StartTime": "2026-02-14T12:00:00Z",
+            },
+            {
+                "RaceId": "RACE_TARGET",
+                "DisciplineId": "PU",
+                "catId": "SW",
+                "StartTime": "2026-02-15T12:00:00Z",
+            },
+        ],
+    )
+    payloads = {
+        "RACE_BEFORE": {
+            "IsResult": True,
+            "Results": [{"IsTeam": False, "Rank": "1", "IBUId": "A", "Nat": "NOR"}],
+        },
+        "RACE_TARGET": {
+            "IsResult": True,
+            "Results": [{"IsTeam": False, "Rank": "1", "IBUId": "D", "Nat": "ITA"}],
+        },
+    }
+    monkeypatch.setattr(
+        startlist, "get_race_results", lambda race_id: payloads[race_id]
+    )
+
+    country_medals, athlete_stats = startlist._fetch_olympic_season_medals(
+        "2526",
+        "SW",
+        cutoff,
+        include_cutoff=True,
+    )
+
+    assert len(country_medals) == 2
+    assert country_medals[-1]["gold"] == "ITA"
+    assert "D" in athlete_stats
+
+
 def test_find_all_startlist_races_keeps_startlist_only(monkeypatch):
     monkeypatch.setattr(startlist, "get_current_season_id", lambda: "2526")
     monkeypatch.setattr(

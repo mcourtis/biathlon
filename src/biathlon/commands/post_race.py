@@ -79,6 +79,17 @@ DISCIPLINE_LABELS = {
     "MS": "Mass Start",
 }
 
+RELAY_MILESTONE_ROWS_RANK_1 = [
+    "Relay Win",
+    "Relay Podium",
+    "Relay Flower",
+    "Win",
+    "Podium",
+    "Flower",
+]
+RELAY_MILESTONE_ROWS_RANK_2_3 = ["Relay Podium", "Relay Flower", "Podium", "Flower"]
+RELAY_MILESTONE_ROWS_RANK_4_6 = ["Relay Flower", "Flower"]
+
 
 MEDAL_RANK_MAP = {1: "gold", 2: "silver", 3: "bronze"}
 
@@ -541,6 +552,127 @@ def _make_row_style_formatter(row_styles: list[str]) -> Callable[[str, int], str
         return cell_str
 
     return _formatter
+
+
+def _relay_milestone_types_for_rank(rank: int) -> list[str]:
+    if rank == 1:
+        return RELAY_MILESTONE_ROWS_RANK_1
+    if rank <= 3:
+        return RELAY_MILESTONE_ROWS_RANK_2_3
+    return RELAY_MILESTONE_ROWS_RANK_4_6
+
+
+def _is_race_milestone_count(count: int) -> bool:
+    return count == 1 or count % 25 == 0
+
+
+def _build_race_milestone_rows(
+    *,
+    race_count: int,
+    team_race_count: int | None,
+    is_relay: bool,
+    decorated_name: str,
+    nat: str,
+) -> list[list[Any]]:
+    rows: list[list[Any]] = []
+    if _is_race_milestone_count(race_count):
+        if is_relay:
+            rows.append([race_count, "Race", decorated_name, nat])
+        else:
+            rows.append([race_count, decorated_name, nat])
+    if (
+        is_relay
+        and team_race_count is not None
+        and team_race_count != race_count
+        and _is_race_milestone_count(team_race_count)
+    ):
+        rows.append([team_race_count, "Team Race", decorated_name, nat])
+    return rows
+
+
+def _build_relay_milestone_blocks(
+    top_milestones: list[list[Any]],
+    entries: list[dict],
+    team_results: list[dict],
+) -> list[dict[str, Any]]:
+    milestone_counts: dict[str, dict[str, int]] = {}
+    for row in top_milestones:
+        if len(row) < 6:
+            continue
+        count = _parse_int(row[0])
+        milestone_type = str(row[1] or "")
+        ibu_id = str(row[4] or "")
+        if count is None or count <= 0 or not milestone_type or not ibu_id:
+            continue
+        milestone_counts.setdefault(ibu_id, {})[milestone_type] = count
+
+    athletes_by_bib_leg: dict[str, dict[int, dict]] = {}
+    for entry in entries:
+        bib = str(entry.get("bib") or "")
+        leg_val = _parse_int(entry.get("leg"))
+        if not bib or leg_val is None:
+            continue
+        athletes_by_bib_leg.setdefault(bib, {})[leg_val] = entry
+
+    teams: list[dict[str, Any]] = []
+    for team in team_results:
+        rank_val = _parse_rank(team.get("Rank"))
+        bib = str(team.get("Bib") or "")
+        if rank_val is None or rank_val > TOP_N or not bib:
+            continue
+        team_name = str(
+            team.get("Name") or team.get("ShortName") or team.get("Nat") or ""
+        )
+        team_nat = str(team.get("Nat") or "")
+        teams.append(
+            {
+                "rank": rank_val,
+                "bib": bib,
+                "name": team_name or team_nat or bib,
+                "nat": team_nat,
+            }
+        )
+    teams.sort(key=lambda row: (row["rank"], row["bib"]))
+
+    blocks: list[dict[str, Any]] = []
+    for team in teams:
+        rank_val = int(team["rank"])
+        bib = str(team["bib"])
+        legs = athletes_by_bib_leg.get(bib, {})
+        headers = ["Milestone Type"]
+        athlete_ids: list[str] = []
+        for leg in (1, 2, 3, 4):
+            leg_entry = legs.get(leg)
+            athlete_name = str(leg_entry.get("name") or "-") if leg_entry else "-"
+            headers.append(f"L{leg} {athlete_name}")
+            athlete_ids.append(str(leg_entry.get("ibu_id") or "") if leg_entry else "")
+
+        rows: list[list[str]] = []
+        highlight_cells: set[tuple[int, int]] = set()
+        row_types = _relay_milestone_types_for_rank(rank_val)
+        for row_idx, milestone_type in enumerate(row_types):
+            row_out = [milestone_type]
+            for col_idx, athlete_id in enumerate(athlete_ids, start=1):
+                cell = "-"
+                if athlete_id:
+                    count = milestone_counts.get(athlete_id, {}).get(milestone_type)
+                    if count is not None:
+                        cell = _ordinal(count)
+                        if count == 1 or count % 5 == 0:
+                            highlight_cells.add((row_idx, col_idx))
+                row_out.append(cell)
+            rows.append(row_out)
+        blocks.append(
+            {
+                "rank": rank_val,
+                "team_name": team["name"],
+                "team_nat": team["nat"],
+                "headers": headers,
+                "rows": rows,
+                "highlight_cells": highlight_cells,
+            }
+        )
+    return blocks
 
 
 def _leader_marker_suffix(
@@ -1094,6 +1226,7 @@ def _render_olympic_medal_sections(
                 discipline,
                 cat_id,
                 cutoff_dt=cutoff_dt,
+                include_cutoff=True,
             )
         else:
             podiums_future = executor.submit(
@@ -1101,8 +1234,14 @@ def _render_olympic_medal_sections(
                 discipline,
                 cat_id,
                 cutoff_dt=cutoff_dt,
+                include_cutoff=True,
             )
-        medals_future = executor.submit(_get_all_olympic_medals, cat_id, cutoff_dt)
+        medals_future = executor.submit(
+            _get_all_olympic_medals,
+            cat_id,
+            cutoff_dt=cutoff_dt,
+            include_cutoff=True,
+        )
         podiums = podiums_future.result()
         all_country_medals, all_athlete_stats = medals_future.result()
 
@@ -2274,15 +2413,20 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 if not is_current_race:
                     stat["flower_prior"] += 1
                     all_stat["flower_prior"] += 1
-        if (
-            race_count == 1 or race_count % 25 == 0
-        ) and ibu_id not in race_milestone_ids:
-            race_milestones.append(
-                [
-                    race_count,
-                    decorate_any(entry["name"], entry["nat"], ibu_id),
-                    entry["nat"],
-                ]
+        if ibu_id not in race_milestone_ids:
+            team_race_count = None
+            if is_relay:
+                team_race_count = sum(
+                    1 for res in level_results if _is_team_level_result(res)
+                )
+            race_milestones.extend(
+                _build_race_milestone_rows(
+                    race_count=race_count,
+                    team_race_count=team_race_count,
+                    is_relay=is_relay,
+                    decorated_name=decorate_any(entry["name"], entry["nat"], ibu_id),
+                    nat=entry["nat"],
+                )
             )
             race_milestone_ids.add(ibu_id)
         # Determine athlete's rank and build milestones for top 6
@@ -2309,19 +2453,81 @@ def handle_post_race(args: argparse.Namespace) -> int:
         decorated_name = decorate_any(entry["name"], entry["nat"], ibu_id)
 
         # Store: [count, type, decorated_name, nat, ibu_id, rank]
-        # Winners get win counts
-        if rank_val == 1:
+        if is_relay:
+            if rank_val == 1:
+                top_milestones.append(
+                    [
+                        stat["win"],
+                        "Relay Win",
+                        decorated_name,
+                        entry["nat"],
+                        ibu_id,
+                        rank_val,
+                    ]
+                )
+                top_milestones.append(
+                    [
+                        all_stat["win"],
+                        "Win",
+                        decorated_name,
+                        entry["nat"],
+                        ibu_id,
+                        rank_val,
+                    ]
+                )
+            if rank_val <= 3:
+                top_milestones.append(
+                    [
+                        stat["podium"],
+                        "Relay Podium",
+                        decorated_name,
+                        entry["nat"],
+                        ibu_id,
+                        rank_val,
+                    ]
+                )
+                top_milestones.append(
+                    [
+                        all_stat["podium"],
+                        "Podium",
+                        decorated_name,
+                        entry["nat"],
+                        ibu_id,
+                        rank_val,
+                    ]
+                )
             top_milestones.append(
                 [
-                    all_stat["win"],
-                    "Win",
+                    stat["flower"],
+                    "Relay Flower",
                     decorated_name,
                     entry["nat"],
                     ibu_id,
                     rank_val,
                 ]
             )
-            if not is_relay:
+            top_milestones.append(
+                [
+                    all_stat["flower"],
+                    "Flower",
+                    decorated_name,
+                    entry["nat"],
+                    ibu_id,
+                    rank_val,
+                ]
+            )
+        else:
+            if rank_val == 1:
+                top_milestones.append(
+                    [
+                        all_stat["win"],
+                        "Win",
+                        decorated_name,
+                        entry["nat"],
+                        ibu_id,
+                        rank_val,
+                    ]
+                )
                 top_milestones.append(
                     [
                         stat["win"],
@@ -2332,20 +2538,17 @@ def handle_post_race(args: argparse.Namespace) -> int:
                         rank_val,
                     ]
                 )
-
-        # Top 3 get podium counts
-        if rank_val <= 3:
-            top_milestones.append(
-                [
-                    all_stat["podium"],
-                    "Podium",
-                    decorated_name,
-                    entry["nat"],
-                    ibu_id,
-                    rank_val,
-                ]
-            )
-            if not is_relay:
+            if rank_val <= 3:
+                top_milestones.append(
+                    [
+                        all_stat["podium"],
+                        "Podium",
+                        decorated_name,
+                        entry["nat"],
+                        ibu_id,
+                        rank_val,
+                    ]
+                )
                 top_milestones.append(
                     [
                         stat["podium"],
@@ -2356,19 +2559,16 @@ def handle_post_race(args: argparse.Namespace) -> int:
                         rank_val,
                     ]
                 )
-
-        # Top 6 get flower counts
-        top_milestones.append(
-            [
-                all_stat["flower"],
-                "Flower",
-                decorated_name,
-                entry["nat"],
-                ibu_id,
-                rank_val,
-            ]
-        )
-        if not is_relay:
+            top_milestones.append(
+                [
+                    all_stat["flower"],
+                    "Flower",
+                    decorated_name,
+                    entry["nat"],
+                    ibu_id,
+                    rank_val,
+                ]
+            )
             top_milestones.append(
                 [
                     stat["flower"],
@@ -2384,22 +2584,35 @@ def handle_post_race(args: argparse.Namespace) -> int:
         sec += 1
         if race_milestones:
             race_milestones.sort(key=lambda row: row[0], reverse=True)
-            # Convert milestone numbers to ordinal
-            race_milestones = [
-                [_ordinal(row[0]), row[1], row[2]] for row in race_milestones
-            ]
+            if is_relay:
+                race_milestones = [
+                    [_ordinal(row[0]), row[1], row[2], row[3]]
+                    for row in race_milestones
+                ]
+            else:
+                race_milestones = [
+                    [_ordinal(row[0]), row[1], row[2]] for row in race_milestones
+                ]
             label = (
                 f"{sec}. World Cup + WCH + OWG race milestones:"
                 if use_major
                 else f"{sec}. World Cup race milestones:"
             )
             print(_format_section_title(label, args))
-            render_table(
-                ["Milestone", "Athlete", "Nat"],
-                race_milestones,
-                output_format=output_format,
-                cell_formatters=[None, name_formatter_plain, None],
-            )
+            if is_relay:
+                render_table(
+                    ["Milestone", "Type", "Athlete", "Nat"],
+                    race_milestones,
+                    output_format=output_format,
+                    cell_formatters=[None, None, name_formatter_plain, None],
+                )
+            else:
+                render_table(
+                    ["Milestone", "Athlete", "Nat"],
+                    race_milestones,
+                    output_format=output_format,
+                    cell_formatters=[None, name_formatter_plain, None],
+                )
             print()
         else:
             label = (
@@ -2412,64 +2625,107 @@ def handle_post_race(args: argparse.Namespace) -> int:
 
         sec += 1
         if top_milestones:
-            # Group by athlete (ibu_id), sort groups by race finish rank
-            from itertools import groupby
-
-            # Define sort order for milestone types
-            type_order = {
-                "Win": 0,
-                "Individual Win": 1,
-                "Podium": 2,
-                "Individual Podium": 3,
-                "Flower": 4,
-                "Individual Flower": 5,
-            }
-            # Sort by ibu_id to group
-            top_milestones.sort(key=lambda row: row[4])
-            grouped = []
-            for ibu_id, group in groupby(top_milestones, key=lambda row: row[4]):
-                group_rows = list(group)
-                # Sort within group by type order (Win, Podium, Flower)
-                group_rows.sort(key=lambda row: type_order.get(row[1], 99))
-                # Get athlete info from first row: decorated_name, nat, rank
-                athlete_name = group_rows[0][2]
-                athlete_nat = group_rows[0][3]
-                athlete_rank = group_rows[0][5]
-                grouped.append((athlete_rank, athlete_name, athlete_nat, group_rows))
-            # Sort groups by race finish rank (ascending: 1st, 2nd, 3rd...)
-            grouped.sort(key=lambda g: g[0])
-
             label = (
                 f"{sec}. World Cup + WCH + OWG Top 6 Milestones:"
                 if use_major
                 else f"{sec}. World Cup Top 6 Milestones:"
             )
             print(_format_section_title(label, args))
-            for i, (rank, athlete_name, athlete_nat, group_rows) in enumerate(grouped):
-                # Print athlete header
-                athlete_header = f"{rank}. {athlete_name} ({athlete_nat})"
-                if pretty:
-                    print(
-                        f"{Color.BOLD}{name_formatter_plain(athlete_header, 0)}{Color.RESET}"
-                    )
-                else:
-                    print(athlete_header)
-                # Convert milestone numbers to ordinal, only show Milestone and Type
-                # Track which rows have multiples of 5 for highlighting
-                display_rows = [[_ordinal(int(row[0])), row[1]] for row in group_rows]
-                row_styles = [
-                    "highlight" if row[0] == 1 or row[0] % 5 == 0 else ""
-                    for row in group_rows
-                ]
-                render_table(
-                    ["Milestone", "Type"],
-                    display_rows,
-                    output_format=output_format,
-                    show_headers=False,
-                    row_styles=row_styles,
+
+            if is_relay:
+                relay_blocks = _build_relay_milestone_blocks(
+                    top_milestones, entries, team_results
                 )
-                if i < len(grouped) - 1:
-                    print()
+                for i, block in enumerate(relay_blocks):
+                    team_header = (
+                        f"{block['rank']}. {block['team_name']} ({block['team_nat']})"
+                        if block["team_nat"]
+                        else f"{block['rank']}. {block['team_name']}"
+                    )
+                    if pretty:
+                        print(f"{Color.BOLD}{team_header}{Color.RESET}")
+                    else:
+                        print(team_header)
+                    cell_formatters: list[Callable[[str, int], str] | None] = [None]
+                    for col_idx in range(1, len(block["headers"])):
+                        highlight_rows = {
+                            row_idx
+                            for row_idx, col in block["highlight_cells"]
+                            if col == col_idx
+                        }
+                        if highlight_rows:
+
+                            def _highlight_cell(
+                                cell_str: str,
+                                row_idx: int,
+                                highlight_rows: set[int] = highlight_rows,
+                            ) -> str:
+                                if row_idx in highlight_rows and cell_str != "-":
+                                    return _apply_style(cell_str, "highlight")
+                                return cell_str
+
+                            cell_formatters.append(_highlight_cell)
+                        else:
+                            cell_formatters.append(None)
+                    render_table(
+                        block["headers"],
+                        block["rows"],
+                        output_format=output_format,
+                        cell_formatters=cell_formatters,
+                    )
+                    if i < len(relay_blocks) - 1:
+                        print()
+            else:
+                # Group by athlete (ibu_id), sort groups by race finish rank
+                from itertools import groupby
+
+                type_order = {
+                    "Win": 0,
+                    "Individual Win": 1,
+                    "Podium": 2,
+                    "Individual Podium": 3,
+                    "Flower": 4,
+                    "Individual Flower": 5,
+                }
+                top_milestones.sort(key=lambda row: row[4])
+                grouped = []
+                for _ibu_id, group in groupby(top_milestones, key=lambda row: row[4]):
+                    group_rows = list(group)
+                    group_rows.sort(key=lambda row: type_order.get(row[1], 99))
+                    athlete_name = group_rows[0][2]
+                    athlete_nat = group_rows[0][3]
+                    athlete_rank = group_rows[0][5]
+                    grouped.append(
+                        (athlete_rank, athlete_name, athlete_nat, group_rows)
+                    )
+                grouped.sort(key=lambda g: g[0])
+
+                for i, (rank, athlete_name, athlete_nat, group_rows) in enumerate(
+                    grouped
+                ):
+                    athlete_header = f"{rank}. {athlete_name} ({athlete_nat})"
+                    if pretty:
+                        print(
+                            f"{Color.BOLD}{name_formatter_plain(athlete_header, 0)}{Color.RESET}"
+                        )
+                    else:
+                        print(athlete_header)
+                    display_rows = [
+                        [_ordinal(int(row[0])), row[1]] for row in group_rows
+                    ]
+                    row_styles = [
+                        "highlight" if row[0] == 1 or row[0] % 5 == 0 else ""
+                        for row in group_rows
+                    ]
+                    render_table(
+                        ["Milestone", "Type"],
+                        display_rows,
+                        output_format=output_format,
+                        show_headers=False,
+                        row_styles=row_styles,
+                    )
+                    if i < len(grouped) - 1:
+                        print()
             print()
         else:
             label = (

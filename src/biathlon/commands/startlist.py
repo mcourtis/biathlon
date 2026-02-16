@@ -2386,6 +2386,7 @@ def _fetch_olympic_individual_podium(
     discipline: str,
     category: str,
     cutoff_dt: datetime.datetime | None = None,
+    include_cutoff: bool = False,
 ) -> dict | None:
     """Fetch podium for a single Olympic individual race. Returns None if not found."""
     event_id = f"BT{season_id}SWRLOG__"
@@ -2405,7 +2406,12 @@ def _fetch_olympic_individual_podium(
                 str(race.get("StartTime") or race.get("StartDate") or "")
             )
             if cutoff_dt is not None:
-                if start_dt is None or start_dt > cutoff_dt:
+                if start_dt is None:
+                    continue
+                if include_cutoff:
+                    if start_dt > cutoff_dt:
+                        continue
+                elif start_dt >= cutoff_dt:
                     continue
             candidates.append((start_dt, race_id))
     if not candidates:
@@ -2488,6 +2494,7 @@ def _fetch_olympic_podium(
     discipline: str,
     category: str,
     cutoff_dt: datetime.datetime | None = None,
+    include_cutoff: bool = False,
 ) -> dict | None:
     """Fetch podium for a single Olympic relay race. Returns None if not found."""
     event_id = f"BT{season_id}SWRLOG__"
@@ -2508,7 +2515,12 @@ def _fetch_olympic_podium(
                 str(race.get("StartTime") or race.get("StartDate") or "")
             )
             if cutoff_dt is not None:
-                if start_dt is None or start_dt > cutoff_dt:
+                if start_dt is None:
+                    continue
+                if include_cutoff:
+                    if start_dt > cutoff_dt:
+                        continue
+                elif start_dt >= cutoff_dt:
                     continue
             candidates.append((start_dt, race_id))
     if not candidates:
@@ -2607,6 +2619,7 @@ def _get_past_olympic_relay_podiums(
     discipline: str,
     category: str,
     cutoff_dt: datetime.datetime | None = None,
+    include_cutoff: bool = False,
 ) -> list[dict]:
     """Fetch podiums from past Olympic relay races.
 
@@ -2623,6 +2636,7 @@ def _get_past_olympic_relay_podiums(
                 discipline,
                 category,
                 cutoff_dt,
+                include_cutoff,
             ): s_id
             for s_id in OLYMPIC_SEASON_IDS
         }
@@ -2640,6 +2654,7 @@ def _get_past_olympic_individual_podiums(
     discipline: str,
     category: str,
     cutoff_dt: datetime.datetime | None = None,
+    include_cutoff: bool = False,
 ) -> list[dict]:
     """Fetch podiums from past Olympic individual races."""
     podiums: list[dict] = []
@@ -2653,6 +2668,7 @@ def _get_past_olympic_individual_podiums(
                 discipline,
                 category,
                 cutoff_dt,
+                include_cutoff,
             ): s_id
             for s_id in OLYMPIC_SEASON_IDS
         }
@@ -2669,6 +2685,7 @@ def _fetch_olympic_season_medals(
     season_id: str,
     category: str,
     cutoff_dt: datetime.datetime | None = None,
+    include_cutoff: bool = False,
 ) -> tuple[list[dict], dict[str, dict]]:
     """Fetch country and athlete medals for all disciplines in one Olympic season.
 
@@ -2701,7 +2718,12 @@ def _fetch_olympic_season_medals(
             str(race.get("StartTime") or race.get("StartDate") or "")
         )
         if cutoff_dt is not None:
-            if start_dt is None or start_dt > cutoff_dt:
+            if start_dt is None:
+                continue
+            if include_cutoff:
+                if start_dt > cutoff_dt:
+                    continue
+            elif start_dt >= cutoff_dt:
                 continue
         rid = race.get("RaceId")
         if not rid:
@@ -2956,6 +2978,7 @@ def _fetch_olympic_season_medals(
 def _get_all_olympic_medals(
     category: str,
     cutoff_dt: datetime.datetime | None = None,
+    include_cutoff: bool = False,
 ) -> tuple[list[dict], dict[str, dict]]:
     """Fetch country and athlete medals across all Olympic seasons.
 
@@ -3019,7 +3042,11 @@ def _get_all_olympic_medals(
     ) as executor:
         futures = {
             executor.submit(
-                _fetch_olympic_season_medals, s_id, category, cutoff_dt
+                _fetch_olympic_season_medals,
+                s_id,
+                category,
+                cutoff_dt,
+                include_cutoff,
             ): s_id
             for s_id in OLYMPIC_SEASON_IDS
         }
