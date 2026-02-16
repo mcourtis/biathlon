@@ -4,7 +4,7 @@ import argparse
 import datetime
 
 from biathlon.api import BiathlonError
-from biathlon.commands import post_race
+from biathlon.commands import postrace
 
 
 def _dt(value: str) -> datetime.datetime:
@@ -27,7 +27,7 @@ def test_filter_results_to_snapshot_excludes_future_and_warns_unknown(
             raise BiathlonError("missing")
         return {"Competition": {"StartTime": start_by_race[race_id]}}
 
-    monkeypatch.setattr(post_race, "get_race_results", fake_get_race_results)
+    monkeypatch.setattr(postrace, "get_race_results", fake_get_race_results)
 
     rows = [
         {"RaceId": "RACE_TARGET"},
@@ -38,7 +38,7 @@ def test_filter_results_to_snapshot_excludes_future_and_warns_unknown(
     warning_keys: set[str] = set()
     race_start_cache = {target_race_id: target_start}
 
-    filtered = post_race._filter_results_to_snapshot(
+    filtered = postrace._filter_results_to_snapshot(
         rows,
         target_race_id,
         target_start,
@@ -57,7 +57,7 @@ def test_is_result_at_or_before_target_uses_season_fast_path(monkeypatch):
     def fail_if_called(race_id: str) -> dict:
         raise AssertionError(f"unexpected API call for {race_id}")
 
-    monkeypatch.setattr(post_race, "get_race_results", fail_if_called)
+    monkeypatch.setattr(postrace, "get_race_results", fail_if_called)
 
     warning_keys: set[str] = set()
     cache = {}
@@ -68,7 +68,7 @@ def test_is_result_at_or_before_target_uses_season_fast_path(monkeypatch):
     future_row = {"RaceId": "BT2728SWRLCP01SMSP", "Season": "27/28"}
 
     assert (
-        post_race._is_result_at_or_before_target(
+        postrace._is_result_at_or_before_target(
             past_row,
             target_race,
             target_start,
@@ -79,7 +79,7 @@ def test_is_result_at_or_before_target_uses_season_fast_path(monkeypatch):
         is True
     )
     assert (
-        post_race._is_result_at_or_before_target(
+        postrace._is_result_at_or_before_target(
             future_row,
             target_race,
             target_start,
@@ -93,24 +93,24 @@ def test_is_result_at_or_before_target_uses_season_fast_path(monkeypatch):
 
 def test_is_lapped_current_result_detects_lap_by_irm():
     entry = {"irm": "LAP", "time": "+1:20.5"}
-    assert post_race._is_lapped_current_result(entry, 10059, "PU") is True
+    assert postrace._is_lapped_current_result(entry, 10059, "PU") is True
 
 
 def test_is_lapped_current_result_detects_pursuit_fallback_rank():
     entry = {"irm": "", "time": "39:10.0"}
-    assert post_race._is_lapped_current_result(entry, 10060, "PU") is True
-    assert post_race._is_lapped_current_result(entry, 10060, "SP") is False
+    assert postrace._is_lapped_current_result(entry, 10060, "PU") is True
+    assert postrace._is_lapped_current_result(entry, 10060, "SP") is False
 
 
 def test_collect_discipline_race_ids_applies_cutoff_and_warns_unknown(
     monkeypatch, capsys
 ):
     monkeypatch.setattr(
-        post_race, "get_events", lambda season_id, level: [{"EventId": "E"}]
+        postrace, "get_events", lambda season_id, level: [{"EventId": "E"}]
     )
-    monkeypatch.setattr(post_race, "detect_event_type", lambda event: "WC")
+    monkeypatch.setattr(postrace, "detect_event_type", lambda event: "WC")
     monkeypatch.setattr(
-        post_race,
+        postrace,
         "get_races",
         lambda event_id: [
             {
@@ -134,7 +134,7 @@ def test_collect_discipline_race_ids_applies_cutoff_and_warns_unknown(
     )
 
     warning_keys: set[str] = set()
-    race_ids = post_race._collect_discipline_race_ids(
+    race_ids = postrace._collect_discipline_race_ids(
         ["2526"],
         "SP",
         "SW",
@@ -171,12 +171,12 @@ def test_render_olympic_medal_sections_uses_inclusive_cutoff(monkeypatch):
         return [], {}
 
     monkeypatch.setattr(
-        post_race, "_get_past_olympic_individual_podiums", fake_individual_podiums
+        postrace, "_get_past_olympic_individual_podiums", fake_individual_podiums
     )
-    monkeypatch.setattr(post_race, "_get_all_olympic_medals", fake_all_olympic_medals)
+    monkeypatch.setattr(postrace, "_get_all_olympic_medals", fake_all_olympic_medals)
 
     args = argparse.Namespace(format="tsv")
-    sec = post_race._render_olympic_medal_sections(
+    sec = postrace._render_olympic_medal_sections(
         args,
         0,
         "PU",
@@ -201,10 +201,10 @@ def test_has_newer_relevant_wc_points_race_detects_completed_newer(monkeypatch):
         (_dt("2026-01-20T10:00:00Z"), "RACE_NEW", "PU"),
     ]
     monkeypatch.setattr(
-        post_race, "_collect_wc_individual_races", lambda season_id, cat_id: races
+        postrace, "_collect_wc_individual_races", lambda season_id, cat_id: races
     )
     monkeypatch.setattr(
-        post_race,
+        postrace,
         "get_race_results",
         lambda race_id: {
             "Results": [
@@ -214,7 +214,7 @@ def test_has_newer_relevant_wc_points_race_detects_completed_newer(monkeypatch):
     )
 
     assert (
-        post_race._has_newer_relevant_wc_points_race(
+        postrace._has_newer_relevant_wc_points_race(
             "2526", "SW", "RACE_TARGET", _dt("2026-01-10T10:00:00Z")
         )
         is True
@@ -228,7 +228,7 @@ def test_compute_wc_snapshot_rows_uses_target_cutoff(monkeypatch):
         (_dt("2026-01-20T10:00:00Z"), "RACE_NEW", "SP"),
     ]
     monkeypatch.setattr(
-        post_race, "_collect_wc_individual_races", lambda season_id, cat_id: races
+        postrace, "_collect_wc_individual_races", lambda season_id, cat_id: races
     )
 
     payloads = {
@@ -280,11 +280,9 @@ def test_compute_wc_snapshot_rows_uses_target_cutoff(monkeypatch):
             ]
         },
     }
-    monkeypatch.setattr(
-        post_race, "get_race_results", lambda race_id: payloads[race_id]
-    )
+    monkeypatch.setattr(postrace, "get_race_results", lambda race_id: payloads[race_id])
 
-    total_rows, disc_rows = post_race._compute_wc_snapshot_rows(
+    total_rows, disc_rows = postrace._compute_wc_snapshot_rows(
         "2526",
         "SW",
         "RACE_TARGET",
@@ -300,7 +298,7 @@ def test_compute_wc_snapshot_rows_uses_target_cutoff(monkeypatch):
 
 
 def test_relay_milestone_types_for_rank():
-    assert post_race._relay_milestone_types_for_rank(1) == [
+    assert postrace._relay_milestone_types_for_rank(1) == [
         "Relay Win",
         "Relay Podium",
         "Relay Flower",
@@ -308,24 +306,24 @@ def test_relay_milestone_types_for_rank():
         "Podium",
         "Flower",
     ]
-    assert post_race._relay_milestone_types_for_rank(2) == [
+    assert postrace._relay_milestone_types_for_rank(2) == [
         "Relay Podium",
         "Relay Flower",
         "Podium",
         "Flower",
     ]
-    assert post_race._relay_milestone_types_for_rank(3) == [
+    assert postrace._relay_milestone_types_for_rank(3) == [
         "Relay Podium",
         "Relay Flower",
         "Podium",
         "Flower",
     ]
-    assert post_race._relay_milestone_types_for_rank(4) == ["Relay Flower", "Flower"]
-    assert post_race._relay_milestone_types_for_rank(6) == ["Relay Flower", "Flower"]
+    assert postrace._relay_milestone_types_for_rank(4) == ["Relay Flower", "Flower"]
+    assert postrace._relay_milestone_types_for_rank(6) == ["Relay Flower", "Flower"]
 
 
 def test_build_race_milestone_rows_relay_team_race_only():
-    rows = post_race._build_race_milestone_rows(
+    rows = postrace._build_race_milestone_rows(
         race_count=26,
         team_race_count=25,
         is_relay=True,
@@ -336,7 +334,7 @@ def test_build_race_milestone_rows_relay_team_race_only():
 
 
 def test_build_race_milestone_rows_relay_race_and_team_race():
-    rows = post_race._build_race_milestone_rows(
+    rows = postrace._build_race_milestone_rows(
         race_count=50,
         team_race_count=25,
         is_relay=True,
@@ -350,7 +348,7 @@ def test_build_race_milestone_rows_relay_race_and_team_race():
 
 
 def test_build_race_milestone_rows_non_relay_shape_unchanged():
-    rows = post_race._build_race_milestone_rows(
+    rows = postrace._build_race_milestone_rows(
         race_count=25,
         team_race_count=None,
         is_relay=False,
@@ -432,7 +430,7 @@ def test_build_relay_milestone_blocks_rank_rows_and_highlights():
         [9, "Flower", "C4", "SWE", "C4", 4],
     ]
 
-    blocks = post_race._build_relay_milestone_blocks(
+    blocks = postrace._build_relay_milestone_blocks(
         top_milestones, entries, team_results
     )
 
@@ -493,7 +491,7 @@ def test_build_relay_milestone_blocks_missing_leg_uses_placeholder():
         [5, "Flower", "A3", "NOR", "A3", 4],
     ]
 
-    blocks = post_race._build_relay_milestone_blocks(
+    blocks = postrace._build_relay_milestone_blocks(
         top_milestones, entries, team_results
     )
 
@@ -516,7 +514,7 @@ def test_find_best_u23_leader_prefers_explicit_row_marker():
         },
     ]
 
-    leader = post_race._find_best_u23_leader(rows, {"A"})
+    leader = postrace._find_best_u23_leader(rows, {"A"})
 
     assert leader["id"] == "B"
     assert leader["name"] == "Bravo"
@@ -530,7 +528,7 @@ def test_find_best_u23_leader_falls_back_to_u23_ids():
         {"Rank": "3", "IBUId": "C", "Name": "Charlie", "Nat": "FRA", "Score": 220},
     ]
 
-    leader = post_race._find_best_u23_leader(rows, {"B", "C"})
+    leader = postrace._find_best_u23_leader(rows, {"B", "C"})
 
     assert leader["id"] == "B"
 
@@ -546,9 +544,9 @@ def test_build_athlete_age_map_appends_u23(monkeypatch):
             raise BiathlonError("boom")
         return bios.get(ibu_id, {})
 
-    monkeypatch.setattr(post_race, "get_athlete_bio", fake_get_athlete_bio)
+    monkeypatch.setattr(postrace, "get_athlete_bio", fake_get_athlete_bio)
 
-    age_map, u23_ids = post_race._build_athlete_age_map(
+    age_map, u23_ids = postrace._build_athlete_age_map(
         {"A", "B", "C"}, datetime.date(2025, 12, 1)
     )
 
@@ -578,7 +576,7 @@ def test_build_standings_rows_includes_age_column():
         },
     ]
 
-    table_rows, row_styles = post_race._build_standings_rows(
+    table_rows, row_styles = postrace._build_standings_rows(
         rows,
         top_n=10,
         race_points_by_id={"A": 90, "B": 75},
@@ -592,10 +590,10 @@ def test_build_standings_rows_includes_age_column():
 
 
 def test_make_name_formatter_supports_u23_marker():
-    formatter = post_race._make_name_formatter()
-    value = f"Alice {post_race.U23_LEADER_MARKER}"
+    formatter = postrace._make_name_formatter()
+    value = f"Alice {postrace.U23_LEADER_MARKER}"
 
     out = formatter(value, 0)
 
-    assert post_race.U23_LEADER_MARKER not in out
+    assert postrace.U23_LEADER_MARKER not in out
     assert "●" in out

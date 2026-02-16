@@ -37,7 +37,7 @@ from ._common import (
     detect_event_type,
     is_relay_discipline,
 )
-from .post_race import handle_post_race
+from .postrace import handle_post_race
 from .results import _get_wc_rows, _has_completed_results
 from ._common import _select_race_interactive
 from .startlist import (
@@ -2146,6 +2146,6 @@ def handle_brief_startlist(args: argparse.Namespace) -> int:
 def handle_brief_post_race(args: argparse.Namespace) -> int:
     """Display post-race analysis (after a race).
 
-    Delegates to the existing post_race handler.
+    Delegates to the existing postrace handler.
     """
     return handle_post_race(args)

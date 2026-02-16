@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from biathlon.api import BiathlonError
 from biathlon.cli import build_parser
-from biathlon.commands import brief, post_race, startlist
+from biathlon.commands import brief, postrace, startlist
 
 
 def _race_payload(
@@ -120,7 +120,7 @@ def test_brief_startlist_vs_postrace_olympic_medal_cutoff(monkeypatch, capsys):
         ]
 
     monkeypatch.setattr(brief, "get_race_results", fake_get_race_results)
-    monkeypatch.setattr(post_race, "get_race_results", fake_get_race_results)
+    monkeypatch.setattr(postrace, "get_race_results", fake_get_race_results)
     monkeypatch.setattr(startlist, "get_race_results", fake_get_race_results)
     monkeypatch.setattr(startlist, "get_races", fake_get_races)
     monkeypatch.setattr(startlist, "OLYMPIC_SEASON_IDS", ["2526"])
@@ -139,11 +139,11 @@ def test_brief_startlist_vs_postrace_olympic_medal_cutoff(monkeypatch, capsys):
         startlist, "_render_wc_standings_sections", lambda *a, **k: None
     )
     monkeypatch.setattr(
-        post_race,
+        postrace,
         "_render_best_performances_section",
         lambda _args, sec, *_a, **_k: sec,
     )
-    monkeypatch.setattr(post_race, "_collect_discipline_race_ids", lambda *a, **k: [])
+    monkeypatch.setattr(postrace, "_collect_discipline_race_ids", lambda *a, **k: [])
 
     parser = build_parser()
 

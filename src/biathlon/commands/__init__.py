@@ -25,7 +25,7 @@ from .athlete import (
     handle_athlete_id,
 )
 from .shooting import handle_shooting
-from .post_race import handle_post_race
+from .postrace import handle_post_race
 from .brief import (
     handle_brief_event,
     handle_brief_startlist,
