@@ -1454,7 +1454,7 @@ def _get_current_season_relay_podiums(
         return []
 
     fallback_dt = datetime.datetime.min.replace(tzinfo=datetime.timezone.utc)
-    podium_entries.sort(key=lambda item: (item[0] or fallback_dt), reverse=True)
+    podium_entries.sort(key=lambda item: item[0] or fallback_dt, reverse=True)
     return [entry for _, entry in podium_entries]
 
 
