@@ -1585,11 +1585,11 @@ def _render_team_startlist(
     if relay_wc_rows:
         _print_section_title(relay_title)
         relay_rows: list[list[str]] = []
-        for idx, row in enumerate(relay_wc_rows):
-            rank = row.get("Rank") or row.get("Standing") or idx + 1
-            name = row.get("Name") or row.get("ShortName") or ""
-            nat = row.get("Nat") or ""
-            score = row.get("Score") or row.get("Points") or 0
+        for idx, standing in enumerate(relay_wc_rows):
+            rank = standing.get("Rank") or standing.get("Standing") or idx + 1
+            name = standing.get("Name") or standing.get("ShortName") or ""
+            nat = standing.get("Nat") or ""
+            score = standing.get("Score") or standing.get("Points") or 0
             relay_rows.append([str(rank).rstrip("."), str(name), str(nat), str(score)])
         render_table(
             ["Rank", "Team", "Nat", "Points"],

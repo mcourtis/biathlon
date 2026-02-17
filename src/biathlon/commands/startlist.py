@@ -2613,8 +2613,11 @@ def _fetch_olympic_podium(
         rank = int(rank_str)
         name = res.get("Name") or res.get("ShortName") or ""
         nat = res.get("Nat") or ""
-        # Show country names without trailing "(NAT)" codes in section 2.
-        display = name or _country_display(nat)
+        base = name or _country_display(nat)
+        if nat and nat not in base:
+            display = f"{base} ({nat})"
+        else:
+            display = base
         if rank == 1:
             gold = display
             gold_nat = nat
