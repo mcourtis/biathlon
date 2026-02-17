@@ -17,6 +17,20 @@ def test_events_accepts_format_markdown():
     assert args.format == "markdown"
 
 
+def test_form_accepts_nat_filter():
+    parser = build_parser()
+    args = parser.parse_args(["form", "--nat", "fra,nor"])
+    assert args.command == "form"
+    assert args.nat == "fra,nor"
+
+
+def test_form_min_default_is_none():
+    parser = build_parser()
+    args = parser.parse_args(["form"])
+    assert args.command == "form"
+    assert args.min_pct is None
+
+
 def test_invalid_format_rejected():
     parser = build_parser()
     with pytest.raises(SystemExit) as exc_info:

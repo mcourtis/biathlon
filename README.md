@@ -170,6 +170,7 @@ biathlon form
 biathlon form --men --shoot
 biathlon form --startlist
 biathlon form --season --top 10
+biathlon form --nat FRA,NOR
 ```
 
 Season, event and race briefs (venue history, startlist analysis, post-race recap):

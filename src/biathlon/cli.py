@@ -814,12 +814,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--top", type=int, default=0, help="Filter to top N in WC standings"
     )
     form_parser.add_argument(
+        "--nat",
+        default="",
+        metavar="NATS",
+        help="Filter by nationality codes (comma-separated, e.g. FRA,NOR)",
+    )
+    form_parser.add_argument(
         "--min",
         type=int,
-        default=50,
+        default=None,
         dest="min_pct",
         metavar="PCT",
-        help="Minimum race participation percentage (0-100, default: 50)",
+        help="Minimum race participation percentage (0-100, default: 50; 0 with --startlist)",
     )
     form_parser.add_argument(
         "--season", action="store_true", help="Calculate form based on all season races"

@@ -64,6 +64,17 @@ DISCIPLINE_NAME_TO_CODE = {
 }
 
 
+def _parse_nat_filter(value: str) -> set[str]:
+    """Parse --nat value into a set of uppercase 3-letter codes."""
+    nats: set[str] = set()
+    for token in str(value or "").split(","):
+        nat = token.strip().upper()
+        if not nat:
+            continue
+        nats.add(nat[:3])
+    return nats
+
+
 def _venue_abbrev(event_name: str) -> str:
     """Extract a 3-letter venue abbreviation from an event name."""
     # Clean up the name
@@ -925,7 +936,11 @@ def _compute_athletes(
         )
 
     # Filter by minimum participation percentage (based on display races only)
-    min_pct = getattr(args, "min_pct", 75)
+    min_pct_raw = getattr(args, "min_pct", 75)
+    try:
+        min_pct = int(min_pct_raw) if min_pct_raw is not None else 0
+    except (TypeError, ValueError):
+        min_pct = 0
     if min_pct > 0 and completed_race_ids:
         display_race_set = set(completed_race_ids)
         total_display_races = len(completed_race_ids)
@@ -950,6 +965,7 @@ def _render_form_table(
     data: FormData,
     args: argparse.Namespace,
     shoot_mode: bool,
+    nat_filter: set[str] | None = None,
 ) -> int:
     """Sort, format, and render the form table. Returns 0."""
     season_mode = getattr(args, "season", False)
@@ -1013,6 +1029,7 @@ def _render_form_table(
                 "season_form": entry["season_form"],
                 "current_form": entry["current_form"],
                 "name": entry["name"],
+                "nat": entry["nat"],
                 "row": row_data,
                 "_ranks": entry["ranks"],
             }
@@ -1032,6 +1049,17 @@ def _render_form_table(
     # Assign ranks
     for idx, row in enumerate(rows, start=1):
         row["row"][0] = idx
+
+    # Apply optional nationality filter while preserving global rank values
+    if nat_filter is not None:
+        rows = [
+            row
+            for row in rows
+            if str(row.get("nat") or "").strip().upper()[:3] in nat_filter
+        ]
+        if not rows:
+            print("no athletes found", file=sys.stderr)
+            return 1
 
     # Apply limit
     limit = getattr(args, "limit", 25)
@@ -1162,6 +1190,7 @@ def _render_combined_table(
     shoot_athletes: list[dict],
     args: argparse.Namespace,
     result_athletes: list[dict] | None = None,
+    nat_filter: set[str] | None = None,
 ) -> int:
     """Render combined course time + shooting (+ result) ranking table."""
     season_mode = getattr(args, "season", False)
@@ -1222,6 +1251,17 @@ def _render_combined_table(
     # Assign ranks
     for i, entry in enumerate(combined, 1):
         entry["rank"] = i
+
+    # Apply optional nationality filter while preserving global rank values
+    if nat_filter is not None:
+        combined = [
+            entry
+            for entry in combined
+            if str(entry.get("nat") or "").strip().upper()[:3] in nat_filter
+        ]
+        if not combined:
+            print("no athletes found", file=sys.stderr)
+            return 1
 
     # Apply limit
     limit = getattr(args, "limit", 25)
@@ -1313,7 +1353,16 @@ def handle_form(args: argparse.Namespace) -> int:
         print("error: --season and --event are mutually exclusive", file=sys.stderr)
         return 1
 
+    nat_raw = str(getattr(args, "nat", "") or "")
+    nat_filter = _parse_nat_filter(nat_raw)
+    if nat_raw and not nat_filter:
+        print("error: invalid --nat filter", file=sys.stderr)
+        return 1
+    nat_filter_arg = nat_filter or None
+
     startlist_flag = getattr(args, "startlist", None)
+    if getattr(args, "min_pct", None) is None:
+        args.min_pct = 0 if startlist_flag is not None else 50
 
     if startlist_flag is not None:
         # --startlist mode: auto-detect gender, show both course time + shooting tables
@@ -1352,43 +1401,69 @@ def handle_form(args: argparse.Namespace) -> int:
 
         # Compute athletes for all three modes
         course_athletes = _compute_athletes(
-            data, args, shoot_mode=False, filter_ibu_ids=startlist_ids
+            data,
+            args,
+            shoot_mode=False,
+            filter_ibu_ids=startlist_ids,
         )
         if course_athletes is None:
             return 1
         shoot_athletes = _compute_athletes(
-            data, args, shoot_mode=True, filter_ibu_ids=startlist_ids
+            data,
+            args,
+            shoot_mode=True,
+            filter_ibu_ids=startlist_ids,
         )
         if shoot_athletes is None:
             return 1
         result_athletes = _compute_athletes(
-            data, args, shoot_mode=False, result_mode=True, filter_ibu_ids=startlist_ids
+            data,
+            args,
+            shoot_mode=False,
+            result_mode=True,
+            filter_ibu_ids=startlist_ids,
         )
         if result_athletes is None:
             return 1
 
         # Rank results table
         print(_format_section_title("Rank results", args))
-        _render_form_table(result_athletes, data, args, shoot_mode=False)
+        rc = _render_form_table(
+            result_athletes, data, args, shoot_mode=False, nat_filter=nat_filter_arg
+        )
+        if rc != 0:
+            return rc
 
         print()
 
         # Course time ranks table
         print(_format_section_title("Course time ranks", args))
-        _render_form_table(course_athletes, data, args, shoot_mode=False)
+        rc = _render_form_table(
+            course_athletes, data, args, shoot_mode=False, nat_filter=nat_filter_arg
+        )
+        if rc != 0:
+            return rc
 
         print()
 
         # Shooting accuracy table
         print(_format_section_title("Shooting accuracy", args))
-        _render_form_table(shoot_athletes, data, args, shoot_mode=True)
+        rc = _render_form_table(
+            shoot_athletes, data, args, shoot_mode=True, nat_filter=nat_filter_arg
+        )
+        if rc != 0:
+            return rc
 
         print()
 
         # Combined ranking table
         print(_format_section_title("Combined ranking", args))
         return _render_combined_table(
-            course_athletes, shoot_athletes, args, result_athletes=result_athletes
+            course_athletes,
+            shoot_athletes,
+            args,
+            result_athletes=result_athletes,
+            nat_filter=nat_filter_arg,
         )
 
     # Standard mode (no --startlist flag)
@@ -1401,7 +1476,12 @@ def handle_form(args: argparse.Namespace) -> int:
         return 1
 
     # Compute athletes for all three modes
-    result_athletes = _compute_athletes(data, args, shoot_mode=False, result_mode=True)
+    result_athletes = _compute_athletes(
+        data,
+        args,
+        shoot_mode=False,
+        result_mode=True,
+    )
     if result_athletes is None:
         return 1
     course_athletes = _compute_athletes(data, args, shoot_mode=False)
@@ -1413,16 +1493,26 @@ def handle_form(args: argparse.Namespace) -> int:
 
     # Rank results table
     print(_format_section_title("Rank results", args))
-    _render_form_table(result_athletes, data, args, shoot_mode=False)
+    rc = _render_form_table(
+        result_athletes, data, args, shoot_mode=False, nat_filter=nat_filter_arg
+    )
+    if rc != 0:
+        return rc
 
     print()
 
     # Course time ranks table
     print(_format_section_title("Course time ranks", args))
-    _render_form_table(course_athletes, data, args, shoot_mode=False)
+    rc = _render_form_table(
+        course_athletes, data, args, shoot_mode=False, nat_filter=nat_filter_arg
+    )
+    if rc != 0:
+        return rc
 
     print()
 
     # Shooting accuracy table
     print(_format_section_title("Shooting accuracy", args))
-    return _render_form_table(shoot_athletes, data, args, shoot_mode=True)
+    return _render_form_table(
+        shoot_athletes, data, args, shoot_mode=True, nat_filter=nat_filter_arg
+    )
