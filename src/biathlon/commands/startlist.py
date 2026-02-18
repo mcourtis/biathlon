@@ -4114,7 +4114,7 @@ def _fetch_wch_season_medals(
 
     for race_disc, _race_cat, payload in mixed_races:
         results = payload.get("Results", []) or []
-        team_ranks: dict[str, int] = {}
+        mixed_team_ranks: dict[str, int] = {}
         for res in results:
             if not res.get("IsTeam"):
                 continue
@@ -4123,7 +4123,7 @@ def _fetch_wch_season_medals(
                 continue
             nat = str(res.get("Nat") or "").upper()
             if nat:
-                team_ranks[nat] = rank_val
+                mixed_team_ranks[nat] = rank_val
         for res in results:
             if res.get("IsTeam"):
                 continue
@@ -4131,7 +4131,7 @@ def _fetch_wch_season_medals(
             if not ibu_id or ibu_id not in known_cat_ids:
                 continue
             nat = str(res.get("Nat") or "").upper()
-            rank_val = team_ranks.get(nat)
+            rank_val = mixed_team_ranks.get(nat)
             if rank_val is None:
                 continue
             name = str(res.get("Name") or res.get("ShortName") or "")
@@ -5474,12 +5474,12 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
         else:
             rosters = _build_team_rosters(payload)
             has_rosters = any(rosters.values())
-            rows: list[list[str]] = []
+            team_rows: list[list[str]] = []
             headers = ["Bib", "Team", "Nat"]
             if has_rosters:
                 headers.extend(["Athlete 1", "Athlete 2", "Athlete 3", "Athlete 4"])
             for team in team_entries:
-                row = [
+                team_row = [
                     str(team.get("bib") or ""),
                     str(team.get("name") or ""),
                     str(team.get("nat") or ""),
@@ -5490,34 +5490,34 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                     roster = rosters.get(f"bib:{bib}") if bib else None
                     if not roster and nat:
                         roster = rosters.get(f"nat:{nat}")
-                    row.extend(
+                    team_row.extend(
                         (roster or [])[:4] + ["-"] * (4 - len((roster or [])[:4]))
                     )
-                rows.append(row)
+                team_rows.append(team_row)
             _print_spaced_section_title(
                 _section_title(SECTION_PARTICIPATING_TEAMS), args
             )
             render_table(
                 headers,
-                rows,
+                team_rows,
                 output_format=output_format,
                 column_separators={3} if has_rosters else {2},
             )
             print()
 
     # Sections 3 and 4
-    for section_id, rows in (
+    for section_id, standings_rows in (
         (SECTION_WC_TOTAL, total_standings[:10]),
         (SECTION_WC_DISCIPLINE, disc_standings[:10]),
     ):
         if not enabled(section_id):
             continue
-        if not rows:
+        if not standings_rows:
             _print_section_none(section_id, args)
             continue
         _render_standings_section(
             _section_title(section_id),
-            rows,
+            standings_rows,
             args,
             startlist_ids,
             name_formatter=format_leader_name,
@@ -5532,7 +5532,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
         )
         for target_cat in target_cats:
             if is_snapshot:
-                rows = _compute_nations_pre_race_standings(
+                nation_rows = _compute_nations_pre_race_standings(
                     season_id,
                     snapshot_target_race_id,
                     snapshot_cutoff_dt,
@@ -5540,27 +5540,35 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                     limit=10,
                 )
             else:
-                rows = _fetch_nations_cup_standings(season_id, target_cat, limit=10)
-            nations_rows_by_cat[target_cat] = rows[:10]
+                nation_rows = _fetch_nations_cup_standings(
+                    season_id, target_cat, limit=10
+                )
+            nations_rows_by_cat[target_cat] = nation_rows[:10]
         if not any(nations_rows_by_cat.values()):
             _print_section_none(SECTION_NATIONS_CUP, args)
         else:
             _print_spaced_section_title(_section_title(SECTION_NATIONS_CUP), args)
             for idx, target_cat in enumerate(target_cats):
-                rows = nations_rows_by_cat.get(target_cat, [])
-                if not rows:
+                nation_rows = nations_rows_by_cat.get(target_cat, [])
+                if not nation_rows:
                     continue
                 if len(target_cats) > 1:
                     label = CATEGORY_DISPLAY_NAMES.get(target_cat, target_cat)
                     print(_format_section_title(label, args))
                 table_rows = []
-                for row_idx, row in enumerate(rows):
+                for row_idx, standing_row in enumerate(nation_rows):
                     rank = str(
-                        row.get("Rank") or row.get("Standing") or row_idx + 1
+                        standing_row.get("Rank")
+                        or standing_row.get("Standing")
+                        or row_idx + 1
                     ).rstrip(".")
-                    nat = str(row.get("Nat") or "")
-                    country = str(row.get("Name") or _country_display(nat) or nat)
-                    points = str(row.get("Score") or row.get("Points") or "0")
+                    nat = str(standing_row.get("Nat") or "")
+                    country = str(
+                        standing_row.get("Name") or _country_display(nat) or nat
+                    )
+                    points = str(
+                        standing_row.get("Score") or standing_row.get("Points") or "0"
+                    )
                     table_rows.append([rank, country, points])
                 render_table(
                     ["Rank", "Country", "Points"],
@@ -5622,13 +5630,15 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                     "Relay WC",
                 )
             )
-        for target_cat, rows in nations_rows_by_cat.items():
-            if rows:
+        for target_cat, nation_rows in nations_rows_by_cat.items():
+            if nation_rows:
                 label = (
                     f"Nations Cup {CATEGORY_DISPLAY_NAMES.get(target_cat, target_cat)}"
                 )
                 scenarios.extend(
-                    _compute_country_what_if_scenarios(rows, startlist_countries, label)
+                    _compute_country_what_if_scenarios(
+                        nation_rows, startlist_countries, label
+                    )
                 )
         if not scenarios:
             _print_section_none(SECTION_STANDINGS_WATCH, args)
@@ -5901,12 +5911,12 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
             hit = milestone(current + 1, step, include_first=include_first)
             if hit is None:
                 continue
-            row = [hit, scope_event_label, type_label, name]
+            milestone_row = [hit, scope_event_label, type_label, name]
             if is_mixed:
-                row.extend([gender, age, nat, current])
+                milestone_row.extend([gender, age, nat, current])
             else:
-                row.extend([age, nat, current])
-            race_rows.append(row)
+                milestone_row.extend([age, nat, current])
+            race_rows.append(milestone_row)
 
         for (
             scope_event_label,
@@ -5925,12 +5935,12 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                 hit = milestone(next_count, step, include_first=include_first)
             if hit is None:
                 continue
-            row = [hit, scope_event_label, type_label, name]
+            milestone_row = [hit, scope_event_label, type_label, name]
             if is_mixed:
-                row.extend([gender, age, nat, current])
+                milestone_row.extend([gender, age, nat, current])
             else:
-                row.extend([age, nat, current])
-            win_rows.append(row)
+                milestone_row.extend([age, nat, current])
+            win_rows.append(milestone_row)
 
     milestone_sections = [
         (SECTION_RACE_MILESTONES, race_rows, "CurrentRaces"),
