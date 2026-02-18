@@ -298,13 +298,23 @@ def format_race_header(payload: dict, race_id: str) -> str:
     race_label = comp.get("ShortDescription") or comp.get("Description") or race_id
     event_label = sport_evt.get("ShortDescription") or sport_evt.get("Organizer") or ""
 
-    start = comp.get("StartTime") or ""
+    start = comp.get("StartTime") or comp.get("StartDate") or ""
     date_part, time_part = "", ""
-    if isinstance(start, str) and "T" in start:
+    start_dt = parse_start_datetime(str(start))
+    if start_dt is not None:
+        local_dt = start_dt.astimezone()
+        date_part = local_dt.strftime("%Y-%m-%d")
+        tz_name = local_dt.tzname() or ""
+        time_part = f"{local_dt.strftime('%H:%M')} {tz_name}".strip()
+    elif isinstance(start, str) and "T" in start:
         date_part, rest = start.split("T", 1)
         time_part = rest.rstrip("Z")
     location = f" — {event_label}" if event_label else ""
-    return f"# {race_label}{location} {date_part} {time_part} ({race_id})".strip()
+    when = " ".join(part for part in (date_part, time_part) if part)
+    base = f"# {race_label}{location}".strip()
+    if when:
+        base = f"{base} {when}"
+    return f"{base} ({race_id})".strip()
 
 
 def format_result_row(

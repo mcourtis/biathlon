@@ -260,6 +260,9 @@ def test_fetch_olympic_relay_podium_uses_strict_cutoff(monkeypatch):
 
     assert podium is not None
     assert podium["gold"] == "Norway (NOR)"
+    assert podium["gold_nat"] == "NOR"
+    assert podium["silver_nat"] == "SWE"
+    assert podium["bronze_nat"] == "GER"
 
 
 def test_fetch_olympic_season_medals_uses_strict_cutoff(monkeypatch):
@@ -490,9 +493,9 @@ def test_fetch_relay_wc_standings_mixed_relay(monkeypatch):
     monkeypatch.setattr(
         startlist,
         "_fetch_standings",
-        lambda cup_id, limit=10: [{"Rank": "1", "Name": "NORWAY"}]
-        if cup_id == "MX_CUP"
-        else [],
+        lambda cup_id, limit=10: (
+            [{"Rank": "1", "Name": "NORWAY"}] if cup_id == "MX_CUP" else []
+        ),
     )
 
     label, rows = startlist._fetch_relay_wc_standings("2526", "MX", "MR")
@@ -684,6 +687,13 @@ def test_olympic_athlete_tables_keep_global_ranks_for_startlist_athletes(
         "_get_all_olympic_medals",
         lambda *_args, **_kwargs: ([], all_athlete_stats),
     )
+    monkeypatch.setattr(startlist, "_get_wc_rows", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        startlist, "_get_cup_ids_for_race", lambda *_args, **_kwargs: ("", "")
+    )
+    monkeypatch.setattr(
+        startlist, "_get_previous_individual_podiums", lambda *_a, **_k: []
+    )
 
     ctx = {
         "payload": {
@@ -697,18 +707,440 @@ def test_olympic_athlete_tables_keep_global_ranks_for_startlist_athletes(
                 }
             ]
         },
+        "race_id": "RACE1",
+        "entries": [],
         "race_disc": "PU",
         "cat_id": "SW",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_OWG,
         "startlist_ids": {"S1"},
+        "age_cache": {},
+        "prefetched_results": {},
+        "team_entries": [],
+        "is_mixed": False,
         "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
     }
     args = argparse.Namespace(format="tsv")
 
-    startlist._render_olympic_individual_sections(ctx, args, section_offset=3)
+    startlist.render_startlist_analysis(ctx, args)
     out = capsys.readouterr().out
 
-    assert "7. Athlete medal table (Women Pursuit):" in out
+    assert "Athlete Olympic Games Medal Table - Pursuit (all editions)" in out
     assert "5\tTARGET One\tSWE\tF\t0\t1\t0\t1\t1" in out
+    assert "\tBETA One\tGER\tF\t0\t2\t0\t2\t2" not in out
 
-    assert "8. Athlete medal table (Women, all Olympic disciplines):" in out
+    assert "Athlete Olympic Games Medal Table - All Disciplines (all editions)" in out
     assert "5\tTARGET One\tSWE\tF\t1\t0\t0\t1\t1\t0\t0\t0\t0\t0\t0\t0\t0\t0\t0" in out
+    assert "CHARLIE One\tFRA\tF" not in out
+
+
+def test_render_startlist_analysis_relay_sections(monkeypatch, capsys):
+    monkeypatch.setattr(
+        startlist,
+        "_fetch_relay_wc_standings",
+        lambda *_a, **_k: (
+            "Men Relay",
+            [{"Rank": "1", "Name": "NORWAY", "Nat": "NOR", "Score": "220"}],
+        ),
+    )
+    monkeypatch.setattr(startlist, "_fetch_nations_cup_standings", lambda *_a, **_k: [])
+    monkeypatch.setattr(startlist, "_get_previous_relay_podiums", lambda *_a, **_k: [])
+
+    ctx = {
+        "payload": {
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "Bib": "1",
+                    "Nat": "NOR",
+                    "Leg": 1,
+                    "FamilyName": "A",
+                    "Name": "A One",
+                },
+                {
+                    "IsTeam": False,
+                    "Bib": "1",
+                    "Nat": "NOR",
+                    "Leg": 2,
+                    "FamilyName": "B",
+                    "Name": "B Two",
+                },
+            ]
+        },
+        "race_id": "RACE1",
+        "entries": [],
+        "race_disc": "RL",
+        "cat_id": "SM",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_WC,
+        "startlist_ids": set(),
+        "age_cache": {},
+        "prefetched_results": {},
+        "team_entries": [{"bib": "1", "name": "Norway", "nat": "NOR"}],
+        "is_mixed": False,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+    }
+    args = argparse.Namespace(format="tsv", leader_markers=False)
+
+    startlist.render_startlist_analysis(ctx, args)
+    out = capsys.readouterr().out
+
+    assert "Participating Teams" in out
+    assert "1\tNorway\tNOR\tA One\tB Two\t-\t-" in out
+    assert "Relay WC Standings (Top 10)" in out
+    assert "1\tNORWAY\tNOR\t220" in out
+
+
+def test_render_startlist_analysis_skips_win_milestone_one(monkeypatch, capsys):
+    monkeypatch.setattr(startlist, "_get_wc_rows", lambda *_a, **_k: [])
+    monkeypatch.setattr(startlist, "_get_cup_ids_for_race", lambda *_a, **_k: ("", ""))
+    monkeypatch.setattr(startlist, "_fetch_nations_cup_standings", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        startlist, "_get_previous_individual_podiums", lambda *_a, **_k: []
+    )
+
+    wc_non_win_results = [
+        {"Level": "WC", "Comp": "SP", "Rank": "2", "SO": "2"} for _ in range(24)
+    ]
+    ctx = {
+        "payload": {"Results": []},
+        "race_id": "RACE1",
+        "entries": [{"ibu_id": "A1", "name": "Alpha", "age": "25", "nat": "NOR"}],
+        "race_disc": "SP",
+        "cat_id": "SW",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_WC,
+        "startlist_ids": {"A1"},
+        "age_cache": {"A1": "25"},
+        "prefetched_results": {"A1": {"Results": wc_non_win_results}},
+        "team_entries": [],
+        "is_mixed": False,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+    }
+    args = argparse.Namespace(format="tsv", leader_markers=False)
+
+    startlist.render_startlist_analysis(ctx, args)
+    out = capsys.readouterr().out
+
+    assert "Race milestones" in out
+    assert "World Cup\tRace\tAlpha" in out
+    assert "Win milestones: none" in out
+
+
+def test_render_startlist_analysis_suppresses_duplicate_event_relay_milestone_one(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(startlist, "_get_wc_rows", lambda *_a, **_k: [])
+    monkeypatch.setattr(startlist, "_get_cup_ids_for_race", lambda *_a, **_k: ("", ""))
+    monkeypatch.setattr(
+        startlist, "_fetch_relay_wc_standings", lambda *_a, **_k: ("Relay", [])
+    )
+    monkeypatch.setattr(startlist, "_get_previous_relay_podiums", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        startlist, "_get_past_olympic_relay_podiums", lambda *_a, **_k: []
+    )
+    monkeypatch.setattr(
+        startlist, "_get_all_olympic_medals", lambda *_a, **_k: ([], {})
+    )
+
+    ctx = {
+        "payload": {"Results": []},
+        "race_id": "RACE1",
+        "entries": [{"ibu_id": "A1", "name": "Alpha", "age": "25", "nat": "NOR"}],
+        "race_disc": "RL",
+        "cat_id": "SM",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_OWG,
+        "startlist_ids": {"A1"},
+        "age_cache": {"A1": "25"},
+        "prefetched_results": {
+            "A1": {"Results": [{"Level": "WC", "Comp": "RL", "Rank": "5", "SO": "5"}]}
+        },
+        "team_entries": [],
+        "is_mixed": False,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+    }
+    args = argparse.Namespace(format="tsv", leader_markers=False)
+
+    startlist.render_startlist_analysis(ctx, args)
+    out = capsys.readouterr().out
+
+    assert "Olympic Games\tRace\tAlpha" in out
+    assert "Olympic Games\tMen Relay\tAlpha" not in out
+    assert "Olympic Games\tTeam Race\tAlpha" not in out
+
+
+def test_render_startlist_analysis_collapses_multiple_race_milestone_ones_per_athlete(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(startlist, "_get_wc_rows", lambda *_a, **_k: [])
+    monkeypatch.setattr(startlist, "_get_cup_ids_for_race", lambda *_a, **_k: ("", ""))
+    monkeypatch.setattr(
+        startlist, "_fetch_relay_wc_standings", lambda *_a, **_k: ("Relay", [])
+    )
+    monkeypatch.setattr(startlist, "_get_previous_relay_podiums", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        startlist, "_get_past_olympic_relay_podiums", lambda *_a, **_k: []
+    )
+    monkeypatch.setattr(
+        startlist, "_get_all_olympic_medals", lambda *_a, **_k: ([], {})
+    )
+
+    # One prior individual major race keeps career "Race" off milestone=1.
+    # Same-value rows are deduped by scope breadth within each subsection.
+    ctx = {
+        "payload": {"Results": []},
+        "race_id": "RACE1",
+        "entries": [{"ibu_id": "A1", "name": "Alpha", "age": "25", "nat": "NOR"}],
+        "race_disc": "RL",
+        "cat_id": "SM",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_OWG,
+        "startlist_ids": {"A1"},
+        "age_cache": {"A1": "25"},
+        "prefetched_results": {
+            "A1": {"Results": [{"Level": "WC", "Comp": "SP", "Rank": "5", "SO": "5"}]}
+        },
+        "team_entries": [],
+        "is_mixed": False,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+    }
+    args = argparse.Namespace(format="tsv", leader_markers=False)
+
+    startlist.render_startlist_analysis(ctx, args)
+    out = capsys.readouterr().out
+
+    race_start = out.index("Race milestones")
+    win_start = out.index("Win milestones")
+    race_block = out[race_start:win_start]
+
+    assert "1st\tOlympic Games\tRace\tAlpha\t25\tNOR" in race_block
+    assert "1st\tOlympic Games\tMen Relay\tAlpha\t25\tNOR" not in race_block
+    assert "1st\tOlympic Games\tTeam Race\tAlpha\t25\tNOR" not in race_block
+    assert "1st\tWC+WCH+OWG\tMen Relay\tAlpha\t25\tNOR" not in race_block
+    assert "1st\tWC+WCH+OWG\tTeam Race\tAlpha\t25\tNOR" in race_block
+    assert race_block.count("\tAlpha\t25\tNOR") == 2
+
+
+def test_render_startlist_analysis_relay_family_vs_discipline_counts(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(startlist, "_get_wc_rows", lambda *_a, **_k: [])
+    monkeypatch.setattr(startlist, "_get_cup_ids_for_race", lambda *_a, **_k: ("", ""))
+    monkeypatch.setattr(
+        startlist, "_fetch_relay_wc_standings", lambda *_a, **_k: ("Relay", [])
+    )
+    monkeypatch.setattr(startlist, "_fetch_nations_cup_standings", lambda *_a, **_k: [])
+    monkeypatch.setattr(startlist, "_get_previous_relay_podiums", lambda *_a, **_k: [])
+
+    rl_results = [
+        {"Level": "WC", "Comp": "RL", "Rank": "5", "SO": "5"} for _ in range(49)
+    ]
+    mr_results = [
+        {"Level": "WCH", "Comp": "MR", "Rank": "6", "SO": "6"} for _ in range(25)
+    ]
+    ctx = {
+        "payload": {"Results": []},
+        "race_id": "RACE1",
+        "entries": [{"ibu_id": "A1", "name": "Alpha", "age": "25", "nat": "NOR"}],
+        "race_disc": "RL",
+        "cat_id": "SM",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_WC,
+        "startlist_ids": {"A1"},
+        "age_cache": {"A1": "25"},
+        "prefetched_results": {
+            "A1": {"Results": rl_results + mr_results},
+        },
+        "team_entries": [],
+        "is_mixed": False,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+    }
+    args = argparse.Namespace(format="tsv", leader_markers=False)
+
+    startlist.render_startlist_analysis(ctx, args)
+    out = capsys.readouterr().out
+
+    assert "75th\tWC+WCH+OWG\tRace\tAlpha\t25\tNOR" in out
+    assert "50th\tWC+WCH+OWG\tMen Relay\tAlpha\t25\tNOR" in out
+    assert "ALL relay races" not in out
+
+
+def test_render_startlist_analysis_groups_race_milestones_by_athlete(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(startlist, "_get_wc_rows", lambda *_a, **_k: [])
+    monkeypatch.setattr(startlist, "_get_cup_ids_for_race", lambda *_a, **_k: ("", ""))
+    monkeypatch.setattr(startlist, "_fetch_nations_cup_standings", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        startlist, "_get_previous_individual_podiums", lambda *_a, **_k: []
+    )
+
+    alpha_results = [
+        {"Level": "WC", "Comp": "SP", "Rank": "2", "SO": "2"} for _ in range(49)
+    ] + [{"Level": "WC", "Comp": "PU", "Rank": "2", "SO": "2"} for _ in range(50)]
+    beta_results = [
+        {"Level": "WC", "Comp": "SP", "Rank": "2", "SO": "2"} for _ in range(74)
+    ]
+    ctx = {
+        "payload": {"Results": []},
+        "race_id": "RACE1",
+        "entries": [
+            {"ibu_id": "A1", "name": "Alpha", "age": "25", "nat": "NOR"},
+            {"ibu_id": "B1", "name": "Beta", "age": "26", "nat": "SWE"},
+        ],
+        "race_disc": "SP",
+        "cat_id": "SW",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_WC,
+        "startlist_ids": {"A1", "B1"},
+        "age_cache": {"A1": "25", "B1": "26"},
+        "prefetched_results": {
+            "A1": {"Results": alpha_results},
+            "B1": {"Results": beta_results},
+        },
+        "team_entries": [],
+        "is_mixed": False,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+    }
+    args = argparse.Namespace(format="tsv", leader_markers=False)
+
+    startlist.render_startlist_analysis(ctx, args)
+    out = capsys.readouterr().out
+
+    race_start = out.index("Race milestones")
+    win_start = out.index("Win milestones")
+    race_block = out[race_start:win_start]
+    current_start = race_block.index("Current Event")
+    career_start = race_block.index("## Career")
+    current_block = race_block[current_start:career_start]
+    career_block = race_block[career_start:]
+    assert current_block.rfind("\tAlpha\t") < current_block.find("\tBeta\t")
+    assert career_block.rfind("\tAlpha\t") < career_block.find("\tBeta\t")
+
+
+def test_render_startlist_analysis_groups_win_milestones_by_athlete(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(startlist, "_get_wc_rows", lambda *_a, **_k: [])
+    monkeypatch.setattr(startlist, "_get_cup_ids_for_race", lambda *_a, **_k: ("", ""))
+    monkeypatch.setattr(startlist, "_fetch_nations_cup_standings", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        startlist, "_get_previous_individual_podiums", lambda *_a, **_k: []
+    )
+
+    alpha_results = [
+        {"Level": "WC", "Comp": "SP", "Rank": "1", "SO": "1"} for _ in range(4)
+    ] + [{"Level": "WC", "Comp": "PU", "Rank": "1", "SO": "1"} for _ in range(15)]
+    beta_results = [
+        {"Level": "WC", "Comp": "SP", "Rank": "1", "SO": "1"} for _ in range(14)
+    ]
+    ctx = {
+        "payload": {"Results": []},
+        "race_id": "RACE1",
+        "entries": [
+            {"ibu_id": "A1", "name": "Alpha", "age": "25", "nat": "NOR"},
+            {"ibu_id": "B1", "name": "Beta", "age": "26", "nat": "SWE"},
+        ],
+        "race_disc": "SP",
+        "cat_id": "SW",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_WC,
+        "startlist_ids": {"A1", "B1"},
+        "age_cache": {"A1": "25", "B1": "26"},
+        "prefetched_results": {
+            "A1": {"Results": alpha_results},
+            "B1": {"Results": beta_results},
+        },
+        "team_entries": [],
+        "is_mixed": False,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+    }
+    args = argparse.Namespace(format="tsv", leader_markers=False)
+
+    startlist.render_startlist_analysis(ctx, args)
+    out = capsys.readouterr().out
+
+    win_start = out.index("Win milestones")
+    next_start = out.index("Previous podiums", win_start)
+    win_block = out[win_start:next_start]
+    current_start = win_block.index("Current Event")
+    career_start = win_block.index("## Career")
+    current_block = win_block[current_start:career_start]
+    career_block = win_block[career_start:]
+    assert current_block.rfind("\tAlpha\t") < current_block.find("\tBeta\t")
+    assert career_block.rfind("\tAlpha\t") < career_block.find("\tBeta\t")
+
+
+def test_render_startlist_analysis_owg_win_current_event_starts_at_two(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(startlist, "_get_wc_rows", lambda *_a, **_k: [])
+    monkeypatch.setattr(startlist, "_get_cup_ids_for_race", lambda *_a, **_k: ("", ""))
+    monkeypatch.setattr(
+        startlist, "_fetch_relay_wc_standings", lambda *_a, **_k: ("Relay", [])
+    )
+    monkeypatch.setattr(startlist, "_get_previous_relay_podiums", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        startlist, "_get_past_olympic_relay_podiums", lambda *_a, **_k: []
+    )
+    monkeypatch.setattr(
+        startlist, "_get_all_olympic_medals", lambda *_a, **_k: ([], {})
+    )
+
+    ctx = {
+        "payload": {"Results": []},
+        "race_id": "RACE1",
+        "entries": [{"ibu_id": "A1", "name": "Alpha", "age": "25", "nat": "NOR"}],
+        "race_disc": "RL",
+        "cat_id": "SM",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_OWG,
+        "startlist_ids": {"A1"},
+        "age_cache": {"A1": "25"},
+        "prefetched_results": {
+            "A1": {"Results": [{"Level": "OWG", "Comp": "RL", "Rank": "1", "SO": "1"}]}
+        },
+        "team_entries": [],
+        "is_mixed": False,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+    }
+    args = argparse.Namespace(format="tsv", leader_markers=False)
+
+    startlist.render_startlist_analysis(ctx, args)
+    out = capsys.readouterr().out
+
+    win_start = out.index("Win milestones")
+    next_start = out.index("Previous podiums", win_start)
+    win_block = out[win_start:next_start]
+    assert "### Current Event" in win_block
+    assert "Milestone\tEvent\tType\tAthlete\tAge\tNat" in win_block
+    assert "CurrentWins" not in win_block
+    assert "2nd\tOlympic Games\tRace\tAlpha\t25\tNOR" in win_block

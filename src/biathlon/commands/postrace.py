@@ -1471,6 +1471,7 @@ def _render_olympic_medal_sections(
     cutoff_dt: datetime.datetime | None = None,
     race_country_medals: dict[str, set[str]] | None = None,
     race_athlete_medals: dict[str, set[str]] | None = None,
+    use_dynamic_all_olympic_stats: bool = False,
 ) -> int:
     """Render Olympic/WCH medal table sections after the main postrace output.
 
@@ -1510,6 +1511,53 @@ def _render_olympic_medal_sections(
         )
         podiums = podiums_future.result()
         all_country_medals, all_athlete_stats = medals_future.result()
+
+    def _fetch_dynamic_olympic_aggregate_rows(
+        category: str, cutoff: datetime.datetime | None
+    ) -> tuple[list[dict], list[dict]]:
+        """Return (country_rows, athlete_rows) using achievements' dynamic OWG scan."""
+        try:
+            from . import achievements as achievements_cmd
+        except Exception:
+            return [], []
+
+        try:
+            season_ids, _season_label, scope_events = (
+                achievements_cmd._resolve_season_selection(EVENT_TYPE_OWG, "all")
+            )
+            race_meta = achievements_cmd._collect_race_meta(
+                season_ids, scope_events, category
+            )
+            if cutoff is not None:
+                race_meta = [
+                    meta
+                    for meta in race_meta
+                    if isinstance(meta.get("start_dt"), datetime.datetime)
+                    and meta.get("start_dt") <= cutoff
+                ]
+            payload_by_race = achievements_cmd._fetch_race_payloads(race_meta)
+            country_rows, _country_races_used = (
+                achievements_cmd._aggregate_achievements(
+                    race_meta, payload_by_race, category, by_country=True
+                )
+            )
+            athlete_rows, _athlete_races_used = (
+                achievements_cmd._aggregate_achievements(
+                    race_meta, payload_by_race, category, by_country=False
+                )
+            )
+            return country_rows, athlete_rows
+        except BiathlonError:
+            return [], []
+        except Exception:
+            return [], []
+
+    dynamic_country_rows: list[dict] = []
+    dynamic_athlete_rows: list[dict] = []
+    if use_dynamic_all_olympic_stats:
+        dynamic_country_rows, dynamic_athlete_rows = (
+            _fetch_dynamic_olympic_aggregate_rows(cat_id, cutoff_dt)
+        )
 
     # Section: Country medal table (discipline-specific)
     sec += 1
@@ -1600,7 +1648,7 @@ def _render_olympic_medal_sections(
 
     # Section: Country medal table (all Olympic disciplines)
     sec += 1
-    if not all_country_medals:
+    if not all_country_medals and not dynamic_country_rows:
         print(
             _format_section_title(
                 f"{sec}. Country medal table (all Olympic disciplines): none", args
@@ -1623,24 +1671,51 @@ def _render_olympic_medal_sections(
             }
 
         all_country_counts: dict[str, dict[str, int]] = {}
-        for m in all_country_medals:
-            disc = str(m.get("discipline") or "").upper()
-            is_relay_disc = disc in RELAY_DISCIPLINES
-            for medal_type in ("gold", "silver", "bronze"):
-                nat = m.get(medal_type, "")
+        if dynamic_country_rows:
+            for row in dynamic_country_rows:
+                nat = str(row.get("country") or "")
                 if not nat:
                     continue
-                if nat not in all_country_counts:
-                    all_country_counts[nat] = _init_country()
-                all_country_counts[nat][medal_type] += 1
-                suffix = "_relay" if is_relay_disc else "_ind"
-                all_country_counts[nat][medal_type + suffix] += 1
+                all_country_counts[nat] = {
+                    "gold": int(row.get("gold", 0)),
+                    "silver": int(row.get("silver", 0)),
+                    "bronze": int(row.get("bronze", 0)),
+                    "gold_ind": int(row.get("gold_ind", 0)),
+                    "silver_ind": int(row.get("silver_ind", 0)),
+                    "bronze_ind": int(row.get("bronze_ind", 0)),
+                    "gold_relay": int(row.get("gold_relay", 0)),
+                    "silver_relay": int(row.get("silver_relay", 0)),
+                    "bronze_relay": int(row.get("bronze_relay", 0)),
+                }
+        else:
+            for m in all_country_medals:
+                disc = str(m.get("discipline") or "").upper()
+                is_relay_disc = disc in RELAY_DISCIPLINES
+                for medal_type in ("gold", "silver", "bronze"):
+                    nat = m.get(medal_type, "")
+                    if not nat:
+                        continue
+                    if nat not in all_country_counts:
+                        all_country_counts[nat] = _init_country()
+                    all_country_counts[nat][medal_type] += 1
+                    suffix = "_relay" if is_relay_disc else "_ind"
+                    all_country_counts[nat][medal_type + suffix] += 1
 
-        sorted_all_countries = sorted(
-            all_country_counts.items(),
-            key=lambda x: (x[1]["gold"], x[1]["silver"], x[1]["bronze"]),
-            reverse=True,
-        )
+        if dynamic_country_rows:
+            sorted_all_countries = [
+                (
+                    str(row.get("country") or ""),
+                    all_country_counts[str(row.get("country") or "")],
+                )
+                for row in dynamic_country_rows
+                if str(row.get("country") or "") in all_country_counts
+            ]
+        else:
+            sorted_all_countries = sorted(
+                all_country_counts.items(),
+                key=lambda x: (x[1]["gold"], x[1]["silver"], x[1]["bronze"]),
+                reverse=True,
+            )
 
         print(
             _format_section_title(
@@ -1751,12 +1826,20 @@ def _render_olympic_medal_sections(
         )
 
     # Sort ALL medalists to get correct ranks, then filter display list
-    all_medalists = [
-        (key, stats)
-        for key, stats in all_athlete_stats.items()
-        if stats["gold"] > 0 or stats["silver"] > 0 or stats["bronze"] > 0
-    ]
-    all_medalists.sort(key=_medal_sort_key)
+    if dynamic_athlete_rows:
+        all_medalists = []
+        for stats in dynamic_athlete_rows:
+            key = str(stats.get("ibu_id") or "").strip()
+            if not key:
+                key = f"{str(stats.get('name') or '').strip()}|{str(stats.get('nat') or '').strip()}"
+            all_medalists.append((key, stats))
+    else:
+        all_medalists = [
+            (key, stats)
+            for key, stats in all_athlete_stats.items()
+            if stats["gold"] > 0 or stats["silver"] > 0 or stats["bronze"] > 0
+        ]
+        all_medalists.sort(key=_medal_sort_key)
     # Build ranked list: keep athletes with 2+ gold medals + race medalists
     medalists = [
         (rank, key, stats)
@@ -3598,6 +3681,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             cutoff_dt=target_start_dt,
             race_country_medals=race_country_medals,
             race_athlete_medals=race_athlete_medals,
+            use_dynamic_all_olympic_stats=True,
         )
 
     return 0

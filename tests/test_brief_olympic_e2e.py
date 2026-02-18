@@ -160,7 +160,10 @@ def test_brief_startlist_vs_postrace_olympic_medal_cutoff(monkeypatch, capsys):
     postrace_out = capsys.readouterr().out
 
     # Pre-race startlist output must exclude current-race medals.
-    assert "Country medal table (Women, all Olympic disciplines):" in startlist_out
+    assert (
+        "Country Olympic Games Medal Table - All Disciplines (all editions)"
+        in startlist_out
+    )
     assert "Italy\t1\t0\t0\t1" not in startlist_out
     assert "Lisa Vittozzi\tITA\tF\t1\t0\t0\t1" not in startlist_out
 

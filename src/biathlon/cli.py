@@ -750,9 +750,6 @@ def build_parser() -> argparse.ArgumentParser:
     brief_startlist.add_argument(
         "--race", default="", help="Race id (default: latest WC startlist)"
     )
-    brief_startlist.add_argument(
-        "--major", action="store_true", help="Use WC+WCH+OWG milestones"
-    )
     add_output_format_arg(brief_startlist)
     brief_startlist.set_defaults(func=handle_brief_startlist)
 
