@@ -27,10 +27,12 @@ from .athlete import (
 from .shooting import handle_shooting
 from .postrace import handle_post_race
 from .brief import (
-    handle_brief_event,
+    handle_brief_preevent,
+    handle_brief_postevent,
+    handle_brief_preseason,
+    handle_brief_postseason,
     handle_brief_startlist,
-    handle_brief_post_race,
-    handle_brief_season,
+    handle_brief_postrace,
 )
 from .form import handle_form
 
@@ -57,9 +59,11 @@ __all__ = [
     "handle_athlete_id",
     "handle_shooting",
     "handle_post_race",
-    "handle_brief_event",
-    "handle_brief_season",
+    "handle_brief_preevent",
+    "handle_brief_postevent",
+    "handle_brief_preseason",
+    "handle_brief_postseason",
     "handle_brief_startlist",
-    "handle_brief_post_race",
+    "handle_brief_postrace",
     "handle_form",
 ]

@@ -14,9 +14,11 @@ from .commands import (
     handle_athlete_id,
     handle_athlete_info,
     handle_athlete_results,
-    handle_brief_event,
-    handle_brief_post_race,
-    handle_brief_season,
+    handle_brief_preevent,
+    handle_brief_postevent,
+    handle_brief_preseason,
+    handle_brief_postseason,
+    handle_brief_postrace,
     handle_brief_startlist,
     handle_ceremony,
     handle_cumulate_results,
@@ -683,7 +685,7 @@ def build_parser() -> argparse.ArgumentParser:
     # --- brief ---
     brief_parser = subparsers.add_parser(
         "brief",
-        help="Race analysis (event, season, startlist, postrace)",
+        help="Race analysis (preevent, postevent, preseason, postseason, startlist, postrace)",
         formatter_class=CompactOptionalFormatter,
         add_help=False,
     )
@@ -704,40 +706,73 @@ def build_parser() -> argparse.ArgumentParser:
         dest="brief_command", title="subcommands", metavar=""
     )
 
-    # brief event
-    brief_event = brief_sub.add_parser(
-        "event",
+    # brief preevent
+    brief_preevent = brief_sub.add_parser(
+        "preevent",
         help="Venue history and records (before an event)",
         formatter_class=CompactOptionalFormatter,
         add_help=False,
     )
-    brief_help["event"] = "Venue history and records (before an event)"
-    brief_event.add_argument(
+    brief_help["preevent"] = "Venue history and records (before an event)"
+    brief_preevent.add_argument(
         "--event", default="", help="Event id (default: current/upcoming WC event)"
     )
-    brief_event.add_argument(
+    brief_preevent.add_argument(
         "--men", action="store_true", help="Show men (default: women)"
     )
-    brief_event.add_argument(
+    brief_preevent.add_argument(
         "--major", action="store_true", help="Use WC+WCH+OWG stats"
     )
-    add_output_format_arg(brief_event)
-    brief_event.set_defaults(func=handle_brief_event)
+    add_output_format_arg(brief_preevent)
+    brief_preevent.set_defaults(func=handle_brief_preevent)
 
-    # brief season
-    brief_season = brief_sub.add_parser(
-        "season",
+    # brief postevent
+    brief_postevent = brief_sub.add_parser(
+        "postevent",
+        help="Post-event recap (after an event weekend)",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
+    brief_help["postevent"] = "Post-event recap (after an event weekend) [WIP]"
+    brief_postevent.add_argument(
+        "--event", default="", help="Event id (default: last completed WC event)"
+    )
+    add_output_format_arg(brief_postevent)
+    brief_postevent.set_defaults(func=handle_brief_postevent)
+
+    # brief preseason
+    brief_preseason = brief_sub.add_parser(
+        "preseason",
+        help="Season preview (before the season starts)",
+        formatter_class=CompactOptionalFormatter,
+        add_help=False,
+    )
+    brief_help["preseason"] = "Season preview (before the season starts) [WIP]"
+    brief_preseason.add_argument(
+        "--season", default="", help="Season id (default: current season)"
+    )
+    brief_preseason.add_argument(
+        "--level", default="1", help="Event level (default: 1)"
+    )
+    add_output_format_arg(brief_preseason)
+    brief_preseason.set_defaults(func=handle_brief_preseason)
+
+    # brief postseason
+    brief_postseason = brief_sub.add_parser(
+        "postseason",
         help="Season summary",
         formatter_class=CompactOptionalFormatter,
         add_help=False,
     )
-    brief_help["season"] = "Season summary (events and race counts)"
-    brief_season.add_argument(
+    brief_help["postseason"] = "Season summary (events and race counts)"
+    brief_postseason.add_argument(
         "--season", default="", help="Season id (default: current season)"
     )
-    brief_season.add_argument("--level", default="1", help="Event level (default: 1)")
-    add_output_format_arg(brief_season)
-    brief_season.set_defaults(func=handle_brief_season)
+    brief_postseason.add_argument(
+        "--level", default="1", help="Event level (default: 1)"
+    )
+    add_output_format_arg(brief_postseason)
+    brief_postseason.set_defaults(func=handle_brief_postseason)
 
     # brief startlist
     brief_startlist = brief_sub.add_parser(
@@ -754,21 +789,21 @@ def build_parser() -> argparse.ArgumentParser:
     brief_startlist.set_defaults(func=handle_brief_startlist)
 
     # brief postrace
-    brief_post_race = brief_sub.add_parser(
+    brief_postrace = brief_sub.add_parser(
         "postrace",
         help="Post-race analysis (after a race)",
         formatter_class=CompactOptionalFormatter,
         add_help=False,
     )
     brief_help["postrace"] = "Post-race analysis (after a race)"
-    brief_post_race.add_argument(
+    brief_postrace.add_argument(
         "--race", default="", help="Race id (default: latest completed race)"
     )
-    brief_post_race.add_argument(
+    brief_postrace.add_argument(
         "--major", action="store_true", help="Use WC+WCH+OWG milestones"
     )
-    add_output_format_arg(brief_post_race)
-    brief_post_race.set_defaults(func=handle_brief_post_race)
+    add_output_format_arg(brief_postrace)
+    brief_postrace.set_defaults(func=handle_brief_postrace)
 
     # --- form ---
     form_parser = subparsers.add_parser(

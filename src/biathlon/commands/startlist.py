@@ -4317,7 +4317,7 @@ def render_venue_history(
     Args:
         ctx: Context dict with venue/race info
         args: Command arguments
-        section_offset: Starting section number offset (default 13 for startlist, 0 for brief event)
+        section_offset: Starting section number offset (default 13 for startlist, 0 for brief preevent)
     """
     race_id = ctx["race_id"]
     age_cache = ctx["age_cache"]

@@ -389,7 +389,7 @@ def _render_venue_history_table(
     print()
 
 
-def handle_brief_event(args: argparse.Namespace) -> int:
+def handle_brief_preevent(args: argparse.Namespace) -> int:
     """Display event schedule and venue history (before an event).
 
     Shows event facts, schedule for both genders, and all-time venue/event history.
@@ -716,7 +716,7 @@ def handle_brief_event(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_brief_season(args: argparse.Namespace) -> int:
+def handle_brief_postseason(args: argparse.Namespace) -> int:
     """Display a season summary (events and race breakdown)."""
     season_id = (getattr(args, "season", "") or "").strip() or get_current_season_id()
     level_raw = getattr(args, "level", "1")
@@ -1189,7 +1189,19 @@ def handle_brief_startlist(args: argparse.Namespace) -> int:
     return 0
 
 
-def handle_brief_post_race(args: argparse.Namespace) -> int:
+def handle_brief_postevent(args: argparse.Namespace) -> int:
+    """Post-event recap (after an event weekend). Work in progress."""
+    print("brief postevent: work in progress", file=sys.stderr)
+    return 1
+
+
+def handle_brief_preseason(args: argparse.Namespace) -> int:
+    """Season preview (before the season starts). Work in progress."""
+    print("brief preseason: work in progress", file=sys.stderr)
+    return 1
+
+
+def handle_brief_postrace(args: argparse.Namespace) -> int:
     """Display post-race analysis (after a race).
 
     Delegates to the existing postrace handler.

@@ -176,8 +176,10 @@ biathlon form --nat FRA,NOR
 Season, event and race briefs (venue history, startlist analysis, post-race recap):
 
 ```bash
-biathlon brief season
-biathlon brief event
+biathlon brief preseason
+biathlon brief postseason
+biathlon brief preevent
+biathlon brief postevent
 biathlon brief startlist
 biathlon brief postrace
 ```
