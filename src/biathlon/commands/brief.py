@@ -26,6 +26,7 @@ from ..constants import (
     EVENT_TYPE_OWG,
     EVENT_TYPE_WC,
     EVENT_TYPE_WCH,
+    RELAY_DISCIPLINES,
 )
 from ..formatting import (
     is_pretty_output,
@@ -38,6 +39,9 @@ from ..utils import format_race_header, parse_date, parse_start_datetime
 from .events import compute_event_styles, format_level
 
 from ._common import (
+    DISCIPLINE_LEADER_MARKER,
+    GENERAL_LEADER_MARKER,
+    _format_leader_markers,
     _format_section_title,
     _has_completed_relay_results,
     _max_workers,
@@ -55,12 +59,22 @@ from .postrace import (
     _result_discipline_id,
     _start_dt_from_competition,
 )
-from .results import _get_wc_rows, _has_completed_results
+from .results import _has_completed_results
+from .standings import (
+    ATHLETE_STANDINGS_COLUMN_SEPARATORS,
+    ATHLETE_STANDINGS_HEADERS,
+    _age_on_date,
+    _extract_age_text,
+    _extract_birth_date,
+    _prefetch_bios,
+)
 from .startlist import (
     _build_startlist_entries,
     _build_team_entries,
+    _country_display,
     _extract_venue_name,
     _find_all_startlist_races,
+    _get_wc_points,
     _is_true,
     _prepare_startlist_context,
     render_startlist_analysis,
@@ -68,7 +82,7 @@ from .startlist import (
 
 
 def _find_current_event() -> dict | None:
-    """Find the current or next upcoming World Cup event.
+    """Find the current or next upcoming level-1 event.
 
     Returns the event dict or None if no suitable event found.
     """
@@ -149,13 +163,13 @@ def _find_first_race_for_event(
         return None
 
 
-def _format_local_time(start_raw: str) -> tuple[str, str]:
-    """Convert an ISO datetime string to local date and time.
+def _format_local_time(start_raw: str) -> tuple[str, str, str, str]:
+    """Convert an ISO datetime string to local date/day/time/timezone.
 
-    Returns (date_str, time_str) in local timezone.
+    Returns (date_str, day_str, time_str, tz_str) in local timezone.
     """
     if not isinstance(start_raw, str) or not start_raw:
-        return "", ""
+        return "", "", "", ""
 
     try:
         # Handle Z suffix for UTC
@@ -166,13 +180,20 @@ def _format_local_time(start_raw: str) -> tuple[str, str]:
             dt = dt.replace(tzinfo=datetime.timezone.utc)
         # Convert to local timezone
         local_dt = dt.astimezone()
-        return local_dt.strftime("%Y-%m-%d"), local_dt.strftime("%H:%M")
+        tz_name = local_dt.tzname() or local_dt.strftime("%z") or ""
+        return (
+            local_dt.strftime("%Y-%m-%d"),
+            local_dt.strftime("%a"),
+            local_dt.strftime("%H:%M"),
+            tz_name,
+        )
     except ValueError:
         # Fallback: just extract date part
         if "T" in start_raw:
             date_part, time_part = start_raw.split("T", 1)
-            return date_part, time_part[:5]
-        return start_raw.split(" ", 1)[0], ""
+            tz_guess = "UTC" if time_part.endswith("Z") else ""
+            return date_part, "", time_part[:5], tz_guess
+        return start_raw.split(" ", 1)[0], "", "", ""
 
 
 def _resolve_race_start_datetime(
@@ -406,329 +427,1249 @@ def _render_venue_history_table(
     print()
 
 
-def handle_brief_preevent(args: argparse.Namespace) -> int:
-    """Display event schedule and venue history (before an event).
+PREEVENT_CATEGORY_CODES = ("WC", "WCH", "OWG")
 
-    Shows event facts, schedule for both genders, and all-time venue/event history.
-    """
-    # Get event - either from --event flag or auto-detect
-    current_event: dict | None = None
-    if getattr(args, "event", ""):
-        event_id = args.event
-        # Try to find the event data by searching current season events
-        season_id = get_current_season_id()
+PREEVENT_SECTION_EVENT_AGENDA = "event_agenda"
+PREEVENT_SECTION_ATHLETE_STANDINGS = "athlete_standings"
+PREEVENT_SECTION_RELAY_STANDINGS = "relay_standings"
+PREEVENT_SECTION_NATIONS_CUP = "nations_cup_standings"
+
+PREEVENT_SECTION_ORDER = [
+    PREEVENT_SECTION_EVENT_AGENDA,
+    PREEVENT_SECTION_ATHLETE_STANDINGS,
+    PREEVENT_SECTION_RELAY_STANDINGS,
+    PREEVENT_SECTION_NATIONS_CUP,
+]
+
+PREEVENT_SECTION_TITLES = {
+    PREEVENT_SECTION_EVENT_AGENDA: "Event Agenda",
+    PREEVENT_SECTION_ATHLETE_STANDINGS: "Athlete Standings",
+    PREEVENT_SECTION_RELAY_STANDINGS: "Relay Standings",
+    PREEVENT_SECTION_NATIONS_CUP: "Nations Cup Standings",
+}
+
+
+def _preevent_matrix_row(wc: bool, wch: bool, owg: bool) -> dict[str, bool]:
+    return {"WC": bool(wc), "WCH": bool(wch), "OWG": bool(owg)}
+
+
+PREEVENT_SECTION_MATRIX = {
+    PREEVENT_SECTION_EVENT_AGENDA: _preevent_matrix_row(True, True, True),
+    PREEVENT_SECTION_ATHLETE_STANDINGS: _preevent_matrix_row(True, True, True),
+    PREEVENT_SECTION_RELAY_STANDINGS: _preevent_matrix_row(True, True, True),
+    PREEVENT_SECTION_NATIONS_CUP: _preevent_matrix_row(True, True, True),
+}
+
+
+def _validate_preevent_section_matrix() -> None:
+    expected_sections = set(PREEVENT_SECTION_ORDER)
+    if set(PREEVENT_SECTION_TITLES) != expected_sections:
+        raise ValueError("preevent section titles do not match section order")
+    if set(PREEVENT_SECTION_MATRIX) != expected_sections:
+        raise ValueError("preevent section matrix does not match section order")
+    for section_id in PREEVENT_SECTION_ORDER:
+        row = PREEVENT_SECTION_MATRIX[section_id]
+        if set(row) != set(PREEVENT_CATEGORY_CODES):
+            raise ValueError(
+                f"preevent matrix categories mismatch for section {section_id}"
+            )
+
+
+_validate_preevent_section_matrix()
+
+
+def _preevent_category_code(event_type: str) -> str:
+    if event_type == EVENT_TYPE_WCH:
+        return "WCH"
+    if event_type == EVENT_TYPE_OWG:
+        return "OWG"
+    return "WC"
+
+
+def _preevent_section_enabled(section_id: str, category_code: str) -> bool:
+    row = PREEVENT_SECTION_MATRIX.get(section_id, {})
+    return bool(row.get(category_code, False))
+
+
+def _preevent_heading(level: int, text: str, args: argparse.Namespace) -> str:
+    marks = "#" * max(1, int(level))
+    return _format_section_title(f"{marks} {str(text).strip()}", args)
+
+
+def _normalize_race_discipline_for_sequence(value: object) -> str:
+    disc = str(value or "").strip().upper()
+    return "IN" if disc == "SI" else disc
+
+
+def _build_season_race_sequence_maps(
+    season_id: str,
+    event_type: str,
+    level: int = 1,
+    include_event_id: str = "",
+) -> tuple[dict[tuple[str, str], str], dict[tuple[str, str], str]]:
+    event_ids: list[str] = []
+    seen_event_ids: set[str] = set()
+    try:
+        events = get_events(season_id, level=level)
+    except BiathlonError:
+        events = []
+    for event in events:
+        if detect_event_type(event) != event_type:
+            continue
+        event_id = str(event.get("EventId") or "").strip()
+        if not event_id or event_id in seen_event_ids:
+            continue
+        seen_event_ids.add(event_id)
+        event_ids.append(event_id)
+
+    include_id = str(include_event_id or "").strip()
+    if include_id and include_id not in seen_event_ids:
+        event_ids.append(include_id)
+
+    grouped_by_disc: dict[
+        tuple[str, str], list[tuple[datetime.datetime | None, str]]
+    ] = {}
+    grouped_full: dict[tuple[str, str], list[tuple[datetime.datetime | None, str]]] = {}
+    for event_id in event_ids:
+        try:
+            races = get_races(event_id)
+        except BiathlonError:
+            continue
+        for race in races:
+            race_cat = str(race.get("catId") or race.get("CatId") or "").strip().upper()
+            if race_cat not in {"SW", "SM", "MX"}:
+                continue
+            race_disc = _normalize_race_discipline_for_sequence(
+                race.get("DisciplineId")
+            )
+            if not race_disc:
+                continue
+            race_id = str(race.get("RaceId") or race.get("Id") or "").strip()
+            if not race_id:
+                continue
+            start_raw = str(race.get("StartTime") or race.get("StartDate") or "")
+            start_dt = parse_start_datetime(start_raw)
+            grouped_by_disc.setdefault((race_cat, race_disc), []).append(
+                (start_dt, race_id)
+            )
+
+            if race_cat in {"SW", "SM"} and race_disc in {"SP", "PU", "IN", "MS"}:
+                grouped_full.setdefault((race_cat, "IND"), []).append(
+                    (start_dt, race_id)
+                )
+
+            if race_disc in RELAY_DISCIPLINES:
+                if race_cat in {"SW", "SM"}:
+                    grouped_full.setdefault((race_cat, "TEAM"), []).append(
+                        (start_dt, race_id)
+                    )
+                elif race_cat == "MX":
+                    grouped_full.setdefault(("SW", "TEAM"), []).append(
+                        (start_dt, race_id)
+                    )
+                    grouped_full.setdefault(("SM", "TEAM"), []).append(
+                        (start_dt, race_id)
+                    )
+                    grouped_full.setdefault(("MX", "TEAM"), []).append(
+                        (start_dt, race_id)
+                    )
+
+    fallback_dt = datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)
+    seq_by_race_id_disc: dict[tuple[str, str], str] = {}
+    for (race_cat, _race_disc), entries in grouped_by_disc.items():
+        entries.sort(
+            key=lambda item: (item[0] is None, item[0] or fallback_dt, item[1])
+        )
+        total = len(entries)
+        for idx, (_start_dt, race_id) in enumerate(entries, start=1):
+            seq_by_race_id_disc[(race_cat, race_id)] = f"{idx}/{total}"
+
+    seq_by_race_id_full: dict[tuple[str, str], str] = {}
+    for (race_cat, _bucket), entries in grouped_full.items():
+        entries.sort(
+            key=lambda item: (item[0] is None, item[0] or fallback_dt, item[1])
+        )
+        total = len(entries)
+        for idx, (_start_dt, race_id) in enumerate(entries, start=1):
+            seq_by_race_id_full[(race_cat, race_id)] = f"{idx}/{total}"
+
+    return seq_by_race_id_disc, seq_by_race_id_full
+
+
+def _season_id_from_event_id(event_id: str) -> str:
+    text = str(event_id or "").strip().upper()
+    if len(text) >= 6 and text.startswith("BT") and text[2:6].isdigit():
+        return text[2:6]
+    return ""
+
+
+def _find_event_by_id(event_id: str) -> dict | None:
+    event_key = str(event_id or "").strip()
+    if not event_key:
+        return None
+    season_candidates: list[str] = []
+    parsed_season = _season_id_from_event_id(event_key)
+    if parsed_season:
+        season_candidates.append(parsed_season)
+    current_season = get_current_season_id()
+    if current_season not in season_candidates:
+        season_candidates.append(current_season)
+
+    for season_id in season_candidates:
         for level in (1, 2, 3, 4, 5, 6):
-            events = get_events(season_id, level)
-            for ev in events:
-                if ev.get("EventId") == event_id:
-                    current_event = ev
-                    break
-            if current_event:
-                break
-        # Try to find a race to get venue info (try women first, then men)
-        result = _find_first_race_for_event(event_id, "SW")
-        if not result:
-            result = _find_first_race_for_event(event_id, "SM")
-        if not result:
-            print(f"No races found for event {event_id}", file=sys.stderr)
-            return 1
-        race_id, payload = result
+            try:
+                events = get_events(season_id, level)
+            except BiathlonError:
+                continue
+            for event in events:
+                if str(event.get("EventId") or "").strip() == event_key:
+                    found = dict(event)
+                    found.setdefault("Level", level)
+                    return found
+    return None
+
+
+def _first_event_race_with_start(
+    races: list[dict],
+) -> tuple[str, datetime.datetime] | None:
+    candidates: list[tuple[datetime.datetime, str]] = []
+    for race in races:
+        race_id = str(race.get("RaceId") or race.get("Id") or "")
+        if not race_id:
+            continue
+        race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
+        if race_cat not in {"SW", "SM", "MX"}:
+            continue
+        start_raw = str(race.get("StartTime") or race.get("StartDate") or "")
+        start_dt = parse_start_datetime(start_raw)
+        if start_dt is None:
+            continue
+        candidates.append((start_dt, race_id))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (item[0], item[1]))
+    start_dt, race_id = candidates[0]
+    return race_id, start_dt
+
+
+def _rows_from_athlete_points(
+    points_by_id: dict[str, int],
+    athlete_info: dict[str, tuple[str, str]],
+    limit: int | None = None,
+) -> list[dict]:
+    ranked = sorted(points_by_id.items(), key=lambda item: (-item[1], item[0]))
+    if isinstance(limit, int) and limit > 0:
+        ranked = ranked[:limit]
+    rows: list[dict] = []
+    for idx, (ibu_id, points) in enumerate(ranked, start=1):
+        name, nat = athlete_info.get(ibu_id, ("", ""))
+        rows.append(
+            {
+                "Rank": idx,
+                "Name": name,
+                "Nat": nat,
+                "IBUId": ibu_id,
+                "Score": points,
+            }
+        )
+    return rows
+
+
+def _format_score_value(score: float) -> str:
+    if float(score).is_integer():
+        return str(int(score))
+    return f"{score:.1f}"
+
+
+def _parse_points_value(value: object) -> float:
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return 0.0
+    try:
+        return float(text.replace(",", ""))
+    except ValueError:
+        return 0.0
+
+
+def _rows_from_country_points(
+    points_by_nat: dict[str, float],
+    names_by_nat: dict[str, str] | None,
+    limit: int,
+) -> list[dict]:
+    ranked = sorted(points_by_nat.items(), key=lambda item: (-item[1], item[0]))
+    rows: list[dict] = []
+    for idx, (nat, points) in enumerate(ranked[:limit], start=1):
+        display = ""
+        if names_by_nat:
+            display = str(names_by_nat.get(nat) or "")
+        if not display:
+            display = _country_display(nat) or nat
+        rows.append(
+            {
+                "Rank": idx,
+                "Name": display,
+                "Nat": nat,
+                "Score": _format_score_value(points),
+            }
+        )
+    return rows
+
+
+def _combine_country_rows(
+    row_groups: list[list[dict]],
+    limit: int = 10,
+    one_decimal: bool = False,
+) -> list[dict]:
+    totals_by_nat: dict[str, float] = {}
+    names_by_nat: dict[str, str] = {}
+    for rows in row_groups:
+        for row in rows:
+            nat = str(row.get("Nat") or "").strip().upper()
+            if not nat:
+                continue
+            totals_by_nat[nat] = totals_by_nat.get(nat, 0.0) + _parse_points_value(
+                row.get("Score")
+                if row.get("Score") not in (None, "")
+                else row.get("Points")
+            )
+            if nat not in names_by_nat:
+                team_name = _normalize_team_name(row)
+                if team_name:
+                    names_by_nat[nat] = team_name
+
+    rows = _rows_from_country_points(totals_by_nat, names_by_nat, limit)
+    if one_decimal:
+        for row in rows:
+            row["Score"] = _format_nations_points(
+                row.get("Score") or row.get("Points") or "0"
+            )
+    return rows
+
+
+def _resolve_event_type_and_venue(
+    current_event: dict | None, first_race_id: str
+) -> tuple[str, str]:
+    event_type = detect_event_type(current_event or {})
+    venue_name = str(
+        (current_event or {}).get("Organizer")
+        or (current_event or {}).get("ShortDescription")
+        or ""
+    ).strip()
+
+    payload: dict = {}
+    try:
+        payload = get_race_results(first_race_id)
+    except BiathlonError:
+        payload = {}
+
+    if not current_event and payload:
+        event_type = detect_event_type(payload.get("SportEvt") or {})
+
+    if not venue_name:
+        venue_name = _extract_venue_name(payload) if payload else ""
+
+    if not venue_name:
+        venue_name = "Unknown venue"
+    return event_type, venue_name
+
+
+def _compute_preevent_snapshot_standings(
+    season_id: str,
+    target_race_id: str,
+    cutoff_dt: datetime.datetime,
+    limit: int = 10,
+) -> dict[str, dict]:
+    athlete_total: dict[str, dict[str, int]] = {"SW": {}, "SM": {}}
+    athlete_disc: dict[str, dict[str, dict[str, int]]] = {
+        "SW": {"SP": {}, "PU": {}, "IN": {}, "MS": {}},
+        "SM": {"SP": {}, "PU": {}, "IN": {}, "MS": {}},
+    }
+    athlete_info: dict[str, dict[str, tuple[str, str]]] = {"SW": {}, "SM": {}}
+
+    relay_points: dict[str, dict[str, float]] = {"SW": {}, "SM": {}, "MX": {}}
+    relay_names: dict[str, dict[str, str]] = {"SW": {}, "SM": {}, "MX": {}}
+    nations_points: dict[str, dict[str, float]] = {"SW": {}, "SM": {}}
+
+    try:
+        events = get_events(season_id, level=1)
+    except BiathlonError:
+        events = []
+
+    race_meta_by_id: dict[str, tuple[str, str]] = {}
+    for event in events:
+        if detect_event_type(event) != EVENT_TYPE_WC:
+            continue
+        event_id = str(event.get("EventId") or "")
+        if not event_id:
+            continue
+        try:
+            races = get_races(event_id)
+        except BiathlonError:
+            continue
+        for race in races:
+            race_id = str(race.get("RaceId") or race.get("Id") or "")
+            if not race_id or race_id == target_race_id:
+                continue
+            race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
+            race_disc = str(race.get("DisciplineId") or "").upper()
+            if race_cat not in {"SW", "SM", "MX"}:
+                continue
+            start_dt = parse_start_datetime(
+                str(race.get("StartTime") or race.get("StartDate") or "")
+            )
+            if start_dt is None or start_dt >= cutoff_dt:
+                continue
+            if (
+                race_disc not in {"SP", "PU", "IN", "MS", "SI"}
+                and race_disc not in RELAY_DISCIPLINES
+            ):
+                continue
+            race_meta_by_id[race_id] = (race_cat, race_disc)
+
+    if race_meta_by_id:
+        with ThreadPoolExecutor(
+            max_workers=_max_workers(len(race_meta_by_id))
+        ) as executor:
+            futures = {
+                executor.submit(get_race_results, race_id): race_id
+                for race_id in race_meta_by_id
+            }
+            for future in as_completed(futures):
+                race_id = futures[future]
+                race_cat, race_disc = race_meta_by_id[race_id]
+                try:
+                    payload = future.result()
+                except BiathlonError:
+                    continue
+
+                is_relay_race = race_disc in RELAY_DISCIPLINES
+                if is_relay_race:
+                    if not _has_completed_relay_results(payload):
+                        continue
+                elif not _has_completed_results(payload):
+                    continue
+
+                for res in payload.get("Results") or []:
+                    if is_relay_race and not res.get("IsTeam"):
+                        continue
+                    if not is_relay_race and res.get("IsTeam"):
+                        continue
+
+                    rank_val = _parse_rank(
+                        res.get("Rank") or res.get("SO") or res.get("ResultOrder")
+                    )
+                    if rank_val is None:
+                        continue
+
+                    points = _get_wc_points(rank_val, mass_start=race_disc == "MS")
+                    if points <= 0:
+                        continue
+
+                    nat = str(res.get("Nat") or "").upper()
+                    if not nat:
+                        continue
+
+                    if not is_relay_race and race_cat in {"SW", "SM"}:
+                        ibu_id = _row_ibu_id(res)
+                        if ibu_id:
+                            athlete_total[race_cat][ibu_id] = (
+                                athlete_total[race_cat].get(ibu_id, 0) + points
+                            )
+                            disc_key = "IN" if race_disc == "SI" else race_disc
+                            if disc_key in athlete_disc[race_cat]:
+                                athlete_disc[race_cat][disc_key][ibu_id] = (
+                                    athlete_disc[race_cat][disc_key].get(ibu_id, 0)
+                                    + points
+                                )
+                            if ibu_id not in athlete_info[race_cat]:
+                                athlete_info[race_cat][ibu_id] = (
+                                    str(res.get("Name") or res.get("ShortName") or ""),
+                                    nat,
+                                )
+
+                    if is_relay_race and race_cat in {"SW", "SM", "MX"}:
+                        relay_points[race_cat][nat] = relay_points[race_cat].get(
+                            nat, 0.0
+                        ) + float(points)
+                        relay_names[race_cat].setdefault(
+                            nat,
+                            str(
+                                res.get("Name")
+                                or res.get("ShortName")
+                                or _country_display(nat)
+                                or nat
+                            ),
+                        )
+
+                    if race_cat in {"SW", "SM"}:
+                        nations_points[race_cat][nat] = nations_points[race_cat].get(
+                            nat, 0.0
+                        ) + float(points)
+                    elif race_cat == "MX":
+                        nations_points["SW"][nat] = (
+                            nations_points["SW"].get(nat, 0.0) + float(points) / 2.0
+                        )
+                        nations_points["SM"][nat] = (
+                            nations_points["SM"].get(nat, 0.0) + float(points) / 2.0
+                        )
+
+    athlete_rows: dict[str, dict[str, list[dict]]] = {"SW": {}, "SM": {}}
+    for cat in ("SW", "SM"):
+        athlete_rows[cat]["TS"] = _rows_from_athlete_points(
+            athlete_total[cat], athlete_info[cat]
+        )
+        for disc in ("SP", "PU", "IN", "MS"):
+            athlete_rows[cat][disc] = _rows_from_athlete_points(
+                athlete_disc[cat][disc], athlete_info[cat]
+            )
+
+    relay_all_points: dict[str, float] = {}
+    relay_all_names: dict[str, str] = {}
+    for cat in ("SW", "SM", "MX"):
+        for nat, points in relay_points[cat].items():
+            relay_all_points[nat] = relay_all_points.get(nat, 0.0) + points
+        for nat, name in relay_names[cat].items():
+            if nat not in relay_all_names and name:
+                relay_all_names[nat] = name
+
+    nations_all_points: dict[str, float] = {}
+    for cat in ("SW", "SM"):
+        for nat, points in nations_points[cat].items():
+            nations_all_points[nat] = nations_all_points.get(nat, 0.0) + points
+
+    relay_rows = {
+        cat: _rows_from_country_points(relay_points[cat], relay_names[cat], limit)
+        for cat in ("SW", "SM", "MX")
+    }
+    relay_rows["ALL"] = _rows_from_country_points(
+        relay_all_points, relay_all_names, limit
+    )
+
+    nations_rows = {
+        cat: _rows_from_country_points(nations_points[cat], None, limit)
+        for cat in ("SW", "SM")
+    }
+    nations_rows["ALL"] = _rows_from_country_points(nations_all_points, None, limit)
+
+    return {
+        "athlete": athlete_rows,
+        "relay": relay_rows,
+        "nations": nations_rows,
+    }
+
+
+def _find_level1_cup_id(season_id: str, cat_id: str, discipline_id: str) -> str:
+    target_cat = str(cat_id or "").upper()
+    target_disc = str(discipline_id or "").upper()
+    if target_disc == "SI":
+        target_disc = "IN"
+    try:
+        cups = get_cups(season_id)
+    except BiathlonError:
+        return ""
+    for cup in cups:
+        if int(cup.get("Level") or 0) != 1:
+            continue
+        if str(cup.get("CatId") or "").upper() != target_cat:
+            continue
+        if str(cup.get("DisciplineId") or "").upper() != target_disc:
+            continue
+        cup_id = str(cup.get("CupId") or "")
+        if cup_id:
+            return cup_id
+    return ""
+
+
+def _fetch_cup_rows(cup_id: str) -> list[dict]:
+    if not cup_id:
+        return []
+    try:
+        payload = get_cup_results(cup_id)
+    except BiathlonError:
+        return []
+    return payload.get("Rows") or payload.get("Results") or []
+
+
+def _fetch_live_athlete_cup_rows(season_id: str) -> dict[str, dict[str, list[dict]]]:
+    athlete_rows: dict[str, dict[str, list[dict]]] = {"SW": {}, "SM": {}}
+    for cat_id in ("SW", "SM"):
+        athlete_rows[cat_id]["TS"] = _fetch_cup_rows(
+            _find_level1_cup_id(season_id, cat_id, "TS")
+        )
+        for disc in ("SP", "PU", "IN", "MS"):
+            athlete_rows[cat_id][disc] = _fetch_cup_rows(
+                _find_level1_cup_id(season_id, cat_id, disc)
+            )
+    return athlete_rows
+
+
+def _render_ranked_table(
+    title: str,
+    rows: list[dict],
+    args: argparse.Namespace,
+    name_header: str,
+) -> None:
+    print(_preevent_heading(3, title, args))
+    if not rows:
+        print("none")
+        print()
+        return
+
+    table_rows = []
+    for idx, row in enumerate(rows):
+        rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(".")
+        name = str(row.get("Name") or row.get("ShortName") or "")
+        nat = str(row.get("Nat") or "")
+        points = str(row.get("Score") or row.get("Points") or "0")
+        table_rows.append([rank, name, nat, points])
+
+    render_table(
+        ["Rank", name_header, "Nat", "Points"],
+        table_rows,
+        output_format=get_output_format(args),
+        alignments=["right", "left", "left", "right"],
+        column_separators={3},
+    )
+    print()
+
+
+def _relay_display_cells(row: dict | None, idx: int) -> list[str]:
+    if not row:
+        return ["-", "-", "-"]
+    rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(".")
+    name = _normalize_team_name(row)
+    points = str(row.get("Score") or row.get("Points") or "0")
+    return [rank, name, points]
+
+
+def _render_relay_tables(
+    relay_rows: dict[str, list[dict]],
+    args: argparse.Namespace,
+) -> None:
+    women_rows = relay_rows.get("SW", [])
+    men_rows = relay_rows.get("SM", [])
+    mixed_rows = relay_rows.get("MX", [])
+    all_rows = relay_rows.get("ALL", [])
+    if not all_rows:
+        all_rows = _combine_country_rows([women_rows, men_rows, mixed_rows], limit=10)
+
+    if not any((women_rows, men_rows, mixed_rows, all_rows)):
+        print("none")
+        print()
+        return
+
+    if not is_pretty_output(args):
+        for title, rows in (
+            ("Women Relay", women_rows),
+            ("Men Relay", men_rows),
+            ("Mixed Relay", mixed_rows),
+            ("All Relay (unofficial)", all_rows),
+        ):
+            print(_preevent_heading(3, title, args))
+            if not rows:
+                print("none")
+                print()
+                continue
+            table_rows = []
+            for idx, row in enumerate(rows):
+                rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(
+                    "."
+                )
+                name = _normalize_team_name(row)
+                points = str(row.get("Score") or row.get("Points") or "0")
+                table_rows.append([rank, name, points])
+            render_table(
+                ["Rank", "Team", "Points"],
+                table_rows,
+                output_format=get_output_format(args),
+                alignments=["right", "left", "right"],
+                column_separators={2},
+            )
+            print()
+        return
+
+    max_rows = max(len(women_rows), len(men_rows), len(mixed_rows), len(all_rows))
+    combined_rows: list[list[str]] = []
+    for idx in range(max_rows):
+        combined_rows.append(
+            _relay_display_cells(
+                women_rows[idx] if idx < len(women_rows) else None, idx
+            )
+            + _relay_display_cells(men_rows[idx] if idx < len(men_rows) else None, idx)
+            + _relay_display_cells(
+                mixed_rows[idx] if idx < len(mixed_rows) else None, idx
+            )
+            + _relay_display_cells(all_rows[idx] if idx < len(all_rows) else None, idx)
+        )
+
+    render_table(
+        [
+            "Rank",
+            "Team",
+            "Points",
+            "Rank",
+            "Team",
+            "Points",
+            "Rank",
+            "Team",
+            "Points",
+            "Rank",
+            "Team          ",
+            "Points",
+        ],
+        combined_rows,
+        output_format=get_output_format(args),
+        alignments=[
+            "right",
+            "left",
+            "right",
+            "right",
+            "left",
+            "right",
+            "right",
+            "left",
+            "right",
+            "right",
+            "left",
+            "right",
+        ],
+        column_separators={3, 6, 9},
+        group_headers=[
+            (0, 3, "Women Relay"),
+            (3, 6, "Men Relay"),
+            (6, 9, "Mixed Relay"),
+            (9, 12, "All Relay (unofficial)"),
+        ],
+    )
+    print()
+
+
+def _capitalize_country_name(text: str) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    if len(value) <= 3 and value.isalpha():
+        return value.upper()
+    if value.isupper():
+        return value.title()
+    return value
+
+
+def _normalize_team_name(row: dict | None) -> str:
+    if not isinstance(row, dict):
+        return ""
+    nat = str(row.get("Nat") or "").strip().upper()
+    if nat:
+        mapped = _country_display(nat)
+        if mapped:
+            return mapped
+    raw = str(row.get("Name") or row.get("ShortName") or "")
+    return _capitalize_country_name(raw)
+
+
+def _format_nations_points(value: object) -> str:
+    text = str(value if value is not None else "").strip()
+    if not text:
+        return "0.0"
+    try:
+        number = float(text.replace(",", ""))
+    except ValueError:
+        return text
+    return f"{number:.1f}"
+
+
+def _all_rows_have_integer_points(rows: list[dict]) -> bool:
+    if not rows:
+        return False
+    for row in rows:
+        raw = row.get("Score")
+        if raw in (None, ""):
+            raw = row.get("Points")
+        text = str(raw if raw is not None else "").strip()
+        if not text:
+            return False
+        try:
+            number = float(text.replace(",", ""))
+        except ValueError:
+            return False
+        if not number.is_integer():
+            return False
+    return True
+
+
+def _strip_decimal_zero_scores(rows: list[dict]) -> None:
+    for row in rows:
+        raw = row.get("Score")
+        if raw in (None, ""):
+            raw = row.get("Points")
+        text = str(raw if raw is not None else "").strip()
+        if not text:
+            row["Score"] = "0"
+            continue
+        try:
+            number = float(text.replace(",", ""))
+        except ValueError:
+            row["Score"] = text
+            continue
+        row["Score"] = _format_score_value(number)
+
+
+def _nation_display_cells(row: dict | None, idx: int) -> list[str]:
+    if not row:
+        return ["-", "-", "-"]
+    rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(".")
+    country = _normalize_team_name(row)
+    points = str(row.get("Score") or row.get("Points") or "0")
+    return [rank, country, points]
+
+
+def _render_nations_tables(
+    nations_rows: dict[str, list[dict]],
+    args: argparse.Namespace,
+) -> None:
+    women_rows_raw = nations_rows.get("SW", [])
+    men_rows_raw = nations_rows.get("SM", [])
+    all_rows_raw = nations_rows.get("ALL", [])
+
+    def _normalized(rows: list[dict]) -> list[dict]:
+        normalized = []
+        for row in rows:
+            copy = dict(row)
+            copy["Name"] = _normalize_team_name(copy)
+            copy["Score"] = _format_nations_points(
+                copy.get("Score") or copy.get("Points") or "0"
+            )
+            normalized.append(copy)
+        return normalized
+
+    women_rows = _normalized(women_rows_raw)
+    men_rows = _normalized(men_rows_raw)
+    all_rows = _normalized(all_rows_raw)
+    if not all_rows:
+        all_rows = _combine_country_rows(
+            [women_rows, men_rows], limit=10, one_decimal=True
+        )
+        for row in all_rows:
+            row["Score"] = _format_nations_points(
+                row.get("Score") or row.get("Points") or "0"
+            )
+
+    if _all_rows_have_integer_points(all_rows):
+        _strip_decimal_zero_scores(all_rows)
+
+    if not any((women_rows, men_rows, all_rows)):
+        print("none")
+        print()
+        return
+
+    if not is_pretty_output(args):
+        for title, rows in (
+            ("Women", women_rows),
+            ("Men", men_rows),
+            ("Combined (unofficial)", all_rows),
+        ):
+            _render_ranked_table(title, rows, args, "Team")
+        return
+
+    max_rows = max(len(women_rows), len(men_rows), len(all_rows))
+    combined_rows: list[list[str]] = []
+    for idx in range(max_rows):
+        combined_rows.append(
+            _nation_display_cells(
+                women_rows[idx] if idx < len(women_rows) else None, idx
+            )
+            + _nation_display_cells(men_rows[idx] if idx < len(men_rows) else None, idx)
+            + _nation_display_cells(all_rows[idx] if idx < len(all_rows) else None, idx)
+        )
+
+    render_table(
+        [
+            "Rank",
+            "Team",
+            "Points",
+            "Rank",
+            "Team",
+            "Points",
+            "Rank",
+            "Team          ",
+            "Points",
+        ],
+        combined_rows,
+        output_format=get_output_format(args),
+        alignments=[
+            "right",
+            "left",
+            "right",
+            "right",
+            "left",
+            "right",
+            "right",
+            "left",
+            "right",
+        ],
+        column_separators={3, 6},
+        group_headers=[
+            (0, 3, "Women"),
+            (3, 6, "Men"),
+            (6, 9, "Combined (unofficial)"),
+        ],
+    )
+    print()
+
+
+def _render_snapshot_athlete_standings_table(
+    title: str,
+    total_rows: list[dict],
+    discipline_rows: dict[str, list[dict]],
+    args: argparse.Namespace,
+    reference_date: datetime.date | None = None,
+) -> None:
+    print(_preevent_heading(3, title, args))
+    display_rows = list(total_rows[:10])
+    if not display_rows:
+        print("none")
+        print()
+        return
+
+    pretty = is_pretty_output(args)
+
+    disc_points_by_id: dict[str, dict[str, str]] = {
+        disc: {} for disc in ("SP", "PU", "IN", "MS")
+    }
+    discipline_leader_by_disc: dict[str, str] = {}
+    for disc in ("SP", "PU", "IN", "MS"):
+        rows_for_disc = discipline_rows.get(disc, [])
+        if rows_for_disc:
+            leader_id = _row_ibu_id(rows_for_disc[0])
+            if leader_id:
+                discipline_leader_by_disc[disc] = leader_id
+        for row in rows_for_disc:
+            ibu_id = _row_ibu_id(row)
+            if not ibu_id:
+                continue
+            value = str(row.get("Score") or row.get("Points") or "0").strip()
+            disc_points_by_id[disc][ibu_id] = value
+
+    total_leader_id = _row_ibu_id(total_rows[0]) if total_rows else ""
+
+    athlete_ids = [_row_ibu_id(row) for row in display_rows if _row_ibu_id(row)]
+    age_display_by_id: dict[str, str] = {}
+    if athlete_ids:
+        bios = _prefetch_bios(athlete_ids)
+        for ibu_id in dict.fromkeys(athlete_ids):
+            bio = bios.get(ibu_id, {})
+            if reference_date is not None:
+                birth_date = _extract_birth_date(bio)
+                if birth_date is not None:
+                    age_display_by_id[ibu_id] = str(
+                        _age_on_date(birth_date, reference_date)
+                    )
+                    continue
+            age_text = _extract_age_text(bio)
+            age_display_by_id[ibu_id] = age_text or "-"
+
+    def _score_or_dash(value: str) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return "-"
+        try:
+            if float(text) == 0.0:
+                return "-"
+        except ValueError:
+            pass
+        return text
+
+    def _is_discipline_leader(ibu_id: str) -> bool:
+        if not ibu_id:
+            return False
+        return any(
+            leader_id == ibu_id for leader_id in discipline_leader_by_disc.values()
+        )
+
+    def _format_secondary_leader_cell(cell_str: str, row_idx: int) -> str:
+        if not pretty or not Color.enabled():
+            return cell_str
+        row = display_rows[row_idx]
+        ibu_id = _row_ibu_id(row)
+        if ibu_id == total_leader_id:
+            return Color.gold(cell_str)
+        if _is_discipline_leader(ibu_id):
+            return Color.rgb(cell_str, Color.LIGHT_GOLD, bold=False)
+        return cell_str
+
+    def _format_name_base(cell_str: str, row_idx: int) -> str:
+        if not pretty or not Color.enabled():
+            return cell_str
+        row = display_rows[row_idx]
+        ibu_id = _row_ibu_id(row)
+        if ibu_id == total_leader_id:
+            return Color.gold(cell_str)
+        if _is_discipline_leader(ibu_id):
+            return Color.rgb(cell_str, Color.LIGHT_GOLD, bold=True)
+        return cell_str
+
+    def _format_name_cell(cell_str: str, row_idx: int) -> str:
+        return _format_leader_markers(cell_str, row_idx, _format_name_base)
+
+    row_styles: list[str] = []
+    table_rows: list[list[str]] = []
+    for idx, row in enumerate(display_rows):
+        rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(".")
+        ibu_id = _row_ibu_id(row)
+        name = str(row.get("Name") or row.get("ShortName") or "")
+        if pretty:
+            markers: list[str] = []
+            if ibu_id == total_leader_id:
+                markers.append(GENERAL_LEADER_MARKER)
+            for disc in ("SP", "PU", "IN", "MS"):
+                if discipline_leader_by_disc.get(disc) == ibu_id:
+                    markers.append(DISCIPLINE_LEADER_MARKER)
+            if markers:
+                name = name + " " + " ".join(markers)
+        nat = str(row.get("Nat") or "")
+        total = str(row.get("Score") or row.get("Points") or "0")
+        age_display = age_display_by_id.get(ibu_id, "-")
+        row_styles.append("gold" if ibu_id == total_leader_id else "")
+        table_rows.append(
+            [
+                rank,
+                name,
+                nat,
+                age_display,
+                total,
+                _score_or_dash(disc_points_by_id["SP"].get(ibu_id, "0")),
+                _score_or_dash(disc_points_by_id["PU"].get(ibu_id, "0")),
+                _score_or_dash(disc_points_by_id["IN"].get(ibu_id, "0")),
+                _score_or_dash(disc_points_by_id["MS"].get(ibu_id, "0")),
+            ]
+        )
+
+    def _make_disc_value_formatter(disc_key: str):
+        def formatter(cell_str: str, row_idx: int) -> str:
+            if not pretty or not Color.enabled():
+                return cell_str
+            row = display_rows[row_idx]
+            ibu_id = _row_ibu_id(row)
+            if discipline_leader_by_disc.get(disc_key) != ibu_id:
+                return cell_str
+            if ibu_id == total_leader_id:
+                return Color.gold(cell_str)
+            return Color.rgb(cell_str, Color.LIGHT_GOLD, bold=False)
+
+        return formatter
+
+    render_table(
+        list(ATHLETE_STANDINGS_HEADERS),
+        table_rows,
+        output_format=get_output_format(args),
+        alignments=[
+            "right",
+            "left",
+            "left",
+            "right",
+            "right",
+            "right",
+            "right",
+            "right",
+            "right",
+        ],
+        row_styles=row_styles if pretty else None,
+        cell_formatters=(
+            [
+                _format_secondary_leader_cell,
+                _format_name_cell,
+                _format_secondary_leader_cell,
+                _format_secondary_leader_cell,
+                None,
+                _make_disc_value_formatter("SP"),
+                _make_disc_value_formatter("PU"),
+                _make_disc_value_formatter("IN"),
+                _make_disc_value_formatter("MS"),
+            ]
+            if pretty
+            else None
+        ),
+        column_separators=ATHLETE_STANDINGS_COLUMN_SEPARATORS,
+    )
+    print()
+
+
+def _render_preevent_agenda(
+    races: list[dict],
+    args: argparse.Namespace,
+    season_id: str,
+    event_type: str,
+    event_id: str,
+    level: int = 1,
+) -> None:
+    print(
+        _preevent_heading(
+            2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_EVENT_AGENDA], args
+        )
+    )
+    include_season_race_columns = event_type == EVENT_TYPE_WC
+    sequence_by_race_id_disc: dict[tuple[str, str], str] = {}
+    sequence_by_race_id_full: dict[tuple[str, str], str] = {}
+    if include_season_race_columns:
+        sequence_by_race_id_disc, sequence_by_race_id_full = (
+            _build_season_race_sequence_maps(
+                season_id, event_type, level=level, include_event_id=event_id
+            )
+        )
+    schedule_rows: list[tuple[datetime.datetime | None, str, list[str]]] = []
+    for race in races:
+        race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
+        if race_cat not in {"SW", "SM", "MX"}:
+            continue
+        race_id = str(race.get("RaceId") or race.get("Id") or "")
+        start_raw = str(race.get("StartTime") or race.get("StartDate") or "")
+        start_dt = parse_start_datetime(start_raw)
+        date_str, day_str, time_str, tz_str = _format_local_time(start_raw)
+        time_with_tz = time_str
+        if tz_str:
+            time_with_tz = f"{time_str} {tz_str}".strip()
+        cat_label = CATEGORY_DISPLAY_NAMES.get(race_cat, race_cat)
+        disc_code = str(race.get("DisciplineId") or "").upper()
+        disc_label = DISCIPLINE_NAMES.get(disc_code, disc_code)
+        row = [date_str, day_str, time_with_tz, cat_label, disc_label]
+        if include_season_race_columns:
+            season_race = sequence_by_race_id_disc.get((race_cat, race_id), "-")
+            season_race_full = sequence_by_race_id_full.get((race_cat, race_id), "-")
+            row.extend([season_race, season_race_full])
+        schedule_rows.append(
+            (
+                start_dt,
+                race_id,
+                row,
+            )
+        )
+
+    if not schedule_rows:
+        print("none")
+        print()
+        return
+
+    fallback_dt = datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)
+    schedule_rows.sort(
+        key=lambda item: (item[0] is None, item[0] or fallback_dt, item[1])
+    )
+    headers = ["Date", "Day", "Time", "Category", "Discipline"]
+    if include_season_race_columns:
+        headers.extend(["Season Race", "Season Race Full"])
+    render_table(
+        headers,
+        [row for _dt, _race_id, row in schedule_rows],
+        output_format=get_output_format(args),
+    )
+    print()
+
+
+def handle_brief_preevent(args: argparse.Namespace) -> int:
+    """Display a pre-event brief (agenda and standings snapshot)."""
+    requested_event_id = str(getattr(args, "event", "") or "").strip()
+    current_event: dict | None
+
+    if requested_event_id:
+        event_id = requested_event_id
+        current_event = _find_event_by_id(event_id)
     else:
-        # Auto-detect current/upcoming event
         current_event = _find_current_event()
         if not current_event:
-            print("No current or upcoming World Cup event found", file=sys.stderr)
+            print("No current or upcoming level-1 event found", file=sys.stderr)
             return 1
-        event_id = current_event.get("EventId")
+        event_id = str(current_event.get("EventId") or "").strip()
         if not event_id:
             print("Event has no ID", file=sys.stderr)
             return 1
-        result = _find_first_race_for_event(event_id, "SW")
-        if not result:
-            result = _find_first_race_for_event(event_id, "SM")
-        if not result:
-            print(f"No races found for event {event_id}", file=sys.stderr)
-            return 1
-        race_id, payload = result
 
-    # Detect event type (World Cup, World Championship, Olympic Games)
-    event_type = detect_event_type(current_event) if current_event else EVENT_TYPE_WC
-
-    venue_name = _extract_venue_name(payload)
-    if not venue_name:
-        print("Could not determine venue name", file=sys.stderr)
-        return 1
-
-    use_major = bool(getattr(args, "major", False))
-
-    # Determine location label for stats sections based on event type
-    if event_type == EVENT_TYPE_OWG:
-        location_label = "Olympic Games"
-    elif event_type == EVENT_TYPE_WCH:
-        location_label = "World Championships"
-    else:
-        location_label = venue_name
-
-    # Print header
-    print()
-    print(_format_section_title(f"Event Brief: {venue_name}", args))
-    print()
-
-    # Import the functions we need for alltime stats
-    from .startlist import (
-        _get_alltime_venue_stats,
-        _get_alltime_major_event_stats,
-        _get_venue_events_only,
-    )
-
-    # Get current season ID for fetching active athletes
-    current_season = get_current_season_id()
-
-    # Fetch history and current season standings in parallel
-    # For Olympic Games and World Championships:
-    #   - Venue events only for Event Facts (lightweight - no race results)
-    #   - Major event stats for "Most decorated" sections (women + men in parallel)
-    # For regular World Cup: fetch venue-level stats for both
-    women_stats: list[dict] = []
-    women_events: list[dict] = []  # Used for Event Facts (always venue-level)
-    men_stats: list[dict] = []
-    women_active_ids: set[str] = set()
-    men_active_ids: set[str] = set()
-
-    is_major_event = event_type in (EVENT_TYPE_OWG, EVENT_TYPE_WCH)
-
-    def fetch_venue_events():
-        # Lightweight fetch - only events, no race results
-        return _get_venue_events_only(venue_name, use_major)
-
-    def fetch_women_venue():
-        return _get_alltime_venue_stats(venue_name, "SW", use_major, show_progress=True)
-
-    def fetch_men_venue():
-        return _get_alltime_venue_stats(
-            venue_name, "SM", use_major, show_progress=False
-        )
-
-    def fetch_women_major():
-        return _get_alltime_major_event_stats(event_type, "SW", show_progress=True)
-
-    def fetch_men_major():
-        return _get_alltime_major_event_stats(event_type, "SM", show_progress=False)
-
-    def fetch_women_standings():
-        rows = _get_wc_rows("SW", current_season)
-        return {_row_ibu_id(r) for r in rows if _row_ibu_id(r)}
-
-    def fetch_men_standings():
-        rows = _get_wc_rows("SM", current_season)
-        return {_row_ibu_id(r) for r in rows if _row_ibu_id(r)}
-
-    if is_major_event:
-        # For major events:
-        # - Fetch venue events only (fast) for Event Facts
-        # - Fetch major event stats for women + men in parallel
-        with ThreadPoolExecutor(max_workers=5) as executor:
-            venue_events_future = executor.submit(fetch_venue_events)
-            women_major_future = executor.submit(fetch_women_major)
-            men_major_future = executor.submit(fetch_men_major)
-            women_standings_future = executor.submit(fetch_women_standings)
-            men_standings_future = executor.submit(fetch_men_standings)
-
-            women_events = venue_events_future.result()  # For Event Facts
-            women_stats, _, _ = women_major_future.result()  # For Most Decorated
-            men_stats, _, _ = men_major_future.result()
-            women_active_ids = women_standings_future.result()
-            men_active_ids = men_standings_future.result()
-    else:
-        # For regular World Cup, venue stats are used for both Event Facts and Most Decorated
-        with ThreadPoolExecutor(max_workers=4) as executor:
-            women_venue_future = executor.submit(fetch_women_venue)
-            men_venue_future = executor.submit(fetch_men_venue)
-            women_standings_future = executor.submit(fetch_women_standings)
-            men_standings_future = executor.submit(fetch_men_standings)
-
-            women_stats, _, women_events = women_venue_future.result()
-            men_stats, _, _ = men_venue_future.result()
-            women_active_ids = women_standings_future.result()
-            men_active_ids = men_standings_future.result()
-
-    # Event Facts section
-    if women_events:
-        # Get unique seasons and find the first one
-        season_years: dict[str, int] = {}  # season_id -> year
-        for ev in women_events:
-            start_date = ev.get("start_date", "")
-            season_id = ev.get("season_id", "")
-            if start_date and len(start_date) >= 4 and season_id:
-                try:
-                    year = int(start_date[:4])
-                    if season_id not in season_years:
-                        season_years[season_id] = year
-                except ValueError:
-                    pass
-
-        if season_years:
-            # Cutoff year to filter out future events.
-            current_year = datetime.date.today().year
-            max_event_year = current_year
-            season_end_year = _season_end_year(current_season)
-            if season_end_year:
-                max_event_year = min(max_event_year, season_end_year)
-
-            # Categorize events: WC (regular), WCH (World Championships), OWG (Olympics)
-            # Only include events up to the cutoff year.
-            wc_events = []
-            wch_events = []
-            owg_events = []
-            for ev in women_events:
-                # Skip future events
-                ev_year = season_years.get(str(ev.get("season_id", "")))
-                if ev_year and ev_year > max_event_year:
-                    continue
-
-                event_data = ev.get("event", {})
-                desc = str(
-                    event_data.get("Description")
-                    or event_data.get("ShortDescription")
-                    or ""
-                ).lower()
-                # Olympic events
-                if "olympic" in desc:
-                    owg_events.append(ev)
-                # World Championships have "world championships" in description
-                elif "world championships" in desc:
-                    wch_events.append(ev)
-                else:
-                    wc_events.append(ev)
-
-            # Find first WC event (excluding WCH and OWG)
-            wc_season_years = {
-                ev["season_id"]: season_years[ev["season_id"]]
-                for ev in wc_events
-                if ev.get("season_id") in season_years
-            }
-            if wc_season_years:
-                first_season = min(
-                    wc_season_years.keys(), key=lambda s: wc_season_years[s]
-                )
-                first_year = wc_season_years[first_season]
-                # Format season (e.g., "1112" -> "2011/2012")
-                s = str(first_season)
-                if len(s) >= 4:
-                    season_display = (
-                        f"20{s[:2]}/20{s[2:]}"
-                        if int(s[:2]) < 50
-                        else f"19{s[:2]}/19{s[2:]}"
-                    )
-                else:
-                    season_display = s
-            else:
-                first_year = None
-                season_display = ""
-
-            # Get years for WC events (already filtered to exclude future)
-            wc_years = sorted(
-                {
-                    season_years[ev["season_id"]]
-                    for ev in wc_events
-                    if ev.get("season_id") in season_years
-                    and season_years[ev["season_id"]] <= max_event_year
-                }
-            )
-            wc_years_str = ", ".join(str(y) for y in wc_years)
-
-            # Get years for WCH events (already filtered to exclude future)
-            wch_years = sorted(
-                {
-                    season_years[ev["season_id"]]
-                    for ev in wch_events
-                    if ev.get("season_id") in season_years
-                    and season_years[ev["season_id"]] <= max_event_year
-                }
-            )
-            wch_years_str = ", ".join(str(y) for y in wch_years)
-
-            # Get years for OWG events (already filtered to exclude future)
-            owg_years = sorted(
-                {
-                    season_years[ev["season_id"]]
-                    for ev in owg_events
-                    if ev.get("season_id") in season_years
-                    and season_years[ev["season_id"]] <= max_event_year
-                }
-            )
-            owg_years_str = ", ".join(str(y) for y in owg_years)
-
-            print(_format_section_title("Event Facts:", args))
-            print(f"  Event type: {EVENT_TYPE_LABELS.get(event_type, 'World Cup')}")
-            if first_year:
-                print(
-                    f"  First World Cup event: {first_year} (season {season_display})"
-                )
-            print(f"  Total World Cup events: {len(wc_events)} ({wc_years_str})")
-            if wch_events:
-                print(
-                    f"  Total World Championship events: {len(wch_events)} ({wch_years_str})"
-                )
-            if owg_events:
-                print(
-                    f"  Total Olympic Games events: {len(owg_events)} ({owg_years_str})"
-                )
-            else:
-                print("  Total Olympic Games events: 0")
-            print()
-
-    # Get and display event schedule for both genders
     try:
         races = get_races(event_id)
     except BiathlonError:
         races = []
+    if not races:
+        print(f"No races found for event {event_id}", file=sys.stderr)
+        return 1
 
-    # Build schedule for all categories (women, men, mixed)
-    schedule_rows = []
-    for race in races:
-        race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
-        if race_cat not in ("SW", "SM", "MX"):
-            continue
-        start_raw = race.get("StartTime") or race.get("StartDate") or ""
-        disc_code = str(race.get("DisciplineId") or "").upper()
-        cat_label = CATEGORY_DISPLAY_NAMES.get(race_cat, race_cat)
-        disc_label = DISCIPLINE_NAMES.get(disc_code, disc_code)
-
-        date_str, time_str = _format_local_time(start_raw)
-        schedule_rows.append((start_raw, [date_str, time_str, cat_label, disc_label]))
-
-    # Sort by start time
-    schedule_rows.sort(key=lambda x: x[0])
-
-    if schedule_rows:
-        print(_format_section_title("Event Schedule:", args))
-        render_table(
-            ["Date", "Time", "Category", "Discipline"],
-            [row[1] for row in schedule_rows],
-            output_format=get_output_format(args),
+    first_race_meta = _first_event_race_with_start(races)
+    if not first_race_meta:
+        print(
+            f"event {event_id} does not expose a race start datetime for snapshot mode",
+            file=sys.stderr,
         )
+        return 1
+
+    first_race_id, cutoff_dt = first_race_meta
+    season_id = str((current_event or {}).get("SeasonId") or "").strip()
+    if not season_id:
+        season_id = _season_id_from_event_id(event_id) or get_current_season_id()
+
+    event_type, venue_name = _resolve_event_type_and_venue(current_event, first_race_id)
+    category_code = _preevent_category_code(event_type)
+    standings = _compute_preevent_snapshot_standings(
+        season_id, first_race_id, cutoff_dt, limit=10
+    )
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    if cutoff_dt > now_utc:
+        standings["athlete"] = _fetch_live_athlete_cup_rows(season_id)
+
+    print()
+    print(_preevent_heading(1, f"Event Brief - {venue_name}", args))
+    print()
+
+    if _preevent_section_enabled(PREEVENT_SECTION_EVENT_AGENDA, category_code):
+        level_raw = (current_event or {}).get("Level")
+        try:
+            event_level = int(level_raw) if level_raw not in (None, "") else 1
+        except (TypeError, ValueError):
+            event_level = 1
+        _render_preevent_agenda(
+            races, args, season_id, event_type, event_id, level=event_level
+        )
+
+    if _preevent_section_enabled(PREEVENT_SECTION_ATHLETE_STANDINGS, category_code):
+        print(
+            _preevent_heading(
+                2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_ATHLETE_STANDINGS], args
+            )
+        )
+        athlete_rows = cast(dict[str, dict[str, list[dict]]], standings["athlete"])
+        athlete_tables = [
+            ("Women", athlete_rows["SW"]),
+            ("Men", athlete_rows["SM"]),
+        ]
+        if not any(rows_by_disc.get("TS") for _title, rows_by_disc in athlete_tables):
+            print("none")
+            print()
+        else:
+            print()
+            for title, rows_by_disc in athlete_tables:
+                _render_snapshot_athlete_standings_table(
+                    title,
+                    rows_by_disc.get("TS", []),
+                    rows_by_disc,
+                    args,
+                    reference_date=cutoff_dt.date(),
+                )
+
+    if _preevent_section_enabled(PREEVENT_SECTION_RELAY_STANDINGS, category_code):
+        print(
+            _preevent_heading(
+                2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_RELAY_STANDINGS], args
+            )
+        )
+        relay_rows = cast(dict[str, list[dict]], standings["relay"])
         print()
+        _render_relay_tables(relay_rows, args)
 
-    # History for women (highlight athletes active in current WC season)
-    _render_venue_history_table(
-        women_stats,
-        women_active_ids,
-        location_label,
-        "Women",
-        args,
-        use_medal_columns=is_major_event,
-    )
-
-    # History for men (highlight athletes active in current WC season)
-    _render_venue_history_table(
-        men_stats,
-        men_active_ids,
-        location_label,
-        "Men",
-        args,
-        use_medal_columns=is_major_event,
-    )
+    if _preevent_section_enabled(PREEVENT_SECTION_NATIONS_CUP, category_code):
+        print(
+            _preevent_heading(
+                2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_NATIONS_CUP], args
+            )
+        )
+        nations_rows = cast(dict[str, list[dict]], standings["nations"])
+        print()
+        _render_nations_tables(nations_rows, args)
 
     return 0
 

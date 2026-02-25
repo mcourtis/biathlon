@@ -173,7 +173,7 @@ biathlon form --season --top 10
 biathlon form --nat FRA,NOR
 ```
 
-Season, event and race briefs (venue history, startlist analysis, post-race recap):
+Season, event and race briefs (preevent agenda + standings snapshot, startlist analysis, post-race recap):
 
 ```bash
 biathlon brief preseason

@@ -503,15 +503,29 @@ def render_table(
             col_positions.append((col_start, pos))
         line_len = pos
         group_line = [" "] * line_len
+        placed_labels: list[str] = []
         for start_col, end_col, label in group_headers:
             span_start = col_positions[start_col][0]
             span_end = col_positions[end_col - 1][1]
             span_width = span_end - span_start
+            if span_width <= 0:
+                continue
+            label_text = str(label)
+            if not label_text:
+                continue
+            # Truncate overly long labels so rendering never indexes outside span.
+            display_label = (
+                label_text if len(label_text) <= span_width else label_text[:span_width]
+            )
             # Center the label within the span
-            pad = span_width - len(label)
-            left_pad = pad // 2
-            for ci, ch in enumerate(label):
-                group_line[span_start + left_pad + ci] = ch
+            pad = span_width - len(display_label)
+            left_pad = max(0, pad // 2)
+            start_idx = span_start + left_pad
+            for ci, ch in enumerate(display_label):
+                target_idx = start_idx + ci
+                if 0 <= target_idx < line_len:
+                    group_line[target_idx] = ch
+            placed_labels.append(display_label)
         raw_line = "".join(group_line).rstrip()
 
         def _style_group_label(label: str) -> str:
@@ -524,7 +538,7 @@ def render_table(
                 return Color.bronze(label)
             return f"{Color.BOLD}{label}{Color.RESET}"
 
-        for _start_col, _end_col, label in group_headers:
+        for label in placed_labels:
             raw_line = raw_line.replace(label, _style_group_label(label), 1)
         print(raw_line)
 

@@ -709,19 +709,15 @@ def build_parser() -> argparse.ArgumentParser:
     # brief preevent
     brief_preevent = brief_sub.add_parser(
         "preevent",
-        help="Venue history and records (before an event)",
+        help="Pre-event agenda and standings snapshot",
         formatter_class=CompactOptionalFormatter,
         add_help=False,
     )
-    brief_help["preevent"] = "Venue history and records (before an event)"
+    brief_help["preevent"] = "Pre-event agenda and standings snapshot"
     brief_preevent.add_argument(
-        "--event", default="", help="Event id (default: current/upcoming WC event)"
-    )
-    brief_preevent.add_argument(
-        "--men", action="store_true", help="Show men (default: women)"
-    )
-    brief_preevent.add_argument(
-        "--major", action="store_true", help="Use WC+WCH+OWG stats"
+        "--event",
+        default="",
+        help="Event id (default: current/in-progress or next level-1 event)",
     )
     add_output_format_arg(brief_preevent)
     brief_preevent.set_defaults(func=handle_brief_preevent)

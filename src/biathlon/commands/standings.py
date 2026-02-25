@@ -48,6 +48,19 @@ DISCIPLINE_LABELS = {
     "MS": "Mass Start",
 }
 
+ATHLETE_STANDINGS_HEADERS = [
+    "Position",
+    "Name",
+    "Country",
+    "Age",
+    "Total",
+    "Sprint",
+    "Pursuit",
+    "Individual",
+    "MassStart",
+]
+ATHLETE_STANDINGS_COLUMN_SEPARATORS = {4, 5}
+
 SORT_COLUMNS = {
     "total": "total",
     "sprint": "SP",
@@ -873,17 +886,7 @@ def handle_standings(args: argparse.Namespace) -> int:
             render_row.insert(1, athlete["disc_position"])
         render_rows.append(render_row)
 
-    headers = [
-        "Position",
-        "Name",
-        "Country",
-        "Age",
-        "Total",
-        "Sprint",
-        "Pursuit",
-        "Individual",
-        "MassStart",
-    ]
+    headers = list(ATHLETE_STANDINGS_HEADERS)
     if sorting_by_discipline:
         disc_label = DISCIPLINE_LABELS.get(athlete_sort_col, athlete_sort_col)
         headers.insert(1, f"{disc_label}Position")
@@ -983,7 +986,7 @@ def handle_standings(args: argparse.Namespace) -> int:
     if sorting_by_discipline:
         athlete_column_separators = {5, 6}
     else:
-        athlete_column_separators = {4, 5}
+        athlete_column_separators = ATHLETE_STANDINGS_COLUMN_SEPARATORS
 
     render_table(
         headers,
