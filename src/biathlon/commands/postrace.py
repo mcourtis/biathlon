@@ -2853,13 +2853,13 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 _format_section_title(f"## Relay WC standings ({relay_wc_label})", args)
             )
             table_rows = []
-            for row_idx, row in enumerate(relay_wc_rows):
+            for row_idx, relay_row in enumerate(relay_wc_rows):
                 rank = str(
-                    row.get("Rank") or row.get("Standing") or row_idx + 1
+                    relay_row.get("Rank") or relay_row.get("Standing") or row_idx + 1
                 ).rstrip(".")
-                name = str(row.get("Name") or row.get("ShortName") or "")
-                nat = str(row.get("Nat") or "")
-                points = str(row.get("Score") or row.get("Points") or "0")
+                name = str(relay_row.get("Name") or relay_row.get("ShortName") or "")
+                nat = str(relay_row.get("Nat") or "")
+                points = str(relay_row.get("Score") or relay_row.get("Points") or "0")
                 table_rows.append([rank, name, nat, points])
             render_table(
                 ["Rank", "Team", "Nat", "Points"],
@@ -3576,11 +3576,11 @@ def handle_post_race(args: argparse.Namespace) -> int:
             ath_rows = []
             ath_row_styles = []
             ath_keys = []
-            for rank, stats in ranked_athletes:
+            for r_rank, stats in ranked_athletes:
                 total = stats["gold"] + stats["silver"] + stats["bronze"]
                 ibu_id = stats["ibu_id"]
                 row = [
-                    str(rank),
+                    str(r_rank),
                     stats["name"],
                     stats["nat"],
                     medal_gender,

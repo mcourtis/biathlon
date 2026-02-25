@@ -27,7 +27,13 @@ from ..constants import (
     EVENT_TYPE_WC,
     EVENT_TYPE_WCH,
 )
-from ..formatting import is_pretty_output, get_output_format, Color, render_table
+from ..formatting import (
+    is_pretty_output,
+    get_output_format,
+    Color,
+    render_table,
+    OutputFormat,
+)
 from ..utils import format_race_header, parse_date, parse_start_datetime
 from .events import compute_event_styles, format_level
 
@@ -1204,7 +1210,7 @@ def _render_postevent_standings(
     args: argparse.Namespace,
     season_id: str,
     disciplines_raced: set[tuple[str, str]],
-    output_format: str,
+    output_format: OutputFormat,
 ) -> None:
     """Render WC standings sections for a post-event summary."""
     STANDINGS_TOP_N = 10
