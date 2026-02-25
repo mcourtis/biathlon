@@ -926,16 +926,16 @@ def _compute_preevent_snapshot_standings(
     relay_all_points: dict[str, float] = {}
     relay_all_names: dict[str, str] = {}
     for cat in ("SW", "SM", "MX"):
-        for nat, points in relay_points[cat].items():
-            relay_all_points[nat] = relay_all_points.get(nat, 0.0) + points
+        for nat, relay_pts in relay_points[cat].items():
+            relay_all_points[nat] = relay_all_points.get(nat, 0.0) + relay_pts
         for nat, name in relay_names[cat].items():
             if nat not in relay_all_names and name:
                 relay_all_names[nat] = name
 
     nations_all_points: dict[str, float] = {}
     for cat in ("SW", "SM"):
-        for nat, points in nations_points[cat].items():
-            nations_all_points[nat] = nations_all_points.get(nat, 0.0) + points
+        for nat, nations_pts in nations_points[cat].items():
+            nations_all_points[nat] = nations_all_points.get(nat, 0.0) + nations_pts
 
     relay_rows = {
         cat: _rows_from_country_points(relay_points[cat], relay_names[cat], limit)
@@ -1618,8 +1618,9 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
 
     if _preevent_section_enabled(PREEVENT_SECTION_EVENT_AGENDA, category_code):
         level_raw = (current_event or {}).get("Level")
+        level_text = str(level_raw).strip() if level_raw is not None else ""
         try:
-            event_level = int(level_raw) if level_raw not in (None, "") else 1
+            event_level = int(level_text) if level_text else 1
         except (TypeError, ValueError):
             event_level = 1
         _render_preevent_agenda(
