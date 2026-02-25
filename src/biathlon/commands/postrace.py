@@ -26,6 +26,7 @@ from ..constants import (
     EVENT_TYPE_LABELS,
     EVENT_TYPE_OWG,
     EVENT_TYPE_WC,
+    EVENT_TYPE_WCH,
     INDIVIDUAL_DISCIPLINES,
     RELAY_DISCIPLINE,
     RELAY_DISCIPLINES,
@@ -63,11 +64,16 @@ from ._common import (
 from .results import _find_recent_completed_races, _has_completed_results
 from .startlist import (
     OLYMPIC_SEASON_IDS,
+    _fetch_nations_cup_standings,
+    _fetch_relay_wc_standings,
     _get_all_olympic_medals,
+    _get_all_wch_medals,
     _get_cup_ids_for_race,
     _get_past_olympic_individual_podiums,
     _get_past_olympic_relay_podiums,
     _get_wc_points,
+    _render_athlete_all_medal_table,
+    _render_country_all_medal_table,
 )
 
 
@@ -1670,7 +1676,7 @@ def _render_olympic_medal_sections(
     if not medal_counts:
         print(
             _format_section_title(
-                f"{sec}. Country medal table ({cat_name} {disc_name}): none", args
+                f"## Country medal table — {cat_name} {disc_name}: none", args
             )
         )
         print()
@@ -1682,7 +1688,7 @@ def _render_olympic_medal_sections(
         )
         print(
             _format_section_title(
-                f"{sec}. Country medal table ({cat_name} {disc_name}):", args
+                f"## Country medal table — {cat_name} {disc_name}", args
             )
         )
         rcm = race_country_medals or {}
@@ -1729,7 +1735,8 @@ def _render_olympic_medal_sections(
     if not all_country_medals and not dynamic_country_rows:
         print(
             _format_section_title(
-                f"{sec}. Country medal table (all Olympic disciplines): none", args
+                "## Country Olympic Games Medal Table - All Disciplines (available editions): none",
+                args,
             )
         )
         print()
@@ -1797,7 +1804,8 @@ def _render_olympic_medal_sections(
 
         print(
             _format_section_title(
-                f"{sec}. Country medal table (all Olympic disciplines):", args
+                "## Country Olympic Games Medal Table - All Disciplines (available editions)",
+                args,
             )
         )
         rcm_all = race_country_medals or {}
@@ -1939,14 +1947,16 @@ def _render_olympic_medal_sections(
     if not medalists:
         print(
             _format_section_title(
-                f"{sec}. Athlete medal table (all Olympic disciplines): none", args
+                "## Athlete Olympic Games Medal Table - All Disciplines (available editions): none",
+                args,
             )
         )
         print()
     else:
         print(
             _format_section_title(
-                f"{sec}. Athlete medal table (all Olympic disciplines):", args
+                "## Athlete Olympic Games Medal Table - All Disciplines (available editions)",
+                args,
             )
         )
         ram = race_athlete_medals or {}
@@ -2390,11 +2400,11 @@ def _render_best_performances_section(
 
     sec += 1
     if not milestone_rows:
-        print(_format_section_title(f"{sec}. Best Performances: none", args))
+        print(_format_section_title("## Best Performances: none", args))
         print()
         return sec
 
-    print(_format_section_title(f"{sec}. Best Performances:", args))
+    print(_format_section_title("## Best Performances", args))
     table_rows = []
     row_styles = []
     for rank_val, name, nat, milestone, previous_best in milestone_rows:
@@ -2519,13 +2529,9 @@ def handle_post_race(args: argparse.Namespace) -> int:
     general_leader = {"id": "", "name": "", "nat": ""}
     discipline_leader = {"id": "", "name": "", "nat": ""}
     best_u23_leader = {"id": "", "name": "", "nat": ""}
-    cat_id = ""
-    season_id = ""
+    cat_id = str(comp.get("catId") or comp.get("CatId") or "").upper()
+    season_id = str(sport_evt.get("SeasonId") or "") or _season_id_from_race_id(race_id)
     if is_wc_race and not is_relay and _is_individual_like_discipline(discipline):
-        cat_id = str(comp.get("catId") or comp.get("CatId") or "").upper()
-        season_id = str(sport_evt.get("SeasonId") or "") or _season_id_from_race_id(
-            race_id
-        )
         race_points_by_id = _build_race_points_map(results, discipline)
         use_live_standings = True
         if season_id and cat_id:
@@ -2570,17 +2576,19 @@ def handle_post_race(args: argparse.Namespace) -> int:
 
     age_display_by_id: dict[str, str] = {}
     u23_ids: set[str] = set()
+    reference_date = (
+        target_start_dt.date()
+        if target_start_dt is not None
+        else datetime.datetime.now(datetime.timezone.utc).date()
+    )
+    age_ibu_ids = {str(entry.get("ibu_id") or "") for entry in entries}
     if is_wc_race:
-        reference_date = (
-            target_start_dt.date()
-            if target_start_dt is not None
-            else datetime.datetime.now(datetime.timezone.utc).date()
-        )
-        age_ibu_ids = {str(entry.get("ibu_id") or "") for entry in entries}
         age_ibu_ids.update(_row_ibu_id(row) for row in total_rows)
         age_ibu_ids.update(_row_ibu_id(row) for row in disc_rows)
-        age_display_by_id, u23_ids = _build_athlete_age_map(age_ibu_ids, reference_date)
-        best_u23_leader = _find_best_u23_leader(total_rows or disc_rows, u23_ids)
+    age_display_by_id, u23_ids = _build_athlete_age_map(age_ibu_ids, reference_date)
+    best_u23_leader = (
+        _find_best_u23_leader(total_rows or disc_rows, u23_ids) if is_wc_race else {}
+    )
 
     mark_leaders = pretty
     decorate_any = _make_leader_name_decorator(
@@ -2672,7 +2680,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
         cell_fmts.append(nat_formatter)
         if is_wc_race:
             cell_fmts.append(None)
-        print(_format_section_title(f"{sec}. Results:", args))
+        print(_format_section_title("## Results", args))
         render_table(
             headers,
             results_rows,
@@ -2681,7 +2689,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
         )
         print()
     else:
-        print(_format_section_title(f"{sec}. Results: none", args))
+        print(_format_section_title("## Results: none", args))
         print()
 
     if (
@@ -2703,11 +2711,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     age_display_by_id=age_display_by_id,
                 )
                 total_name_formatter = _make_name_formatter(total_row_styles)
-                print(
-                    _format_section_title(
-                        f"{sec}. World Cup standing changes (Total):", args
-                    )
-                )
+                print(_format_section_title("## WC standings (Total)", args))
                 render_table(
                     [
                         "Rank",
@@ -2735,7 +2739,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             else:
                 print(
                     _format_section_title(
-                        f"{sec}. World Cup standing changes (Total): no data available",
+                        "## WC standings (Total): no data",
                         args,
                     )
                 )
@@ -2752,11 +2756,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     age_display_by_id=age_display_by_id,
                 )
                 disc_name_formatter = _make_name_formatter(disc_row_styles)
-                print(
-                    _format_section_title(
-                        f"{sec}. World Cup standing changes ({disc_label}):", args
-                    )
-                )
+                print(_format_section_title(f"## WC standings ({disc_label})", args))
                 render_table(
                     [
                         "Rank",
@@ -2784,52 +2784,198 @@ def handle_post_race(args: argparse.Namespace) -> int:
             else:
                 print(
                     _format_section_title(
-                        f"{sec}. World Cup standing changes ({disc_label}): no data available",
+                        f"## WC standings ({disc_label}): no data",
                         args,
                     )
                 )
                 print()
         else:
             sec += 1
+            print(_format_section_title("## WC standings: no data", args))
+            print()
+
+    # Nations Cup standings (WC + WCH, non-PU/MS disciplines)
+    if (
+        event_type in (EVENT_TYPE_WC, EVENT_TYPE_WCH)
+        and discipline not in ("PU", "MS")
+        and season_id
+    ):
+        mixed_like = discipline in ("SR", "MR")
+        target_cats = (
+            ["SW", "SM"] if mixed_like else ([cat_id] if cat_id in {"SW", "SM"} else [])
+        )
+        for tc in target_cats:
+            nation_rows = _fetch_nations_cup_standings(season_id, tc, limit=10)
+            sec += 1
+            cat_name_nc = CATEGORY_DISPLAY_NAMES.get(tc, tc)
+            if nation_rows:
+                print(
+                    _format_section_title(
+                        f"## Nations Cup standings ({cat_name_nc})", args
+                    )
+                )
+                table_rows = []
+                for row_idx, standing_row in enumerate(nation_rows):
+                    rank = str(
+                        standing_row.get("Rank")
+                        or standing_row.get("Standing")
+                        or row_idx + 1
+                    ).rstrip(".")
+                    nat = str(standing_row.get("Nat") or "")
+                    country = str(standing_row.get("Name") or nat)
+                    points = str(
+                        standing_row.get("Score") or standing_row.get("Points") or "0"
+                    )
+                    table_rows.append([rank, country, points])
+                render_table(
+                    ["Rank", "Country", "Points"],
+                    table_rows,
+                    output_format=output_format,
+                    column_separators={2},
+                )
+                print()
+            else:
+                print(
+                    _format_section_title(
+                        f"## Nations Cup standings ({cat_name_nc}): no data", args
+                    )
+                )
+                print()
+
+    # Relay WC standings (WC only, relay disciplines)
+    if is_wc_race and is_relay and season_id:
+        relay_wc_label, relay_wc_rows = _fetch_relay_wc_standings(
+            season_id, cat_id, discipline, limit=10
+        )
+        sec += 1
+        if relay_wc_rows:
+            print(
+                _format_section_title(f"## Relay WC standings ({relay_wc_label})", args)
+            )
+            table_rows = []
+            for row_idx, row in enumerate(relay_wc_rows):
+                rank = str(
+                    row.get("Rank") or row.get("Standing") or row_idx + 1
+                ).rstrip(".")
+                name = str(row.get("Name") or row.get("ShortName") or "")
+                nat = str(row.get("Nat") or "")
+                points = str(row.get("Score") or row.get("Points") or "0")
+                table_rows.append([rank, name, nat, points])
+            render_table(
+                ["Rank", "Team", "Nat", "Points"],
+                table_rows,
+                output_format=output_format,
+                column_separators={3},
+            )
+            print()
+        else:
             print(
                 _format_section_title(
-                    f"{sec}. World Cup standing changes: no data available", args
+                    f"## Relay WC standings ({relay_wc_label}): no data", args
                 )
             )
             print()
 
-    if event_type == EVENT_TYPE_OWG:
-        sec = _render_best_performances_section(
-            args,
-            sec,
-            entries,
-            team_results,
-            race_id,
-            target_start_dt,
-            discipline,
-            is_relay,
-            decorate_any,
-            name_formatter_plain,
-            history_race_start_cache,
-            chronology_warning_keys,
+    sec = _render_best_performances_section(
+        args,
+        sec,
+        entries,
+        team_results,
+        race_id,
+        target_start_dt,
+        discipline,
+        is_relay,
+        decorate_any,
+        name_formatter_plain,
+        history_race_start_cache,
+        chronology_warning_keys,
+    )
+
+    all_results_cache: dict[str, list[dict]] = {}
+
+    # Milestone parameters (startlist-style)
+    event_level_set: set[str] = {event_type} if event_type in MAJOR_LEVELS else {"WC"}
+    major_level_set: set[str] = MAJOR_LEVELS
+    event_race_step = 25 if event_type == EVENT_TYPE_WC else 5
+    career_race_step = 25
+    current_event_label = EVENT_TYPE_LABELS.get(event_type, event_type)
+    career_event_label = "WC+WCH+OWG"
+    disc_label = DISCIPLINE_NAMES.get(discipline, discipline)
+    class_label = "Team Race" if is_relay else "Indiv Race"
+
+    def _milestone(current: int, step: int, include_first: bool = True) -> int | None:
+        if current <= 0:
+            return None
+        if include_first and current == 1:
+            return 1
+        if step > 0 and current % step == 0:
+            return current
+        return None
+
+    def _detail_counts(
+        rows_in: list[dict],
+    ) -> tuple[int, int, int, int, int, int, int, int, int]:
+        """Return (wins, ind_wins, team_wins, podiums, ind_podiums, team_podiums,
+        flowers, ind_flowers, team_flowers) from career result rows."""
+        wins = ind_wins = team_wins = 0
+        podiums = ind_podiums = team_podiums = 0
+        flowers = ind_flowers = team_flowers = 0
+        for res in rows_in:
+            rank = _parse_rank(res.get("Rank") or res.get("SO"))
+            if rank is None:
+                continue
+            res_disc = str(res.get("Comp") or "").upper()
+            is_team_res = res_disc in RELAY_DISCIPLINES
+            if rank == 1:
+                wins += 1
+                if is_team_res:
+                    team_wins += 1
+                else:
+                    ind_wins += 1
+            if rank <= 3:
+                podiums += 1
+                if is_team_res:
+                    team_podiums += 1
+                else:
+                    ind_podiums += 1
+            if rank <= 6:
+                flowers += 1
+                if is_team_res:
+                    team_flowers += 1
+                else:
+                    ind_flowers += 1
+        return (
+            wins,
+            ind_wins,
+            team_wins,
+            podiums,
+            ind_podiums,
+            team_podiums,
+            flowers,
+            ind_flowers,
+            team_flowers,
         )
 
-    run_standard_sections = event_type != EVENT_TYPE_OWG
-    use_major = bool(getattr(args, "major", False))
-    level_set = MAJOR_LEVELS if use_major else {"WC"}
-
-    race_milestones = []
-    top_milestones: list[list] = []
-    race_milestone_ids: set[str] = set()
-    processed_ids: set[str] = set()
-    all_results_cache: dict[str, list[dict]] = {}
-    stage_cache: dict[str, dict[int, dict[str, float]]] = {}
+    race_rows: list[list] = []
+    win_rows: list[list] = []
+    processed_milestone_ids: set[str] = set()
 
     for entry in entries:
-        if not run_standard_sections:
-            break
         ibu_id = entry["ibu_id"]
         if not ibu_id:
+            continue
+        # DNF/DNS/lapped filter
+        if is_relay:
+            entry_rank = None
+            for team in team_results:
+                if str(team.get("Bib") or "") == entry["bib"]:
+                    entry_rank = _parse_rank(team.get("Rank"))
+                    break
+        else:
+            entry_rank = _parse_rank(entry["rank"])
+        if entry_rank is None:
+            continue  # DNF, DNS, lapped — milestone not reached
+        if ibu_id in processed_milestone_ids:
             continue
         if ibu_id not in all_results_cache:
             try:
@@ -2842,668 +2988,415 @@ def handle_post_race(args: argparse.Namespace) -> int:
         if not race_row:
             continue
         race_level = str(race_row.get("Level") or "").upper()
-        if race_level not in level_set:
+        if race_level not in event_level_set:
             continue
-        level_results = [
-            r for r in all_results if str(r.get("Level") or "").upper() in level_set
-        ]
-        if race_row and race_row not in level_results:
-            level_results.append(race_row)
-        level_results = _filter_results_to_snapshot(
-            level_results,
+        all_results_filtered = _filter_results_to_snapshot(
+            all_results,
             race_id,
             target_start_dt,
             history_race_start_cache,
             chronology_warning_keys,
             f"milestones for {ibu_id}",
         )
-        race_count = len(level_results)
-        stats_by_category: dict[str, dict[str, dict[str, int]]] = {
-            "Individual": {},
-            "Team": {},
-            "All": {},
-        }
+        event_results = [
+            r
+            for r in all_results_filtered
+            if str(r.get("Level") or "").upper() in event_level_set
+        ]
+        major_results = [
+            r
+            for r in all_results_filtered
+            if str(r.get("Level") or "").upper() in major_level_set
+        ]
+        if race_row not in event_results:
+            event_results.append(race_row)
+        if race_row not in major_results:
+            major_results.append(race_row)
 
-        def _init_stats() -> dict[str, int]:
-            return {
-                "win": 0,
-                "podium": 0,
-                "flower": 0,
-                "win_prior": 0,
-                "podium_prior": 0,
-                "flower_prior": 0,
-            }
+        def _counts(
+            rows_in: list[dict],
+        ) -> tuple[int, int, int, int, int, int, int, int]:
+            all_races = len(rows_in)
+            all_wins = ind_races = ind_wins = team_races = team_wins = 0
+            disc_races = disc_wins = 0
+            for res in rows_in:
+                rank = _parse_rank(res.get("Rank") or res.get("SO"))
+                res_disc = str(res.get("Comp") or "").upper()
+                if rank == 1:
+                    all_wins += 1
+                is_team = res_disc in RELAY_DISCIPLINES
+                if is_team:
+                    team_races += 1
+                    if rank == 1:
+                        team_wins += 1
+                else:
+                    ind_races += 1
+                    if rank == 1:
+                        ind_wins += 1
+                if res_disc == discipline:
+                    disc_races += 1
+                    if rank == 1:
+                        disc_wins += 1
+            return (
+                all_races,
+                all_wins,
+                ind_races,
+                ind_wins,
+                team_races,
+                team_wins,
+                disc_races,
+                disc_wins,
+            )
 
-        for res in level_results:
-            rank_val = _parse_rank(res.get("Rank") or res.get("SO"))
-            if rank_val is None:
+        (e_all, e_win, e_ind, e_ind_win, e_team, e_team_win, e_disc, e_disc_win) = (
+            _counts(event_results)
+        )
+        (c_all, c_win, c_ind, c_ind_win, c_team, c_team_win, c_disc, c_disc_win) = (
+            _counts(major_results)
+        )
+
+        name = decorate_any(entry["name"], entry["nat"], ibu_id)
+        age = _age_for_entry(entry["name"], entry["nat"], ibu_id)
+        nat = entry["nat"]
+
+        e_class_races = e_team if is_relay else e_ind
+        c_class_races = c_team if is_relay else c_ind
+
+        race_scopes = [
+            (
+                current_event_label,
+                disc_label,
+                e_disc,
+                event_race_step,
+                True,
+                "event_discipline",
+            ),
+            (
+                career_event_label,
+                disc_label,
+                c_disc,
+                career_race_step,
+                True,
+                "career_discipline",
+            ),
+            (
+                current_event_label,
+                class_label,
+                e_class_races,
+                event_race_step,
+                True,
+                "event_class",
+            ),
+            (current_event_label, "Race", e_all, event_race_step, True, "event_all"),
+            (
+                career_event_label,
+                class_label,
+                c_class_races,
+                career_race_step,
+                True,
+                "career_class",
+            ),
+            (career_event_label, "Race", c_all, career_race_step, True, "career_all"),
+        ]
+        for (
+            scope_event_label,
+            type_label,
+            current,
+            step,
+            include_first,
+            scope_id,
+        ) in race_scopes:
+            hit = _milestone(current, step, include_first=include_first)
+            if hit is None:
                 continue
-            race_id_match = str(res.get("RaceId") or "")
-            is_current_race = race_id_match == race_id
-            category_label = "Team" if _is_team_level_result(res) else "Individual"
+            race_rows.append([hit, scope_event_label, type_label, name, age, nat])
 
-            # Update category-specific stats (use outer ibu_id, not from result)
-            target_stats = stats_by_category[category_label]
-            stat = target_stats.setdefault(ibu_id, _init_stats())
-
-            # Also update combined "All" stats
-            all_stats = stats_by_category["All"]
-            all_stat = all_stats.setdefault(ibu_id, _init_stats())
-
-            if rank_val == 1:
-                stat["win"] += 1
-                all_stat["win"] += 1
-                if not is_current_race:
-                    stat["win_prior"] += 1
-                    all_stat["win_prior"] += 1
-            if rank_val <= 3:
-                stat["podium"] += 1
-                all_stat["podium"] += 1
-                if not is_current_race:
-                    stat["podium_prior"] += 1
-                    all_stat["podium_prior"] += 1
-            if rank_val <= 6:
-                stat["flower"] += 1
-                all_stat["flower"] += 1
-                if not is_current_race:
-                    stat["flower_prior"] += 1
-                    all_stat["flower_prior"] += 1
-        if ibu_id not in race_milestone_ids:
-            team_race_count = None
-            if is_relay:
-                team_race_count = sum(
-                    1 for res in level_results if _is_team_level_result(res)
-                )
-            race_milestones.extend(
-                _build_race_milestone_rows(
-                    race_count=race_count,
-                    team_race_count=team_race_count,
-                    is_relay=is_relay,
-                    decorated_name=decorate_any(entry["name"], entry["nat"], ibu_id),
-                    nat=entry["nat"],
-                )
-            )
-            race_milestone_ids.add(ibu_id)
-        # Determine athlete's rank and build milestones for top 6
-        if is_relay:
-            # For relays, get rank from team result
-            team_rank = None
-            for team in team_results:
-                if str(team.get("Bib") or "") == entry["bib"]:
-                    team_rank = _parse_rank(team.get("Rank"))
-                    break
-            rank_val = team_rank
-        else:
-            rank_val = _parse_rank(entry["rank"])
-
-        if rank_val is None or rank_val > 6:
-            continue
-        if ibu_id in processed_ids:
-            continue
-        processed_ids.add(ibu_id)
-
-        category = "Team" if is_relay else "Individual"
-        stat = stats_by_category[category].get(ibu_id) or _init_stats()
-        all_stat = stats_by_category["All"].get(ibu_id) or _init_stats()
-        decorated_name = decorate_any(entry["name"], entry["nat"], ibu_id)
-
-        # Store: [count, type, decorated_name, nat, ibu_id, rank]
-        if is_relay:
-            if rank_val == 1:
-                top_milestones.append(
-                    [
-                        stat["win"],
-                        "Relay Win",
-                        decorated_name,
-                        entry["nat"],
-                        ibu_id,
-                        rank_val,
-                    ]
-                )
-                top_milestones.append(
-                    [
-                        all_stat["win"],
-                        "Win",
-                        decorated_name,
-                        entry["nat"],
-                        ibu_id,
-                        rank_val,
-                    ]
-                )
-            if rank_val <= 3:
-                top_milestones.append(
-                    [
-                        stat["podium"],
-                        "Relay Podium",
-                        decorated_name,
-                        entry["nat"],
-                        ibu_id,
-                        rank_val,
-                    ]
-                )
-                top_milestones.append(
-                    [
-                        all_stat["podium"],
-                        "Podium",
-                        decorated_name,
-                        entry["nat"],
-                        ibu_id,
-                        rank_val,
-                    ]
-                )
-            top_milestones.append(
-                [
-                    stat["flower"],
-                    "Relay Flower",
-                    decorated_name,
-                    entry["nat"],
-                    ibu_id,
-                    rank_val,
-                ]
-            )
-            top_milestones.append(
-                [
-                    all_stat["flower"],
-                    "Flower",
-                    decorated_name,
-                    entry["nat"],
-                    ibu_id,
-                    rank_val,
-                ]
-            )
-        else:
-            if rank_val == 1:
-                top_milestones.append(
-                    [
-                        all_stat["win"],
-                        "Win",
-                        decorated_name,
-                        entry["nat"],
-                        ibu_id,
-                        rank_val,
-                    ]
-                )
-                top_milestones.append(
-                    [
-                        stat["win"],
-                        "Individual Win",
-                        decorated_name,
-                        entry["nat"],
-                        ibu_id,
-                        rank_val,
-                    ]
-                )
-            if rank_val <= 3:
-                top_milestones.append(
-                    [
-                        all_stat["podium"],
-                        "Podium",
-                        decorated_name,
-                        entry["nat"],
-                        ibu_id,
-                        rank_val,
-                    ]
-                )
-                top_milestones.append(
-                    [
-                        stat["podium"],
-                        "Individual Podium",
-                        decorated_name,
-                        entry["nat"],
-                        ibu_id,
-                        rank_val,
-                    ]
-                )
-            top_milestones.append(
-                [
-                    all_stat["flower"],
-                    "Flower",
-                    decorated_name,
-                    entry["nat"],
-                    ibu_id,
-                    rank_val,
-                ]
-            )
-            top_milestones.append(
-                [
-                    stat["flower"],
-                    "Individual Flower",
-                    decorated_name,
-                    entry["nat"],
-                    ibu_id,
-                    rank_val,
-                ]
-            )
-
-    if run_standard_sections:
-        sec += 1
-        if race_milestones:
-            race_milestones.sort(key=lambda row: row[0], reverse=True)
-            if is_relay:
-                race_milestones = [
-                    [_ordinal(row[0]), row[1], row[2], row[3]]
-                    for row in race_milestones
-                ]
-            else:
-                race_milestones = [
-                    [_ordinal(row[0]), row[1], row[2]] for row in race_milestones
-                ]
-            if is_wc_race:
+        if entry_rank <= 3:
+            (
+                e_dc_wins,
+                e_dc_ind_wins,
+                e_dc_team_wins,
+                e_dc_podiums,
+                e_dc_ind_podiums,
+                e_dc_team_podiums,
+                e_dc_flowers,
+                e_dc_ind_flowers,
+                e_dc_team_flowers,
+            ) = _detail_counts(event_results)
+            (
+                c_dc_wins,
+                c_dc_ind_wins,
+                c_dc_team_wins,
+                c_dc_podiums,
+                c_dc_ind_podiums,
+                c_dc_team_podiums,
+                c_dc_flowers,
+                c_dc_ind_flowers,
+                c_dc_team_flowers,
+            ) = _detail_counts(major_results)
+            if entry_rank == 1:
                 if is_relay:
-                    race_milestones = [
-                        row[:3] + [_age_for_entry(row[2], row[3]), row[3]]
-                        for row in race_milestones
+                    event_detail = [
+                        (e_dc_team_wins, "Relay Win"),
+                        (e_dc_wins, "Win"),
+                        (e_dc_team_podiums, "Relay Podium"),
+                        (e_dc_podiums, "Podium"),
+                        (e_dc_team_flowers, "Relay Flower"),
+                        (e_dc_flowers, "Flower"),
+                    ]
+                    career_detail = [
+                        (c_dc_team_wins, "Relay Win"),
+                        (c_dc_wins, "Win"),
+                        (c_dc_team_podiums, "Relay Podium"),
+                        (c_dc_podiums, "Podium"),
+                        (c_dc_team_flowers, "Relay Flower"),
+                        (c_dc_flowers, "Flower"),
                     ]
                 else:
-                    race_milestones = [
-                        row[:2] + [_age_for_entry(row[1], row[2]), row[2]]
-                        for row in race_milestones
+                    event_detail = [
+                        (e_dc_ind_wins, "Indiv Win"),
+                        (e_dc_wins, "Win"),
+                        (e_dc_ind_podiums, "Indiv Podium"),
+                        (e_dc_podiums, "Podium"),
+                        (e_dc_ind_flowers, "Indiv Flower"),
+                        (e_dc_flowers, "Flower"),
                     ]
-            label = (
-                f"{sec}. World Cup + WCH + OWG race milestones:"
-                if use_major
-                else f"{sec}. World Cup race milestones:"
-            )
-            print(_format_section_title(label, args))
-            if is_relay:
-                relay_headers = (
-                    ["Milestone", "Type", "Athlete", "Age", "Nat"]
-                    if is_wc_race
-                    else ["Milestone", "Type", "Athlete", "Nat"]
-                )
-                relay_cell_fmts = (
-                    [None, None, name_formatter_plain, None, None]
-                    if is_wc_race
-                    else [None, None, name_formatter_plain, None]
-                )
-                render_table(
-                    relay_headers,
-                    race_milestones,
-                    output_format=output_format,
-                    cell_formatters=relay_cell_fmts,
-                )
+                    career_detail = [
+                        (c_dc_ind_wins, "Indiv Win"),
+                        (c_dc_wins, "Win"),
+                        (c_dc_ind_podiums, "Indiv Podium"),
+                        (c_dc_podiums, "Podium"),
+                        (c_dc_ind_flowers, "Indiv Flower"),
+                        (c_dc_flowers, "Flower"),
+                    ]
             else:
-                athlete_headers = (
-                    ["Milestone", "Athlete", "Age", "Nat"]
-                    if is_wc_race
-                    else ["Milestone", "Athlete", "Nat"]
-                )
-                athlete_cell_fmts = (
-                    [None, name_formatter_plain, None, None]
-                    if is_wc_race
-                    else [None, name_formatter_plain, None]
-                )
-                render_table(
-                    athlete_headers,
-                    race_milestones,
-                    output_format=output_format,
-                    cell_formatters=athlete_cell_fmts,
-                )
-            print()
-        else:
-            label = (
-                f"{sec}. World Cup + WCH + OWG race milestones: none"
-                if use_major
-                else f"{sec}. World Cup race milestones: none"
-            )
-            print(_format_section_title(label, args))
-            print()
-
-        sec += 1
-        if top_milestones:
-            label = (
-                f"{sec}. World Cup + WCH + OWG Top 6 Milestones:"
-                if use_major
-                else f"{sec}. World Cup Top 6 Milestones:"
-            )
-            print(_format_section_title(label, args))
-
-            if is_relay:
-                relay_blocks = _build_relay_milestone_blocks(
-                    top_milestones, entries, team_results
-                )
-                for i, block in enumerate(relay_blocks):
-                    team_header = (
-                        f"{block['rank']}. {block['team_name']} ({block['team_nat']})"
-                        if block["team_nat"]
-                        else f"{block['rank']}. {block['team_name']}"
-                    )
-                    if pretty:
-                        print(f"{Color.BOLD}{team_header}{Color.RESET}")
-                    else:
-                        print(team_header)
-                    cell_formatters: list[Callable[[str, int], str] | None] = [None]
-                    for col_idx in range(1, len(block["headers"])):
-                        highlight_rows = {
-                            row_idx
-                            for row_idx, col in block["highlight_cells"]
-                            if col == col_idx
-                        }
-                        if highlight_rows:
-
-                            def _highlight_cell(
-                                cell_str: str,
-                                row_idx: int,
-                                highlight_rows: set[int] = highlight_rows,
-                            ) -> str:
-                                if row_idx in highlight_rows and cell_str != "-":
-                                    return _apply_style(cell_str, "highlight")
-                                return cell_str
-
-                            cell_formatters.append(_highlight_cell)
-                        else:
-                            cell_formatters.append(None)
-                    render_table(
-                        block["headers"],
-                        block["rows"],
-                        output_format=output_format,
-                        cell_formatters=cell_formatters,
-                    )
-                    if i < len(relay_blocks) - 1:
-                        print()
-            else:
-                # Group by athlete (ibu_id), sort groups by race finish rank
-                from itertools import groupby
-
-                type_order = {
-                    "Win": 0,
-                    "Individual Win": 1,
-                    "Podium": 2,
-                    "Individual Podium": 3,
-                    "Flower": 4,
-                    "Individual Flower": 5,
-                }
-                top_milestones.sort(key=lambda row: row[4])
-                grouped = []
-                for _ibu_id, group in groupby(top_milestones, key=lambda row: row[4]):
-                    group_rows = list(group)
-                    group_rows.sort(key=lambda row: type_order.get(row[1], 99))
-                    athlete_name = group_rows[0][2]
-                    athlete_nat = group_rows[0][3]
-                    athlete_rank = group_rows[0][5]
-                    grouped.append(
-                        (athlete_rank, athlete_name, athlete_nat, group_rows)
-                    )
-                grouped.sort(key=lambda g: g[0])
-
-                for i, (rank, athlete_name, athlete_nat, group_rows) in enumerate(
-                    grouped
-                ):
-                    athlete_header = f"{rank}. {athlete_name} ({athlete_nat})"
-                    if pretty:
-                        print(
-                            f"{Color.BOLD}{name_formatter_plain(athlete_header, 0)}{Color.RESET}"
-                        )
-                    else:
-                        print(athlete_header)
-                    display_rows = [
-                        [_ordinal(int(row[0])), row[1]] for row in group_rows
-                    ]
-                    row_styles = [
-                        "highlight" if row[0] == 1 or row[0] % 5 == 0 else ""
-                        for row in group_rows
-                    ]
-                    render_table(
-                        ["Milestone", "Type"],
-                        display_rows,
-                        output_format=output_format,
-                        show_headers=False,
-                        row_styles=row_styles,
-                    )
-                    if i < len(grouped) - 1:
-                        print()
-            print()
-        else:
-            label = (
-                f"{sec}. World Cup + WCH + OWG Top 6 Milestones: none"
-                if use_major
-                else f"{sec}. World Cup Top 6 Milestones: none"
-            )
-            print(_format_section_title(label, args))
-            print()
-
-    if run_standard_sections:
-        sec += 1
-        lap_rows = _fetch_lap_times(race_id, discipline)
-        if lap_rows:
-            print(_format_section_title(f"{sec}. Top 6 fastest laps:", args))
-            headers = ["Time", "Athlete", "Nat", "Lap"]
-            if is_wc_race:
-                headers.insert(2, "Age")
-            if is_relay:
-                headers.insert(3, "Leg")
-            rows = []
-            for lap_row in lap_rows:
-                ibu_id = name_nat_to_id.get((lap_row["name"], lap_row["nat"]), "")
-                name = decorate_any(lap_row["name"], lap_row["nat"], ibu_id)
-                data = [lap_row["time"], name, lap_row["nat"], lap_row["lap"]]
-                if is_wc_race:
-                    data.insert(
-                        2,
-                        _age_for_entry(lap_row["name"], lap_row["nat"], ibu_id),
-                    )
                 if is_relay:
-                    data.insert(3, lap_row["leg"] or "-")
-                rows.append(data)
-            cell_formatters = [None, name_formatter_plain]
-            if is_wc_race:
-                cell_formatters.append(None)
-            cell_formatters.extend([None, None])
-            if is_relay:
-                cell_formatters.insert(3, None)
-            render_table(
-                headers,
-                rows,
-                output_format=get_output_format(args),
-                cell_formatters=cell_formatters,
-            )
-            print()
-        else:
-            print(_format_section_title(f"{sec}. Top 6 fastest laps: none", args))
-            print()
-
-    if run_standard_sections and is_relay:
-        leg_times = []
-        legs_by_bib: dict[str, dict[int, float]] = {}
-        entry_by_leg: dict[tuple[str, int], dict] = {}
-        for entry in entries:
-            if not entry["bib"] or entry["leg"] is None:
-                continue
-            time_str = entry["time"]
-            if isinstance(time_str, str) and time_str.startswith("+"):
-                continue
-            secs = parse_time_seconds(time_str) if time_str else None
-            if secs is None:
-                continue
-            bib = entry["bib"]
-            leg = int(entry["leg"])
-            legs_by_bib.setdefault(bib, {})[leg] = secs
-            entry_by_leg[(bib, leg)] = entry
-        for bib, leg_times_map in legs_by_bib.items():
-            prev_secs = None
-            for leg in sorted(leg_times_map.keys()):
-                total_secs = leg_times_map[leg]
-                leg_secs = total_secs if prev_secs is None else total_secs - prev_secs
-                if leg_secs <= 0:
-                    prev_secs = total_secs
-                    continue
-                entry_or_none = entry_by_leg.get((bib, leg))
-                if not entry_or_none:
-                    prev_secs = total_secs
-                    continue
-                entry = entry_or_none
-                leg_times.append(
-                    [
-                        leg_secs,
-                        entry["name"],
-                        entry["nat"],
-                        leg,
-                        format_seconds(leg_secs),
+                    event_detail = [
+                        (e_dc_team_podiums, "Relay Podium"),
+                        (e_dc_podiums, "Podium"),
+                        (e_dc_team_flowers, "Relay Flower"),
+                        (e_dc_flowers, "Flower"),
                     ]
-                )
-                prev_secs = total_secs
-        leg_times.sort(key=lambda row: row[0])
-        leg_times = leg_times[:TOP_N]
-        sec += 1
-        if leg_times:
-            print(
-                _format_section_title(f"{sec}. Top 6 fastest legs (total time):", args)
-            )
-            rows = []
-            for row in leg_times:
-                ibu_id = name_nat_to_id.get((row[1], row[2]), "")
-                name = decorate_any(row[1], row[2], ibu_id)
-                data = [row[4], name, row[2], row[3]]
-                if is_wc_race:
-                    data.insert(2, _age_for_entry(row[1], row[2], ibu_id))
-                rows.append(data)
-            headers = (
-                ["Time", "Athlete", "Age", "Nat", "Leg"]
-                if is_wc_race
-                else ["Time", "Athlete", "Nat", "Leg"]
-            )
-            cell_formatters = (
-                [None, name_formatter_plain, None, None, None]
-                if is_wc_race
-                else [None, name_formatter_plain, None, None]
-            )
-            render_table(
-                headers,
-                rows,
-                output_format=output_format,
-                cell_formatters=cell_formatters,
-            )
-            print()
-        else:
-            print(
-                _format_section_title(
-                    f"{sec}. Top 6 fastest legs (total time): none", args
-                )
-            )
-            print()
-
-        from ._common import _fetch_relay_analytic_times as _fetch_analytic_times
-
-        crst_times = _fetch_analytic_times(race_id, "CRST")
-        leg_info = {
-            (entry["bib"], entry["leg"]): entry
-            for entry in entries
-            if entry["bib"] and entry["leg"]
-        }
-        leg_course_rows = []
-        for (bib, leg), secs in crst_times.items():
-            leg_entry = leg_info.get((bib, leg))
-            if not leg_entry:
-                continue
-            leg_course_rows.append(
-                [secs, leg_entry["name"], leg_entry["nat"], leg, format_seconds(secs)]
-            )
-        leg_course_rows.sort(key=lambda row: row[0])
-        leg_course_rows = leg_course_rows[:TOP_N]
-        sec += 1
-        if leg_course_rows:
-            print(
-                _format_section_title(f"{sec}. Top 6 fastest legs (course time):", args)
-            )
-            rows = []
-            for row in leg_course_rows:
-                ibu_id = name_nat_to_id.get((row[1], row[2]), "")
-                name = decorate_any(row[1], row[2], ibu_id)
-                data = [row[4], name, row[2], row[3]]
-                if is_wc_race:
-                    data.insert(2, _age_for_entry(row[1], row[2], ibu_id))
-                rows.append(data)
-            headers = (
-                ["Time", "Athlete", "Age", "Nat", "Leg"]
-                if is_wc_race
-                else ["Time", "Athlete", "Nat", "Leg"]
-            )
-            cell_formatters = (
-                [None, name_formatter_plain, None, None, None]
-                if is_wc_race
-                else [None, name_formatter_plain, None, None]
-            )
-            render_table(
-                headers,
-                rows,
-                output_format=output_format,
-                cell_formatters=cell_formatters,
-            )
-            print()
-        else:
-            print(
-                _format_section_title(
-                    f"{sec}. Top 6 fastest legs (course time): none", args
-                )
-            )
-            print()
-
-    if run_standard_sections:
-        stage_times = _fetch_stage_times_by_stage(race_id, stage_cache)
-        stage_misses_map: dict[str, list[int]] = {}
-        for entry in entries:
-            misses = _parse_stage_misses(entry["shootings"])
-            if entry["key"]:
-                stage_misses_map[entry["key"]] = misses
-            if entry["bib"] and entry["leg"] is not None:
-                stage_misses_map[f"{entry['bib']}:{entry['leg']}"] = misses
-        zero_miss_rows = []
-        for stage_idx, times in stage_times.items():
-            for key, secs in times.items():
-                matched_entry = key_to_entry.get(key)
-                if not matched_entry:
-                    continue
-                stage_misses = _stage_miss_for_index(
-                    stage_misses_map.get(key, []), stage_idx, discipline
-                )
-                if stage_misses is None or stage_misses != 0:
-                    continue
-                stage_label = _stage_label(
-                    stage_idx, discipline, matched_entry.get("leg")
-                )
-                zero_miss_rows.append(
-                    [
-                        secs,
-                        matched_entry["name"],
-                        matched_entry["nat"],
-                        format_seconds(secs),
-                        stage_label,
+                    career_detail = [
+                        (c_dc_team_podiums, "Relay Podium"),
+                        (c_dc_podiums, "Podium"),
+                        (c_dc_team_flowers, "Relay Flower"),
+                        (c_dc_flowers, "Flower"),
                     ]
+                else:
+                    event_detail = [
+                        (e_dc_ind_podiums, "Indiv Podium"),
+                        (e_dc_podiums, "Podium"),
+                        (e_dc_ind_flowers, "Indiv Flower"),
+                        (e_dc_flowers, "Flower"),
+                    ]
+                    career_detail = [
+                        (c_dc_ind_podiums, "Indiv Podium"),
+                        (c_dc_podiums, "Podium"),
+                        (c_dc_ind_flowers, "Indiv Flower"),
+                        (c_dc_flowers, "Flower"),
+                    ]
+            for count, type_label in event_detail:
+                win_rows.append(
+                    [count, current_event_label, type_label, name, age, nat]
                 )
-        zero_miss_rows.sort(key=lambda row: row[0])
-        zero_miss_rows = zero_miss_rows[:TOP_N]
-        sec += 1
-        if zero_miss_rows:
-            print(
-                _format_section_title(f"{sec}. Top 6 fastest shooters (0 miss):", args)
+            for count, type_label in career_detail:
+                win_rows.append([count, career_event_label, type_label, name, age, nat])
+
+        processed_milestone_ids.add(ibu_id)
+
+    def _dedupe_milestone_rows(sub_rows: list[list]) -> list[list]:
+        def _type_breadth(t: str) -> int:
+            if t in {"Race"}:
+                return 3
+            if t in {"Indiv Race", "Team Race"}:
+                return 2
+            return 1
+
+        deduped: dict[tuple, list] = {}
+        for row in sub_rows:
+            key = (str(row[1]), str(row[3]), str(row[5]), int(row[0]))
+            existing = deduped.get(key)
+            if existing is None:
+                deduped[key] = row
+            elif _type_breadth(str(row[2])) > _type_breadth(str(existing[2])):
+                deduped[key] = row
+        return list(deduped.values())
+
+    def _sort_milestone_rows(sub_rows: list[list]) -> list[list]:
+        athlete_max: dict[str, int] = {}
+        for row in sub_rows:
+            athlete = str(row[3])
+            v = int(row[0])
+            if v > athlete_max.get(athlete, 0):
+                athlete_max[athlete] = v
+        sub_rows.sort(
+            key=lambda row: (
+                -athlete_max.get(str(row[3]), 0),
+                str(row[3]),
+                -int(row[0]),
+                str(row[1]),
+                str(row[2]),
             )
-            headers = ["Time", "Athlete", "Nat", "Stage"]
-            if is_wc_race:
-                headers.insert(2, "Age")
-            rows = []
-            for row in zero_miss_rows:
-                ibu_id = name_nat_to_id.get((row[1], row[2]), "")
-                name = decorate_any(row[1], row[2], ibu_id)
-                data = [row[3], name, row[2], row[4] or "-"]
-                if is_wc_race:
-                    data.insert(2, _age_for_entry(row[1], row[2], ibu_id))
-                rows.append(data)
-            cell_formatters = [None, name_formatter_plain]
-            if is_wc_race:
-                cell_formatters.append(None)
-            cell_formatters.extend([None, None])
+        )
+        return sub_rows
+
+    milestone_headers = ["Milestone", "Event", "Type", "Athlete", "Age", "Nat"]
+
+    # Race milestones — startlist-style, split into Current Event / Career subsections
+    sec += 1
+    if not race_rows:
+        print(_format_section_title("## Race milestones: none", args))
+        print()
+    else:
+        print(_format_section_title("## Race milestones", args))
+        print()
+        for subsection_title, subsection_rows in [
+            (
+                "Current Event",
+                [row for row in race_rows if str(row[1]) == current_event_label],
+            ),
+            ("Career", [row for row in race_rows if str(row[1]) == career_event_label]),
+        ]:
+            if not subsection_rows:
+                continue
+            deduped = _dedupe_milestone_rows(subsection_rows)
+            sorted_rows = _sort_milestone_rows(deduped)
+            row_separators = {
+                idx
+                for idx in range(1, len(sorted_rows))
+                if str(sorted_rows[idx][3]) != str(sorted_rows[idx - 1][3])
+            }
+            display_rows = [[_ordinal(int(row[0])), *row[1:]] for row in sorted_rows]
+
+            # Blue gradient: skip 1st, scale by event scope
+            def _race_row_color(
+                count: int, evt_lbl: str
+            ) -> tuple[int, int, int] | None:
+                if count <= 1:
+                    return None
+                if evt_lbl == career_event_label:
+                    t = min(1.0, max(0.0, count / (career_race_step * 8)))
+                else:
+                    t = min(1.0, max(0.0, count / (event_race_step * 10)))
+                return (int(50 + 30 * t), int(80 + 120 * t), int(160 + 95 * t))
+
+            race_row_colors = [
+                _race_row_color(int(row[0]), str(row[1])) for row in sorted_rows
+            ]
+
+            def _make_race_fmt(
+                colors: list, base_fmt: Callable[[str, int], str] | None = None
+            ) -> Callable[[str, int], str]:
+                def _fmt(cell_str: str, row_idx: int) -> str:
+                    base = base_fmt(cell_str, row_idx) if base_fmt else cell_str
+                    color = colors[row_idx] if row_idx < len(colors) else None
+                    return (
+                        Color.rgb(base, color, bold=False)
+                        if color is not None
+                        else base
+                    )
+
+                return _fmt
+
+            race_cell_formatters: list[Callable[[str, int], str] | None] = [
+                _make_race_fmt(race_row_colors),
+                _make_race_fmt(race_row_colors),
+                _make_race_fmt(race_row_colors),
+                _make_race_fmt(race_row_colors, name_formatter_plain),
+                _make_race_fmt(race_row_colors),
+                _make_race_fmt(race_row_colors),
+            ]
+
+            print(_format_section_title(f"### {subsection_title}", args))
             render_table(
-                headers,
-                rows,
+                milestone_headers,
+                display_rows,
                 output_format=output_format,
-                cell_formatters=cell_formatters,
+                cell_formatters=race_cell_formatters,
+                row_separators=row_separators,
             )
             print()
-        else:
-            print(
-                _format_section_title(
-                    f"{sec}. Top 6 fastest shooters (0 miss): none", args
+
+    # Win milestones — per-athlete detail rows, split into Current Event / Career
+    sec += 1
+    if not win_rows:
+        print(_format_section_title("## Win milestones: none", args))
+        print()
+    else:
+        print(_format_section_title("## Win milestones", args))
+        print()
+        for subsection_title, subsection_rows in [
+            (
+                "Current Event",
+                [row for row in win_rows if str(row[1]) == current_event_label],
+            ),
+            ("Career", [row for row in win_rows if str(row[1]) == career_event_label]),
+        ]:
+            if not subsection_rows:
+                continue
+            # Keep podium order — no sort; separate athletes with a blank row
+            row_separators = {
+                idx
+                for idx in range(1, len(subsection_rows))
+                if str(subsection_rows[idx][3]) != str(subsection_rows[idx - 1][3])
+            }
+            display_rows = [
+                [_ordinal(int(row[0])), *row[1:]] for row in subsection_rows
+            ]
+
+            def _win_style(count: int, type_label: str) -> str:
+                if (
+                    "Win" in type_label
+                    and "Podium" not in type_label
+                    and "Flower" not in type_label
+                ):
+                    cat = "win"
+                elif "Podium" in type_label:
+                    cat = "podium"
+                else:
+                    cat = "flower"
+                if count == 1:
+                    return f"{cat}_1st"
+                if count % 5 == 0:
+                    return f"{cat}_mult5"
+                return ""
+
+            _style_rgb: dict[str, tuple[int, int, int]] = {
+                "win_1st": (50, 220, 80),
+                "podium_1st": (0, 160, 80),
+                "flower_1st": (100, 190, 120),
+                "win_mult5": (40, 150, 255),
+                "podium_mult5": (70, 120, 210),
+                "flower_mult5": (110, 160, 210),
+            }
+            win_row_styles = [
+                _win_style(int(row[0]), str(row[2])) for row in subsection_rows
+            ]
+
+            def _win_name_formatter(cell_str: str, row_idx: int) -> str:
+                base = name_formatter_plain(cell_str, row_idx)
+                color = _style_rgb.get(
+                    win_row_styles[row_idx] if row_idx < len(win_row_styles) else ""
                 )
+                return Color.rgb(base, color, bold=False) if color else base
+
+            win_cell_formatters: list[Callable[[str, int], str] | None] = [
+                None,
+                None,
+                None,
+                _win_name_formatter,
+                None,
+                None,
+            ]
+            print(_format_section_title(f"### {subsection_title}", args))
+            render_table(
+                milestone_headers,
+                display_rows,
+                output_format=output_format,
+                cell_formatters=win_cell_formatters,
+                row_separators=row_separators,
+                row_styles=win_row_styles,
             )
             print()
 
@@ -3546,14 +3439,8 @@ def handle_post_race(args: argparse.Namespace) -> int:
             bronze_ids.add(ibu_id)
 
     # Discipline medal table (scoped by event type)
-    medal_season_id = (
-        season_id
-        if season_id
-        else str(sport_evt.get("SeasonId") or "") or _season_id_from_race_id(race_id)
-    )
-    medal_cat_id = (
-        cat_id if cat_id else str(comp.get("catId") or comp.get("CatId") or "").upper()
-    )
+    medal_season_id = season_id
+    medal_cat_id = cat_id
 
     if event_type == EVENT_TYPE_WC:
         medal_season_ids = [medal_season_id]
@@ -3585,15 +3472,15 @@ def handle_post_race(args: argparse.Namespace) -> int:
         disc_name = DISCIPLINE_NAMES.get(discipline, discipline)
         cat_name = CATEGORY_DISPLAY_NAMES.get(medal_cat_id, medal_cat_id)
 
-        # Country medal table — skip for OWG (shown in Olympic medal sections)
-        if event_type != EVENT_TYPE_OWG:
+        # Country medal table — WCH only (OWG shown in Olympic medal sections, WC removed)
+        if event_type == EVENT_TYPE_WCH:
             sec += 1
             if sorted_countries:
                 print(
                     _format_section_title(
-                        f"{sec}. {medal_scope} medal table by country"
+                        f"## {medal_scope} medal table by country"
                         f" — {cat_name} {disc_name}"
-                        f" ({medal_races_used} races):",
+                        f" ({medal_races_used} races)",
                         args,
                     )
                 )
@@ -3638,7 +3525,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             else:
                 print(
                     _format_section_title(
-                        f"{sec}. {medal_scope} medal table"
+                        f"## {medal_scope} medal table by country"
                         f" — {cat_name} {disc_name}: none",
                         args,
                     )
@@ -3658,7 +3545,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             )
             in race_medalist_name_nat
         ]
-        if not is_relay and ranked_athletes:
+        if ranked_athletes:
             if is_wc_race:
                 extra_age_ids = {
                     str(stats.get("ibu_id") or "")
@@ -3673,14 +3560,18 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     age_display_by_id.update(extra_age_map)
                     u23_ids.update(extra_u23_ids)
             sec += 1
-            print(
-                _format_section_title(
-                    f"{sec}. {medal_scope} medal table by athlete"
-                    f" — {cat_name} {disc_name}"
-                    f" ({medal_races_used} races):",
-                    args,
+            if event_type == EVENT_TYPE_OWG:
+                _ath_title = (
+                    f"## Athlete {medal_scope} Medal Table"
+                    f" - {disc_name} (available editions)"
                 )
-            )
+            else:
+                _ath_title = (
+                    f"## {medal_scope} medal table by athlete"
+                    f" — {cat_name} {disc_name}"
+                    f" ({medal_races_used} races)"
+                )
+            print(_format_section_title(_ath_title, args))
             medal_gender = "F" if medal_cat_id == "SW" else "M"
             ath_rows = []
             ath_row_styles = []
@@ -3753,16 +3644,41 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 cell_formatters=cell_formatters,
             )
             print()
-        elif not is_relay:
+        else:
             sec += 1
-            print(
-                _format_section_title(
-                    f"{sec}. {medal_scope} medal table by athlete"
-                    f" — {cat_name} {disc_name}: none",
-                    args,
+            if event_type == EVENT_TYPE_OWG:
+                _ath_none_title = (
+                    f"## Athlete {medal_scope} Medal Table"
+                    f" - {disc_name} (available editions): none"
                 )
-            )
+            else:
+                _ath_none_title = (
+                    f"## {medal_scope} medal table by athlete"
+                    f" — {cat_name} {disc_name}: none"
+                )
+            print(_format_section_title(_ath_none_title, args))
             print()
+
+    # WCH all-discipline medal tables
+    if event_type == EVENT_TYPE_WCH:
+        wch_country, wch_athletes = _get_all_wch_medals(
+            medal_cat_id, cutoff_dt=target_start_dt
+        )
+        sec += 1
+        _render_country_all_medal_table(
+            "country_wch_medals_all_disciplines",
+            wch_country,
+            args,
+            title_override="## WCH medal table by country (all disciplines)",
+        )
+        sec += 1
+        _render_athlete_all_medal_table(
+            "athlete_wch_medals_all_disciplines",
+            wch_athletes,
+            participating_ids,
+            args,
+            title_override="## WCH medal table by athlete (all disciplines)",
+        )
 
     # Olympic medal tables
     if event_type == EVENT_TYPE_OWG:
@@ -3770,7 +3686,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             args,
             sec,
             discipline,
-            cat_id or str(comp.get("catId") or comp.get("CatId") or "").upper(),
+            cat_id,
             is_relay,
             participating_ids,
             gold_ids,

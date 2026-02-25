@@ -10,6 +10,9 @@ from typing import Any, cast
 
 from ..api import (
     BiathlonError,
+    get_all_results,
+    get_cups,
+    get_cup_results,
     get_events,
     get_race_results,
     get_races,
@@ -32,13 +35,21 @@ from ._common import (
     _format_section_title,
     _has_completed_relay_results,
     _max_workers,
+    _ordinal,
+    _parse_rank,
     _row_ibu_id,
     detect_event_type,
     is_relay_discipline,
+    _select_race_interactive,
 )
-from .postrace import handle_post_race
+from .postrace import (
+    handle_post_race,
+    _is_result_at_or_before_target,
+    _is_team_level_result,
+    _result_discipline_id,
+    _start_dt_from_competition,
+)
 from .results import _get_wc_rows, _has_completed_results
-from ._common import _select_race_interactive
 from .startlist import (
     _build_startlist_entries,
     _build_team_entries,
@@ -1189,10 +1200,441 @@ def handle_brief_startlist(args: argparse.Namespace) -> int:
     return 0
 
 
+def _render_postevent_standings(
+    args: argparse.Namespace,
+    season_id: str,
+    disciplines_raced: set[tuple[str, str]],
+    output_format: str,
+) -> None:
+    """Render WC standings sections for a post-event summary."""
+    STANDINGS_TOP_N = 10
+    DISC_ORDER = ["SP", "PU", "IN", "MS"]
+    DISC_LABELS = {
+        "SP": "Sprint",
+        "PU": "Pursuit",
+        "IN": "Individual",
+        "MS": "Mass Start",
+    }
+
+    try:
+        cups = get_cups(season_id)
+    except BiathlonError:
+        return
+
+    # Build cup_id lookup: (cat_id, disc) -> cup_id  (Level=1 only)
+    cup_map: dict[tuple[str, str], str] = {}
+    for cup in cups:
+        if cup.get("Level") != 1:
+            continue
+        cat = str(cup.get("CatId") or "").upper()
+        disc = str(cup.get("DisciplineId") or "").upper()
+        cup_id = str(cup.get("CupId") or "")
+        if cat and disc and cup_id:
+            cup_map.setdefault((cat, disc), cup_id)
+
+    def _fetch_top_n(cat: str, disc: str) -> list[dict]:
+        cup_id = cup_map.get((cat, disc))
+        if not cup_id:
+            return []
+        try:
+            payload = get_cup_results(cup_id)
+            rows = payload.get("Rows") or payload.get("Results") or []
+            return list(rows)[:STANDINGS_TOP_N]
+        except BiathlonError:
+            return []
+
+    def _render_standings(title: str, rows: list[dict]) -> None:
+        if not rows:
+            return
+        print(_format_section_title(title, args))
+        table_rows = []
+        for i, row in enumerate(rows, 1):
+            rank = row.get("Rank") or row.get("Standing") or str(i)
+            name = row.get("Name") or row.get("ShortName") or ""
+            nat = row.get("Nat") or ""
+            score = row.get("Score") or row.get("Points") or row.get("TotalScore") or ""
+            table_rows.append([str(rank), name, nat, str(score)])
+        render_table(
+            ["Rank", "Athlete", "Nat", "Points"],
+            table_rows,
+            output_format=output_format,
+        )
+        print()
+
+    print(_format_section_title("WC Standings", args))
+    print()
+
+    _render_standings("Overall — Women", _fetch_top_n("SW", "TS"))
+    _render_standings("Overall — Men", _fetch_top_n("SM", "TS"))
+
+    disc_set = {disc for disc, _cat in disciplines_raced}
+    for disc in DISC_ORDER:
+        if disc not in disc_set:
+            continue
+        disc_label = DISC_LABELS.get(disc, disc)
+        _render_standings(f"{disc_label} — Women", _fetch_top_n("SW", disc))
+        _render_standings(f"{disc_label} — Men", _fetch_top_n("SM", disc))
+
+
 def handle_brief_postevent(args: argparse.Namespace) -> int:
-    """Post-event recap (after an event weekend). Work in progress."""
-    print("brief postevent: work in progress", file=sys.stderr)
-    return 1
+    """Post-event recap: career milestones across all races of an event, plus WC standings."""
+
+    MAJOR_LEVELS = {"WC", "WCH", "OWG"}
+
+    # --- 1. Resolve event ---
+    event_id: str = getattr(args, "event", "") or ""
+    current_event: dict | None = None
+
+    if event_id:
+        season_id_for_lookup = get_current_season_id()
+        for level in (1, 2, 3):
+            try:
+                evts = get_events(season_id_for_lookup, level)
+            except BiathlonError:
+                continue
+            for ev in evts:
+                if ev.get("EventId") == event_id:
+                    current_event = ev
+                    break
+            if current_event:
+                break
+    else:
+        try:
+            season_id_for_lookup = get_current_season_id()
+            all_events = get_events(season_id_for_lookup, level=1)
+        except BiathlonError as exc:
+            print(str(exc), file=sys.stderr)
+            return 1
+
+        today = datetime.date.today()
+        dated: list[tuple[datetime.date, dict]] = []
+        for ev in all_events:
+            end_raw = ev.get("EndDate") or ev.get("StartDate") or ""
+            end_str = str(end_raw).split("T", 1)[0] if end_raw else ""
+            try:
+                end_date = datetime.date.fromisoformat(end_str)
+            except ValueError:
+                continue
+            if end_date <= today:
+                dated.append((end_date, ev))
+        dated.sort(key=lambda x: x[0], reverse=True)
+        candidates = [ev for _, ev in dated[:5]]
+
+        if not candidates:
+            print("No completed World Cup events found this season", file=sys.stderr)
+            return 1
+
+        if len(candidates) == 1 or not sys.stdin.isatty():
+            current_event = candidates[0]
+            event_id = str(current_event.get("EventId") or "")
+        else:
+            print("\nRecent events:\n", file=sys.stderr)
+            for idx, ev in enumerate(candidates, 1):
+                eid = ev.get("EventId") or "?"
+                desc = (
+                    ev.get("ShortDescription")
+                    or ev.get("Description")
+                    or ev.get("Organizer")
+                    or eid
+                )
+                ev_type = detect_event_type(ev)
+                ev_type_label = EVENT_TYPE_LABELS.get(ev_type, ev_type)
+                start_str = str(ev.get("StartDate") or "").split("T", 1)[0]
+                end_str = str(ev.get("EndDate") or "").split("T", 1)[0]
+                date_range = f"{start_str} – {end_str}" if end_str else start_str
+                print(
+                    f"  {idx}. [{ev_type_label}] {desc}  ({date_range})  [ID: {eid}]",
+                    file=sys.stderr,
+                )
+            print(file=sys.stderr)
+            while True:
+                try:
+                    choice = input(f"Enter selection (1-{len(candidates)}): ").strip()
+                    idx = int(choice) - 1
+                    if 0 <= idx < len(candidates):
+                        current_event = candidates[idx]
+                        event_id = str(current_event.get("EventId") or "")
+                        break
+                    print("Invalid selection, try again.", file=sys.stderr)
+                except ValueError:
+                    print("Please enter a number.", file=sys.stderr)
+                except (EOFError, KeyboardInterrupt):
+                    print("Selection cancelled", file=sys.stderr)
+                    return 1
+
+    if not event_id:
+        print("Could not determine event ID", file=sys.stderr)
+        return 1
+
+    # --- 2. Detect event type and milestone level ---
+    event_type = detect_event_type(current_event) if current_event else EVENT_TYPE_WC
+    # --- 3. Fetch races ---
+    try:
+        all_races = get_races(event_id)
+    except BiathlonError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    if not all_races:
+        print(f"No races found for event {event_id}", file=sys.stderr)
+        return 1
+
+    all_races.sort(key=lambda r: r.get("StartTime") or r.get("StartDate") or "")
+    race_ids = [
+        str(r.get("RaceId") or r.get("Id") or "")
+        for r in all_races
+        if r.get("RaceId") or r.get("Id")
+    ]
+
+    # --- 4. Parallel-fetch race results ---
+    race_payloads: dict[str, dict] = {}
+    with ThreadPoolExecutor(max_workers=_max_workers(len(race_ids))) as executor:
+        futures: dict[Any, str] = {
+            executor.submit(get_race_results, rid): rid for rid in race_ids
+        }
+        for future in as_completed(futures):
+            rid = futures[future]
+            try:
+                race_payloads[rid] = future.result()
+            except BiathlonError:
+                pass
+
+    # Filter to completed races (in chronological order)
+    completed_races: list[tuple[str, dict]] = []
+    for rid in race_ids:
+        payload = race_payloads.get(rid)
+        if not payload:
+            continue
+        comp = payload.get("Competition") or {}
+        disc = str(comp.get("DisciplineId") or "").upper()
+        if is_relay_discipline(disc):
+            if _has_completed_relay_results(payload):
+                completed_races.append((rid, payload))
+        else:
+            if _has_completed_results(payload):
+                completed_races.append((rid, payload))
+
+    if not completed_races:
+        print(f"No completed races found for event {event_id}", file=sys.stderr)
+        return 1
+
+    # --- 5. Collect IBU IDs and parallel-fetch AllResults ---
+    all_ibu_ids: set[str] = set()
+    for _rid, payload in completed_races:
+        for res in payload.get("Results") or []:
+            if not res.get("IsTeam"):
+                ibu_id = str(res.get("IBUId") or "")
+                if ibu_id:
+                    all_ibu_ids.add(ibu_id)
+
+    all_results_cache: dict[str, list[dict]] = {}
+    if all_ibu_ids:
+        ibu_list = list(all_ibu_ids)
+        with ThreadPoolExecutor(max_workers=_max_workers(len(ibu_list))) as executor:
+            futures2: dict[Any, str] = {
+                executor.submit(get_all_results, iid): iid for iid in ibu_list
+            }
+            for future in as_completed(futures2):
+                iid = futures2[future]
+                try:
+                    ar = future.result()
+                    all_results_cache[iid] = list(ar.get("Results") or [])
+                except BiathlonError:
+                    all_results_cache[iid] = []
+
+    # --- 6. Process each race ---
+    output_format = get_output_format(args)
+    race_start_cache: dict[str, datetime.datetime | None] = {}
+    warning_keys: set[str] = set()
+    season_id = ""
+    disciplines_raced: set[tuple[str, str]] = set()
+    any_race_had_results = False
+
+    MAJOR_LEVELS = {"WC", "WCH", "OWG"}
+
+    def _prev_label(value: int | None, scope: str) -> str:
+        if value is None:
+            return f"none ({scope})"
+        return f"{_ordinal(value)} ({scope})"
+
+    print()
+
+    for race_id, payload in completed_races:
+        comp = payload.get("Competition") or {}
+        sport_evt = payload.get("SportEvt") or {}
+        disc = str(comp.get("DisciplineId") or "").upper()
+        cat_id = str(comp.get("catId") or comp.get("CatId") or "").upper()
+        is_relay = is_relay_discipline(disc)
+        target_start_dt = _start_dt_from_competition(comp)
+        race_start_cache[race_id] = target_start_dt
+
+        if not season_id:
+            season_id = str(sport_evt.get("SeasonId") or "")
+            if not season_id and race_id.upper().startswith("BT") and len(race_id) >= 6:
+                season_id = race_id[2:6]
+
+        if not is_relay:
+            disciplines_raced.add((disc, cat_id))
+
+        results = list(payload.get("Results") or [])
+        team_results = [r for r in results if r.get("IsTeam")]
+        leg_results = [r for r in results if not r.get("IsTeam")]
+        entries = [
+            {
+                "ibu_id": str(r.get("IBUId") or ""),
+                "name": r.get("Name") or r.get("ShortName") or "",
+                "nat": r.get("Nat") or "",
+                "bib": str(r.get("Bib") or ""),
+                "rank": r.get("Rank") or r.get("ResultOrder") or "",
+                "irm": str(r.get("IRM") or "").upper(),
+                "time": str(r.get("TotalTime") or r.get("Result") or ""),
+            }
+            for r in leg_results
+        ]
+
+        # Build team rank lookup for relay races
+        team_rank_by_bib: dict[str, int] = {}
+        if is_relay:
+            for team in team_results:
+                bib = str(team.get("Bib") or "")
+                rv = _parse_rank(team.get("Rank") or team.get("SO"))
+                if bib and rv is not None:
+                    team_rank_by_bib[bib] = rv
+
+        # Discipline labels for best-performance messages
+        disc_label = DISCIPLINE_NAMES.get(disc, disc)
+        disc_label_lc = disc_label.lower()
+        if is_relay:
+            all_label = "Best Relay Results (all discipline)"
+            discipline_label = f"Best Relay Results ({disc_label_lc})"
+        else:
+            all_label = "Best Individual Result (all discipline)"
+            discipline_label = f"Best Individual Results ({disc_label_lc})"
+
+        # Best career performance detection
+        seen_ids: set[str] = set()
+        perf_rows: list[tuple[int, str, str, str, str]] = []
+
+        for entry in entries:
+            ibu_id = entry["ibu_id"]
+            if not ibu_id or ibu_id in seen_ids:
+                continue
+            seen_ids.add(ibu_id)
+
+            if is_relay:
+                current_rank = team_rank_by_bib.get(entry["bib"])
+            else:
+                current_rank = _parse_rank(entry["rank"])
+
+            # Skip lapped / invalid results
+            if entry["irm"] == "LAP" or "LAP" in entry["time"].upper():
+                continue
+            if disc == "PU" and current_rank is not None and current_rank >= 10000:
+                continue
+            if current_rank is None:
+                continue
+
+            # Gather all major-level results up to (and including) this race
+            major_ranked: list[tuple[dict, int]] = []
+            for res in all_results_cache.get(ibu_id, []):
+                if str(res.get("Level") or "").upper() not in MAJOR_LEVELS:
+                    continue
+                if not _is_result_at_or_before_target(
+                    res,
+                    race_id,
+                    target_start_dt,
+                    race_start_cache,
+                    warning_keys,
+                    f"best performances for {ibu_id}",
+                ):
+                    continue
+                rv = _parse_rank(
+                    res.get("Rank") or res.get("SO") or res.get("ResultOrder")
+                )
+                if rv is None:
+                    continue
+                major_ranked.append((res, rv))
+
+            prior_rows = [
+                (res, rv)
+                for res, rv in major_ranked
+                if str(res.get("RaceId") or "") != race_id
+            ]
+            prior_same_type = [
+                (res, rv)
+                for res, rv in prior_rows
+                if _is_team_level_result(res) == is_relay
+            ]
+            prior_best_all = min((rv for _, rv in prior_same_type), default=None)
+            prior_best_disc = min(
+                (rv for res, rv in prior_rows if _result_discipline_id(res) == disc),
+                default=None,
+            )
+
+            is_best_all = prior_best_all is None or current_rank < prior_best_all
+            is_best_disc = prior_best_disc is None or current_rank < prior_best_disc
+            if not is_best_all and not is_best_disc:
+                continue
+
+            if is_best_all:
+                perf_rows.append(
+                    (
+                        current_rank,
+                        entry["name"],
+                        entry["nat"],
+                        all_label,
+                        _prev_label(prior_best_all, "all discipline"),
+                    )
+                )
+            else:
+                perf_rows.append(
+                    (
+                        current_rank,
+                        entry["name"],
+                        entry["nat"],
+                        discipline_label,
+                        _prev_label(prior_best_disc, disc_label_lc),
+                    )
+                )
+
+        if not perf_rows:
+            continue
+
+        any_race_had_results = True
+        perf_rows.sort(key=lambda r: (r[0], r[1]))
+
+        print(_format_section_title(format_race_header(payload, race_id), args))
+        print()
+
+        print(_format_section_title("Best Performances:", args))
+        table_rows = []
+        row_styles = []
+        for rank_val, name, nat, milestone, previous_best in perf_rows:
+            table_rows.append([str(rank_val), name, nat, milestone, previous_best])
+            if rank_val == 1:
+                row_styles.append("gold")
+            elif rank_val == 2:
+                row_styles.append("silver")
+            elif rank_val == 3:
+                row_styles.append("bronze")
+            else:
+                row_styles.append("dim")
+        render_table(
+            ["Rank", "Athlete", "Nat", "Milestone", "Previous Best"],
+            table_rows,
+            output_format=output_format,
+            row_styles=row_styles,
+        )
+        print()
+
+    if not any_race_had_results:
+        print(_format_section_title("No best career performances this event.", args))
+        print()
+
+    # --- 7. WC standings (WC events only) ---
+    if event_type == EVENT_TYPE_WC and season_id:
+        _render_postevent_standings(args, season_id, disciplines_raced, output_format)
+
+    return 0
 
 
 def handle_brief_preseason(args: argparse.Namespace) -> int:

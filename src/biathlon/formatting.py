@@ -393,6 +393,19 @@ def render_table(
             return Color.red(text)
         if style == "other":
             return Color.other(text)
+        # Win milestone styles: green shades (1st) and blue shades (×5)
+        if style == "win_1st":
+            return Color.rgb(text, (50, 220, 80), bold=False)
+        if style == "podium_1st":
+            return Color.rgb(text, (0, 160, 80), bold=False)
+        if style == "flower_1st":
+            return Color.rgb(text, (100, 190, 120), bold=False)
+        if style == "win_mult5":
+            return Color.rgb(text, (40, 150, 255), bold=False)
+        if style == "podium_mult5":
+            return Color.rgb(text, (70, 120, 210), bold=False)
+        if style == "flower_mult5":
+            return Color.rgb(text, (110, 160, 210), bold=False)
         return text
 
     formatted_rows: list[list[str]] = []

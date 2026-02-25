@@ -733,9 +733,12 @@ def build_parser() -> argparse.ArgumentParser:
         formatter_class=CompactOptionalFormatter,
         add_help=False,
     )
-    brief_help["postevent"] = "Post-event recap (after an event weekend) [WIP]"
+    brief_help["postevent"] = "Post-event recap (after an event weekend)"
     brief_postevent.add_argument(
         "--event", default="", help="Event id (default: last completed WC event)"
+    )
+    brief_postevent.add_argument(
+        "--major", action="store_true", help="Use WC+WCH+OWG milestones"
     )
     add_output_format_arg(brief_postevent)
     brief_postevent.set_defaults(func=handle_brief_postevent)
