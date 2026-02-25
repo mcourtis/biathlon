@@ -79,7 +79,407 @@ def test_find_current_event_prefers_in_progress(monkeypatch):
     assert event.get("EventId") == "LIVE"
 
 
+def test_resolve_current_season_id_for_highlight_prefers_is_current(monkeypatch):
+    monkeypatch.setattr(brief, "get_current_season_id", lambda: "2627")
+    monkeypatch.setattr(
+        brief,
+        "get_seasons",
+        lambda: [
+            {"SeasonId": "2425", "SortOrder": 1, "IsCurrent": False},
+            {"SeasonId": "2526", "SortOrder": 2, "IsCurrent": True},
+            {"SeasonId": "2627", "SortOrder": 3, "IsCurrent": False},
+        ],
+    )
+
+    assert brief._resolve_current_season_id_for_highlight() == "2526"
+
+
+def test_count_venue_event_editions_groups_wc_wch_owg(monkeypatch):
+    monkeypatch.setattr(brief, "get_seasons", lambda: [{"SeasonId": "2526"}])
+    monkeypatch.setattr(
+        brief,
+        "get_events",
+        lambda season_id, level: (
+            [
+                {
+                    "EventId": "A",
+                    "Organizer": "Kontiolahti",
+                    "Description": "BMW IBU World Cup",
+                },
+                {
+                    "EventId": "B",
+                    "Organizer": "Kontiolahti",
+                    "Description": "BMW IBU World Championships",
+                },
+                {
+                    "EventId": "C",
+                    "Organizer": "Kontiolahti",
+                    "Description": "Olympic Winter Games",
+                },
+                {
+                    "EventId": "D",
+                    "Organizer": "Ostersund",
+                    "Description": "BMW IBU World Cup",
+                },
+                {
+                    "EventId": "A",
+                    "Organizer": "Kontiolahti",
+                    "Description": "BMW IBU World Cup",
+                },
+            ]
+            if season_id == "2526" and level == 1
+            else []
+        ),
+    )
+
+    assert brief._count_venue_event_editions("Kontiolahti") == (1, 1, 1)
+
+
+def test_count_venue_event_editions_excludes_future_after_reference_date(monkeypatch):
+    monkeypatch.setattr(brief, "get_seasons", lambda: [{"SeasonId": "2526"}])
+    monkeypatch.setattr(
+        brief,
+        "get_events",
+        lambda season_id, level: (
+            [
+                {
+                    "EventId": "A",
+                    "Organizer": "Kontiolahti",
+                    "Description": "BMW IBU World Cup",
+                    "StartDate": "2026-01-15",
+                },
+                {
+                    "EventId": "B",
+                    "Organizer": "Kontiolahti",
+                    "Description": "BMW IBU World Championships",
+                    "StartDate": "2026-02-10",
+                },
+            ]
+            if season_id == "2526" and level == 1
+            else []
+        ),
+    )
+
+    assert brief._count_venue_event_editions(
+        "Kontiolahti", reference_date=datetime.date(2026, 1, 15)
+    ) == (1, 0, 0)
+
+
+def test_recent_venue_editions_rows_include_race_type_counts(monkeypatch):
+    monkeypatch.setattr(brief, "get_seasons", lambda: [{"SeasonId": "2526"}])
+    monkeypatch.setattr(
+        brief,
+        "get_events",
+        lambda season_id, level: (
+            [
+                {
+                    "EventId": "A",
+                    "Organizer": "Kontiolahti",
+                    "Description": "BMW IBU World Cup",
+                    "StartDate": "2026-01-15",
+                }
+            ]
+            if season_id == "2526" and level == 1
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_races",
+        lambda event_id: (
+            [
+                {"catId": "SW", "DisciplineId": "SP"},
+                {"catId": "SM", "DisciplineId": "SP"},
+                {"catId": "SW", "DisciplineId": "SI"},
+                {"catId": "SM", "DisciplineId": "PU"},
+                {"catId": "MX", "DisciplineId": "RL"},
+                {"catId": "SM", "DisciplineId": "SR"},
+                {"catId": "JW", "DisciplineId": "SP"},
+            ]
+            if event_id == "A"
+            else []
+        ),
+    )
+
+    rows = brief._build_recent_venue_edition_rows("Kontiolahti", limit=10)
+    assert rows == [["2026-01-15", "WC", 2, 1, 1, 0, 0, 1, 1]]
+
+
+def test_recent_venue_editions_rows_exclude_future_after_reference_date(monkeypatch):
+    monkeypatch.setattr(brief, "get_seasons", lambda: [{"SeasonId": "2526"}])
+    monkeypatch.setattr(
+        brief,
+        "get_events",
+        lambda season_id, level: (
+            [
+                {
+                    "EventId": "A",
+                    "Organizer": "Kontiolahti",
+                    "Description": "BMW IBU World Cup",
+                    "StartDate": "2026-01-15",
+                },
+                {
+                    "EventId": "B",
+                    "Organizer": "Kontiolahti",
+                    "Description": "BMW IBU World Cup",
+                    "StartDate": "2026-12-01",
+                },
+            ]
+            if season_id == "2526" and level == 1
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_races",
+        lambda event_id: [{"catId": "SW", "DisciplineId": "SP"}],
+    )
+
+    rows = brief._build_recent_venue_edition_rows(
+        "Kontiolahti", limit=10, reference_date=datetime.date(2026, 1, 15)
+    )
+    assert rows == [["2026-01-15", "WC", 1, 0, 0, 0, 0, 0, 0]]
+
+
+def test_build_venue_decorated_athlete_rows_uses_medal_columns(monkeypatch):
+    monkeypatch.setattr(brief, "get_current_season_id", lambda: "2526")
+    monkeypatch.setattr(brief, "get_seasons", lambda: [{"SeasonId": "2526"}])
+    monkeypatch.setattr(
+        brief,
+        "get_events",
+        lambda season_id, level: (
+            [
+                {
+                    "EventId": "EVT1",
+                    "Organizer": "Kontiolahti",
+                    "Description": "BMW IBU World Cup",
+                    "StartDate": "2026-01-10",
+                }
+            ]
+            if season_id == "2526" and level == 1
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_races",
+        lambda event_id: (
+            [
+                {"RaceId": "R_SW", "catId": "SW", "DisciplineId": "SP"},
+                {"RaceId": "R_MX", "catId": "MX", "DisciplineId": "SR"},
+                {"RaceId": "R_SM", "catId": "SM", "DisciplineId": "SP"},
+            ]
+            if event_id == "EVT1"
+            else []
+        ),
+    )
+
+    payloads = {
+        "R_SW": {
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "IBUId": "W1",
+                    "Name": "Alice",
+                    "Nat": "NOR",
+                    "Rank": "1",
+                }
+            ]
+        },
+        "R_MX": {
+            "Results": [
+                {"IsTeam": True, "Bib": "7", "Nat": "FRA", "Rank": "1"},
+                {
+                    "IsTeam": False,
+                    "IBUId": "F1",
+                    "Name": "Fiona",
+                    "Nat": "FRA",
+                    "Bib": "7",
+                    "Leg": "1",
+                },
+                {
+                    "IsTeam": False,
+                    "IBUId": "M1",
+                    "Name": "Marc",
+                    "Nat": "FRA",
+                    "Bib": "7",
+                    "Leg": "2",
+                },
+            ]
+        },
+        "R_SM": {
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "IBUId": "M1",
+                    "Name": "Marc",
+                    "Nat": "FRA",
+                    "Rank": "2",
+                }
+            ]
+        },
+    }
+    monkeypatch.setattr(brief, "get_race_results", lambda race_id: payloads[race_id])
+
+    rows, row_styles = brief._build_venue_decorated_athlete_rows(
+        "Kontiolahti", limit=10
+    )
+
+    assert rows[0][1] == "Alice"
+    assert any(
+        row[1] == "Marc"
+        and row[2] == "FRA"
+        and row[3] == "M"
+        and row[4:9] == ["1", "1", "0", "2", "2"]
+        and row[9:14] == ["0", "1", "0", "1", "1"]
+        and row[14:19] == ["1", "0", "0", "1", "1"]
+        for row in rows
+    )
+    assert any(
+        row[1] == "Alice"
+        and row[4:9] == ["1", "0", "0", "1", "1"]
+        and row[9:14] == ["1", "0", "0", "1", "1"]
+        and row[14:19] == ["0", "0", "0", "0", "0"]
+        for row in rows
+    )
+    assert any(
+        row[1] == "Fiona" and row[3] == "F" and row[14:19] == ["1", "0", "0", "1", "1"]
+        for row in rows
+    )
+    assert row_styles
+    assert all(style == "highlight_plain" for style in row_styles)
+
+
+def test_build_venue_decorated_athlete_rows_respects_global_highlight_keys(monkeypatch):
+    monkeypatch.setattr(brief, "get_current_season_id", lambda: "2526")
+    monkeypatch.setattr(
+        brief,
+        "get_seasons",
+        lambda: [
+            {"SeasonId": "2526", "SortOrder": 2},
+            {"SeasonId": "2425", "SortOrder": 1},
+        ],
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_events",
+        lambda season_id, level: (
+            [
+                {
+                    "EventId": "OLD_EVT",
+                    "Organizer": "Kontiolahti",
+                    "Description": "BMW IBU World Cup",
+                    "StartDate": "2025-01-10",
+                }
+            ]
+            if season_id == "2425" and level == 1
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_races",
+        lambda event_id: (
+            [{"RaceId": "OLD_RACE", "catId": "SM", "DisciplineId": "SP"}]
+            if event_id == "OLD_EVT"
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_race_results",
+        lambda race_id: (
+            {
+                "Results": [
+                    {
+                        "IsTeam": False,
+                        "IBUId": "OLD_ATH",
+                        "Name": "Old Athlete",
+                        "Nat": "NOR",
+                        "Rank": "1",
+                    }
+                ]
+            }
+            if race_id == "OLD_RACE"
+            else {"Results": []}
+        ),
+    )
+
+    rows, row_styles = brief._build_venue_decorated_athlete_rows(
+        "Kontiolahti",
+        highlight_keys={"OLD_ATH"},
+        limit=10,
+    )
+
+    assert rows
+    assert row_styles == ["highlight_plain"]
+
+
+def test_render_decorated_tables_renumbers_rank_per_gender(capsys):
+    rows = [
+        [
+            "5",
+            "Woman A",
+            "SWE",
+            "F",
+            "2",
+            "1",
+            "0",
+            "3",
+            "10",
+            "1",
+            "1",
+            "0",
+            "2",
+            "8",
+            "1",
+            "0",
+            "0",
+            "1",
+            "2",
+        ],
+        [
+            "9",
+            "Man A",
+            "NOR",
+            "M",
+            "4",
+            "2",
+            "1",
+            "7",
+            "14",
+            "3",
+            "1",
+            "1",
+            "5",
+            "11",
+            "1",
+            "1",
+            "0",
+            "2",
+            "3",
+        ],
+    ]
+    styles = ["", ""]
+
+    brief._render_decorated_athletes_split_tables(
+        "Most Decorated Athletes at Kontiolahti",
+        rows,
+        styles,
+        argparse.Namespace(format="tsv"),
+    )
+
+    out = capsys.readouterr().out
+    assert "### Women" in out
+    assert "### Men" in out
+    assert "1\tWoman A\tSWE" in out
+    assert "1\tMan A\tNOR" in out
+    assert "5\tWoman A\tSWE" not in out
+    assert "9\tMan A\tNOR" not in out
+
+
 def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
+    monkeypatch.setattr(brief, "get_current_season_id", lambda: "2526")
     monkeypatch.setattr(
         brief,
         "_find_current_event",
@@ -87,26 +487,62 @@ def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
             "EventId": "EVT1",
             "SeasonId": "2526",
             "Organizer": "Ruhpolding",
+            "Nat": "GER",
             "Description": "BMW IBU World Cup",
         },
     )
     monkeypatch.setattr(
         brief,
+        "get_seasons",
+        lambda: [{"SeasonId": "2526"}, {"SeasonId": "2425"}],
+    )
+    monkeypatch.setattr(
+        brief,
         "get_events",
-        lambda season_id, level: [
-            {
-                "EventId": "EVT0",
-                "Description": "BMW IBU World Cup",
-                "StartDate": "2025-12-30",
-                "EndDate": "2026-01-03",
-            },
-            {
-                "EventId": "EVT1",
-                "Description": "BMW IBU World Cup",
-                "StartDate": "2026-01-10",
-                "EndDate": "2026-01-16",
-            },
-        ],
+        lambda season_id, level: (
+            [
+                {
+                    "EventId": "EVT0",
+                    "Organizer": "Ruhpolding",
+                    "Description": "BMW IBU World Cup",
+                    "StartDate": "2025-12-30",
+                    "EndDate": "2026-01-03",
+                },
+                {
+                    "EventId": "EVT1",
+                    "Organizer": "Ruhpolding",
+                    "Description": "BMW IBU World Cup",
+                    "StartDate": "2026-01-10",
+                    "EndDate": "2026-01-16",
+                },
+                {
+                    "EventId": "EVT_WCH",
+                    "Organizer": "Ruhpolding",
+                    "Description": "BMW IBU World Championships",
+                    "StartDate": "2026-02-01",
+                    "EndDate": "2026-02-14",
+                },
+            ]
+            if season_id == "2526" and level == 1
+            else [
+                {
+                    "EventId": "EVT_OWG",
+                    "Organizer": "Ruhpolding",
+                    "Description": "Olympic Winter Games",
+                    "StartDate": "2025-02-01",
+                    "EndDate": "2025-02-14",
+                },
+                {
+                    "EventId": "EVT_OTHER",
+                    "Organizer": "Ostersund",
+                    "Description": "BMW IBU World Cup",
+                    "StartDate": "2025-03-01",
+                    "EndDate": "2025-03-05",
+                },
+            ]
+            if season_id == "2425" and level == 1
+            else []
+        ),
     )
 
     def fake_get_races(event_id: str):
@@ -177,6 +613,7 @@ def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
                 "Results": [],
             }
         payloads = {
+            "TARGET2": {"Results": []},
             "R_SW_SP": {
                 "Results": [
                     {
@@ -235,7 +672,7 @@ def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
                 ]
             },
         }
-        return payloads[race_id]
+        return payloads.get(race_id, {"Results": []})
 
     monkeypatch.setattr(brief, "get_race_results", fake_get_race_results)
 
@@ -245,10 +682,30 @@ def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "# Event Brief - Ruhpolding" in out
+    assert "## Event Facts" in out
+    assert "Country\tWC Editions\tWCH Editions\tOWG Editions" in out
+    assert "Germany\t2\t0\t1" in out
+    assert "## Last 10 Editions at Ruhpolding" in out
+    assert out.index("## Event Agenda") < out.index("## Last 10 Editions at Ruhpolding")
+    assert (
+        "Edition\tType\tSprint\tPursuit\tIndividual\tMass Start\tRelay\tMixed Relay\tSingle Mixed Relay"
+        in out
+    )
+    assert "2026-01-10\tWC\tX\t-\t-\t-\t-\t-\t-" in out
+    assert "2026-02-01\tWCH" not in out
     assert "## Event Agenda" in out
     assert "## Athlete Standings" in out
     assert "## Relay Standings" in out
     assert "## Nations Cup Standings" in out
+    assert "## Most Decorated Athletes at Ruhpolding" in out
+    assert "## Most Decorated Athletes at World Cup" in out
+    assert out.rfind("## Most Decorated Athletes at World Cup") > out.rfind(
+        "## Nations Cup Standings"
+    )
+    assert (
+        "#\tAthlete\tNat\tGold\tSilver\tBronze\tTotal\tRaces\tGold\tSilver\tBronze\tTotal\tRaces\tGold\tSilver\tBronze\tTotal\tRaces"
+        in out
+    )
     assert "### Women" in out
     assert "### Men" in out
     assert "Date\tDay\tTime\tCategory\tDiscipline\tSeason Race\tSeason Race Full" in out
@@ -632,6 +1089,7 @@ def test_relay_and_nations_use_same_country_mapping(monkeypatch, capsys):
 
 
 def test_handle_brief_preevent_upcoming_uses_live_cup_athlete_rows(monkeypatch, capsys):
+    monkeypatch.setattr(brief, "get_current_season_id", lambda: "2526")
     monkeypatch.setattr(
         brief,
         "_find_current_event",
@@ -642,6 +1100,8 @@ def test_handle_brief_preevent_upcoming_uses_live_cup_athlete_rows(monkeypatch, 
             "Description": "BMW IBU World Cup",
         },
     )
+    monkeypatch.setattr(brief, "get_seasons", lambda: [])
+    monkeypatch.setattr(brief, "get_events", lambda season_id, level: [])
     monkeypatch.setattr(
         brief,
         "get_races",
