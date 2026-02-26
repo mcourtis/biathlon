@@ -2711,6 +2711,7 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
                 venue_events=venue_events,
                 reference_date=venue_reference_date,
                 highlight_keys=current_season_highlight_keys,
+                exclude_event_ids={event_id},
                 limit=0,
             )
             _render_decorated_athletes_split_tables(
@@ -2730,6 +2731,7 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
                     event_type,
                     reference_date=venue_reference_date,
                     highlight_keys=current_season_highlight_keys,
+                    exclude_event_ids={event_id},
                     limit=0,
                 )
             )

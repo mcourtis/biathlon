@@ -855,6 +855,96 @@ def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
     assert "Men" in out
 
 
+def test_handle_brief_preevent_excludes_current_event_from_decorated_sections(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        brief,
+        "_find_event_by_id",
+        lambda event_id: {
+            "EventId": event_id,
+            "SeasonId": "2526",
+            "Organizer": "Ruhpolding",
+            "Description": "BMW IBU World Cup",
+            "Nat": "GER",
+        },
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_races",
+        lambda event_id: [
+            {
+                "RaceId": "TARGET",
+                "catId": "SW",
+                "DisciplineId": "SP",
+                "StartTime": "2026-01-10T10:00:00Z",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_race_results",
+        lambda race_id: {
+            "SportEvt": {"Description": "BMW IBU World Cup", "Organizer": "Ruhpolding"},
+            "Competition": {
+                "DisciplineId": "SP",
+                "catId": "SW",
+                "StartTime": "2026-01-10T10:00:00Z",
+            },
+            "Results": [],
+        },
+    )
+    monkeypatch.setattr(brief, "_collect_venue_level1_events", lambda venue_name: [])
+    monkeypatch.setattr(
+        brief,
+        "_count_venue_event_editions",
+        lambda *a, **k: (0, 0, 0),
+    )
+    monkeypatch.setattr(
+        brief,
+        "_compute_preevent_snapshot_standings",
+        lambda *a, **k: {
+            "athlete": {
+                "SW": {"TS": [], "SP": [], "PU": [], "IN": [], "MS": []},
+                "SM": {"TS": [], "SP": [], "PU": [], "IN": [], "MS": []},
+            },
+            "relay": {"SW": [], "SM": [], "MX": []},
+            "nations": {"SW": [], "SM": []},
+        },
+    )
+    monkeypatch.setattr(brief, "_render_preevent_agenda", lambda *a, **k: None)
+    monkeypatch.setattr(brief, "_build_recent_venue_edition_rows", lambda *a, **k: [])
+    monkeypatch.setattr(
+        brief, "_collect_current_season_participant_keys", lambda *a, **k: set()
+    )
+
+    captured: dict[str, set[str] | None] = {"venue": None, "event_type": None}
+
+    def fake_build_venue(*args, **kwargs):
+        captured["venue"] = kwargs.get("exclude_event_ids")
+        return [], []
+
+    def fake_build_event_type(*args, **kwargs):
+        captured["event_type"] = kwargs.get("exclude_event_ids")
+        return [], []
+
+    monkeypatch.setattr(brief, "_build_venue_decorated_athlete_rows", fake_build_venue)
+    monkeypatch.setattr(
+        brief, "_build_event_type_decorated_athlete_rows", fake_build_event_type
+    )
+    monkeypatch.setattr(
+        brief,
+        "_render_decorated_athletes_split_tables",
+        lambda *a, **k: None,
+    )
+
+    rc = brief.handle_brief_preevent(argparse.Namespace(event="EVT1", format="tsv"))
+
+    assert rc == 0
+    assert captured["venue"] == {"EVT1"}
+    assert captured["event_type"] == {"EVT1"}
+
+
 def test_sequence_maps_use_event_level_and_include_mixed_in_team_full(monkeypatch):
     monkeypatch.setattr(
         brief,
