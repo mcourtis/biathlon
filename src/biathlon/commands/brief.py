@@ -430,23 +430,35 @@ def _render_venue_history_table(
 
 PREEVENT_CATEGORY_CODES = ("WC", "WCH", "OWG")
 
+PREEVENT_SECTION_EVENT_FACTS = "event_facts"
 PREEVENT_SECTION_EVENT_AGENDA = "event_agenda"
+PREEVENT_SECTION_LAST_10_EDITIONS = "last_10_editions_venue"
 PREEVENT_SECTION_ATHLETE_STANDINGS = "athlete_standings"
 PREEVENT_SECTION_RELAY_STANDINGS = "relay_standings"
 PREEVENT_SECTION_NATIONS_CUP = "nations_cup_standings"
+PREEVENT_SECTION_DECORATED_VENUE = "most_decorated_venue"
+PREEVENT_SECTION_DECORATED_EVENT_TYPE = "most_decorated_event_type"
 
 PREEVENT_SECTION_ORDER = [
+    PREEVENT_SECTION_EVENT_FACTS,
     PREEVENT_SECTION_EVENT_AGENDA,
+    PREEVENT_SECTION_LAST_10_EDITIONS,
     PREEVENT_SECTION_ATHLETE_STANDINGS,
     PREEVENT_SECTION_RELAY_STANDINGS,
     PREEVENT_SECTION_NATIONS_CUP,
+    PREEVENT_SECTION_DECORATED_VENUE,
+    PREEVENT_SECTION_DECORATED_EVENT_TYPE,
 ]
 
 PREEVENT_SECTION_TITLES = {
+    PREEVENT_SECTION_EVENT_FACTS: "Event Facts",
     PREEVENT_SECTION_EVENT_AGENDA: "Event Agenda",
+    PREEVENT_SECTION_LAST_10_EDITIONS: "Last 10 Editions at <venue>",
     PREEVENT_SECTION_ATHLETE_STANDINGS: "Athlete Standings",
     PREEVENT_SECTION_RELAY_STANDINGS: "Relay Standings",
     PREEVENT_SECTION_NATIONS_CUP: "Nations Cup Standings",
+    PREEVENT_SECTION_DECORATED_VENUE: "Most Decorated Athletes at <venue>",
+    PREEVENT_SECTION_DECORATED_EVENT_TYPE: "Most Decorated Athletes at <event type>",
 }
 
 
@@ -455,10 +467,14 @@ def _preevent_matrix_row(wc: bool, wch: bool, owg: bool) -> dict[str, bool]:
 
 
 PREEVENT_SECTION_MATRIX = {
+    PREEVENT_SECTION_EVENT_FACTS: _preevent_matrix_row(True, True, True),
     PREEVENT_SECTION_EVENT_AGENDA: _preevent_matrix_row(True, True, True),
+    PREEVENT_SECTION_LAST_10_EDITIONS: _preevent_matrix_row(True, True, True),
     PREEVENT_SECTION_ATHLETE_STANDINGS: _preevent_matrix_row(True, True, True),
     PREEVENT_SECTION_RELAY_STANDINGS: _preevent_matrix_row(True, True, True),
     PREEVENT_SECTION_NATIONS_CUP: _preevent_matrix_row(True, True, True),
+    PREEVENT_SECTION_DECORATED_VENUE: _preevent_matrix_row(True, True, True),
+    PREEVENT_SECTION_DECORATED_EVENT_TYPE: _preevent_matrix_row(True, True, True),
 }
 
 
@@ -2469,13 +2485,18 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
     print()
     print(_preevent_heading(1, f"Event Brief - {venue_name}", args))
     print()
-    print(_preevent_heading(2, "Event Facts", args))
-    render_table(
-        ["Country", "WC Editions", "WCH Editions", "OWG Editions"],
-        [[event_country, wc_editions, wch_editions, owg_editions]],
-        output_format=get_output_format(args),
-    )
-    print()
+    if _preevent_section_enabled(PREEVENT_SECTION_EVENT_FACTS, category_code):
+        print(
+            _preevent_heading(
+                2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_EVENT_FACTS], args
+            )
+        )
+        render_table(
+            ["Country", "WC Editions", "WCH Editions", "OWG Editions"],
+            [[event_country, wc_editions, wch_editions, owg_editions]],
+            output_format=get_output_format(args),
+        )
+        print()
 
     if _preevent_section_enabled(PREEVENT_SECTION_EVENT_AGENDA, category_code):
         level_raw = (current_event or {}).get("Level")
@@ -2488,37 +2509,39 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
             races, args, season_id, event_type, event_id, level=event_level
         )
 
-    print(_preevent_heading(2, f"Last 10 Editions at {venue_name}", args))
-    recent_edition_rows = _build_recent_venue_edition_rows(
-        venue_name,
-        limit=10,
-        venue_events=venue_events,
-        reference_date=venue_reference_date,
-    )
-    if not recent_edition_rows:
-        print("none")
-        print()
-    else:
-        recent_edition_display_rows: list[list[str]] = []
-        for row in recent_edition_rows:
-            display_row: list[str] = [str(row[0]), str(row[1])]
-            for value in row[2:]:
-                display_row.append(_race_type_presence_mark(value))
-            recent_edition_display_rows.append(display_row)
-
-        def _format_edition_mark(cell_str: str, _row_idx: int) -> str:
-            return Color.highlight(cell_str) if cell_str == "X" else cell_str
-
-        render_table(
-            ["Edition", "Type"] + [label for _code, label in VENUE_RACE_TYPE_COLUMNS],
-            recent_edition_display_rows,
-            output_format=get_output_format(args),
-            alignments=["left", "left"] + ["left" for _ in VENUE_RACE_TYPE_COLUMNS],
-            column_separators={2},
-            cell_formatters=[None, None]
-            + [_format_edition_mark for _ in VENUE_RACE_TYPE_COLUMNS],
+    if _preevent_section_enabled(PREEVENT_SECTION_LAST_10_EDITIONS, category_code):
+        print(_preevent_heading(2, f"Last 10 Editions at {venue_name}", args))
+        recent_edition_rows = _build_recent_venue_edition_rows(
+            venue_name,
+            limit=10,
+            venue_events=venue_events,
+            reference_date=venue_reference_date,
         )
-        print()
+        if not recent_edition_rows:
+            print("none")
+            print()
+        else:
+            recent_edition_display_rows: list[list[str]] = []
+            for row in recent_edition_rows:
+                display_row: list[str] = [str(row[0]), str(row[1])]
+                for value in row[2:]:
+                    display_row.append(_race_type_presence_mark(value))
+                recent_edition_display_rows.append(display_row)
+
+            def _format_edition_mark(cell_str: str, _row_idx: int) -> str:
+                return Color.highlight(cell_str) if cell_str == "X" else cell_str
+
+            render_table(
+                ["Edition", "Type"]
+                + [label for _code, label in VENUE_RACE_TYPE_COLUMNS],
+                recent_edition_display_rows,
+                output_format=get_output_format(args),
+                alignments=["left", "left"] + ["left" for _ in VENUE_RACE_TYPE_COLUMNS],
+                column_separators={2},
+                cell_formatters=[None, None]
+                + [_format_edition_mark for _ in VENUE_RACE_TYPE_COLUMNS],
+            )
+            print()
 
     if _preevent_section_enabled(PREEVENT_SECTION_ATHLETE_STANDINGS, category_code):
         print(
@@ -2565,42 +2588,52 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
         print()
         _render_nations_tables(nations_rows, args)
 
-    current_season_highlight_keys = _collect_current_season_participant_keys(
-        reference_date=venue_reference_date
+    show_decorated_venue = _preevent_section_enabled(
+        PREEVENT_SECTION_DECORATED_VENUE, category_code
     )
-    decorated_rows, decorated_row_styles = _build_venue_decorated_athlete_rows(
-        venue_name,
-        venue_events=venue_events,
-        reference_date=venue_reference_date,
-        highlight_keys=current_season_highlight_keys,
-        limit=0,
+    show_decorated_event_type = _preevent_section_enabled(
+        PREEVENT_SECTION_DECORATED_EVENT_TYPE, category_code
     )
-    _render_decorated_athletes_split_tables(
-        f"Most Decorated Athletes at {venue_name}",
-        decorated_rows,
-        decorated_row_styles,
-        args,
-        per_gender_limit=15,
-    )
-
-    event_type_label = EVENT_TYPE_LABELS.get(
-        event_type, EVENT_TYPE_LABELS.get(EVENT_TYPE_WC, "World Cup")
-    )
-    decorated_scope_rows, decorated_scope_styles = (
-        _build_event_type_decorated_athlete_rows(
-            event_type,
-            reference_date=venue_reference_date,
-            highlight_keys=current_season_highlight_keys,
-            limit=0,
+    if show_decorated_venue or show_decorated_event_type:
+        current_season_highlight_keys = _collect_current_season_participant_keys(
+            reference_date=venue_reference_date
         )
-    )
-    _render_decorated_athletes_split_tables(
-        f"Most Decorated Athletes at {event_type_label}",
-        decorated_scope_rows,
-        decorated_scope_styles,
-        args,
-        per_gender_limit=15,
-    )
+
+        if show_decorated_venue:
+            decorated_rows, decorated_row_styles = _build_venue_decorated_athlete_rows(
+                venue_name,
+                venue_events=venue_events,
+                reference_date=venue_reference_date,
+                highlight_keys=current_season_highlight_keys,
+                limit=0,
+            )
+            _render_decorated_athletes_split_tables(
+                f"Most Decorated Athletes at {venue_name}",
+                decorated_rows,
+                decorated_row_styles,
+                args,
+                per_gender_limit=15,
+            )
+
+        if show_decorated_event_type:
+            event_type_label = EVENT_TYPE_LABELS.get(
+                event_type, EVENT_TYPE_LABELS.get(EVENT_TYPE_WC, "World Cup")
+            )
+            decorated_scope_rows, decorated_scope_styles = (
+                _build_event_type_decorated_athlete_rows(
+                    event_type,
+                    reference_date=venue_reference_date,
+                    highlight_keys=current_season_highlight_keys,
+                    limit=0,
+                )
+            )
+            _render_decorated_athletes_split_tables(
+                f"Most Decorated Athletes at {event_type_label}",
+                decorated_scope_rows,
+                decorated_scope_styles,
+                args,
+                per_gender_limit=15,
+            )
 
     return 0
 

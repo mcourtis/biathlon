@@ -23,7 +23,11 @@ def test_preevent_section_matrix_has_full_event_coverage():
 
 
 def test_preevent_matrix_sample_cells_match_spec():
+    assert brief._preevent_section_enabled(brief.PREEVENT_SECTION_EVENT_FACTS, "WC")
     assert brief._preevent_section_enabled(brief.PREEVENT_SECTION_EVENT_AGENDA, "WC")
+    assert brief._preevent_section_enabled(
+        brief.PREEVENT_SECTION_LAST_10_EDITIONS, "WCH"
+    )
     assert brief._preevent_section_enabled(
         brief.PREEVENT_SECTION_ATHLETE_STANDINGS, "WCH"
     )
@@ -31,6 +35,10 @@ def test_preevent_matrix_sample_cells_match_spec():
         brief.PREEVENT_SECTION_RELAY_STANDINGS, "OWG"
     )
     assert brief._preevent_section_enabled(brief.PREEVENT_SECTION_NATIONS_CUP, "OWG")
+    assert brief._preevent_section_enabled(brief.PREEVENT_SECTION_DECORATED_VENUE, "WC")
+    assert brief._preevent_section_enabled(
+        brief.PREEVENT_SECTION_DECORATED_EVENT_TYPE, "OWG"
+    )
 
 
 def test_brief_preevent_rejects_removed_flags():
