@@ -478,6 +478,132 @@ def test_render_decorated_tables_renumbers_rank_per_gender(capsys):
     assert "9\tMan A\tNOR" not in out
 
 
+def test_render_decorated_tables_respects_per_gender_limit(capsys):
+    rows = [
+        [
+            "1",
+            "Woman A",
+            "SWE",
+            "F",
+            "3",
+            "0",
+            "0",
+            "3",
+            "8",
+            "3",
+            "0",
+            "0",
+            "3",
+            "8",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+        ],
+        [
+            "2",
+            "Man A",
+            "NOR",
+            "M",
+            "3",
+            "0",
+            "0",
+            "3",
+            "8",
+            "3",
+            "0",
+            "0",
+            "3",
+            "8",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+        ],
+        [
+            "3",
+            "Woman B",
+            "GER",
+            "F",
+            "2",
+            "1",
+            "0",
+            "3",
+            "9",
+            "2",
+            "1",
+            "0",
+            "3",
+            "9",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+        ],
+        [
+            "4",
+            "Man B",
+            "FRA",
+            "M",
+            "2",
+            "1",
+            "0",
+            "3",
+            "9",
+            "2",
+            "1",
+            "0",
+            "3",
+            "9",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+        ],
+        [
+            "5",
+            "Woman C",
+            "ITA",
+            "F",
+            "1",
+            "1",
+            "1",
+            "3",
+            "10",
+            "1",
+            "1",
+            "1",
+            "3",
+            "10",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+        ],
+    ]
+    styles = ["", "", "", "", ""]
+
+    brief._render_decorated_athletes_split_tables(
+        "Most Decorated Athletes at Kontiolahti",
+        rows,
+        styles,
+        argparse.Namespace(format="tsv"),
+        per_gender_limit=2,
+    )
+
+    out = capsys.readouterr().out
+    assert "Woman A" in out
+    assert "Woman B" in out
+    assert "Woman C" not in out
+    assert "Man A" in out
+    assert "Man B" in out
+
+
 def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
     monkeypatch.setattr(brief, "get_current_season_id", lambda: "2526")
     monkeypatch.setattr(

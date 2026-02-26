@@ -1558,6 +1558,7 @@ def _render_decorated_athletes_split_tables(
     rows: list[list[str]],
     row_styles: list[str],
     args: argparse.Namespace,
+    per_gender_limit: int | None = None,
 ) -> None:
     print(_preevent_heading(2, title, args))
     if not rows:
@@ -1591,6 +1592,9 @@ def _render_decorated_athletes_split_tables(
         print(_preevent_heading(3, gender_label, args))
         gender_rows = rows_by_gender.get(gender_code, [])
         gender_styles = styles_by_gender.get(gender_code, [])
+        if isinstance(per_gender_limit, int) and per_gender_limit > 0:
+            gender_rows = gender_rows[:per_gender_limit]
+            gender_styles = gender_styles[:per_gender_limit]
         if not gender_rows:
             print("none")
             print()
@@ -2569,13 +2573,14 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
         venue_events=venue_events,
         reference_date=venue_reference_date,
         highlight_keys=current_season_highlight_keys,
-        limit=20,
+        limit=0,
     )
     _render_decorated_athletes_split_tables(
         f"Most Decorated Athletes at {venue_name}",
         decorated_rows,
         decorated_row_styles,
         args,
+        per_gender_limit=15,
     )
 
     event_type_label = EVENT_TYPE_LABELS.get(
@@ -2586,7 +2591,7 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
             event_type,
             reference_date=venue_reference_date,
             highlight_keys=current_season_highlight_keys,
-            limit=20,
+            limit=0,
         )
     )
     _render_decorated_athletes_split_tables(
@@ -2594,6 +2599,7 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
         decorated_scope_rows,
         decorated_scope_styles,
         args,
+        per_gender_limit=15,
     )
 
     return 0
