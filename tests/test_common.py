@@ -5,6 +5,7 @@ from biathlon.commands._common import (
     _ordinal,
     _parse_rank,
     _row_ibu_id,
+    counts_toward_wc_standings,
     is_mixed_relay,
     is_relay_discipline,
 )
@@ -152,3 +153,36 @@ class TestIsMixedRelay:
 
     def test_sprint(self):
         assert is_mixed_relay("SP", "SW") is False
+
+
+class TestCountsTowardWcStandings:
+    def test_wc_events_always_count(self):
+        assert counts_toward_wc_standings("WC", "2526", "SP", "SW") is True
+
+    def test_olympics_only_count_in_1998_to_2010_window(self):
+        assert counts_toward_wc_standings("OWG", "9798", "SP", "SW") is True
+        assert counts_toward_wc_standings("OWG", "0102", "SP", "SW") is True
+        assert counts_toward_wc_standings("OWG", "0506", "SP", "SW") is True
+        assert counts_toward_wc_standings("OWG", "0910", "SP", "SW") is True
+        assert counts_toward_wc_standings("OWG", "1314", "SP", "SW") is False
+        assert counts_toward_wc_standings("OWG", "9394", "SP", "SW") is False
+
+    def test_wch_basic_yes_no_year_exceptions(self):
+        assert counts_toward_wc_standings("WCH", "8990", "SP", "SW") is True
+        assert counts_toward_wc_standings("WCH", "9091", "SP", "SW") is False
+        assert counts_toward_wc_standings("WCH", "9293", "SP", "SW") is False
+        assert counts_toward_wc_standings("WCH", "1516", "SP", "SW") is True
+        assert counts_toward_wc_standings("WCH", "1718", "SP", "SW") is False
+        assert counts_toward_wc_standings("WCH", "2122", "SP", "SW") is False
+
+    def test_wch_partial_olympic_year_rules_are_discipline_specific(self):
+        assert counts_toward_wc_standings("WCH", "9798", "PU", "SW") is True
+        assert counts_toward_wc_standings("WCH", "9798", "TM", "SM") is True
+        assert counts_toward_wc_standings("WCH", "9798", "SP", "SW") is False
+
+        assert counts_toward_wc_standings("WCH", "0102", "MS", "SM") is True
+        assert counts_toward_wc_standings("WCH", "0102", "PU", "SM") is False
+
+        assert counts_toward_wc_standings("WCH", "0506", "MR", "MX") is True
+        assert counts_toward_wc_standings("WCH", "0506", "RL", "MX") is True
+        assert counts_toward_wc_standings("WCH", "0506", "RL", "SW") is False

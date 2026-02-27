@@ -123,6 +123,79 @@ def detect_event_type(event: dict) -> str:
     return EVENT_TYPE_WC
 
 
+def _season_end_year(season_id: str) -> int | None:
+    """Return season end year for ids like '9798' -> 1998."""
+    text = str(season_id or "").strip()
+    if len(text) != 4 or not text.isdigit():
+        return None
+
+    start_yy = int(text[:2])
+    end_yy = int(text[2:])
+    century = 1900 if start_yy >= 80 else 2000
+    if end_yy < start_yy:
+        century += 100
+    return century + end_yy
+
+
+def _normalize_wc_rule_discipline(discipline: str, category: str) -> str:
+    disc = str(discipline or "").upper()
+    cat = str(category or "").upper()
+    if disc == "SI":
+        return "IN"
+    # Some mixed relays are stored as RL + MX instead of MR.
+    if disc == "RL" and cat == "MX":
+        return "MR"
+    return disc
+
+
+def counts_toward_wc_standings(
+    event_type: str,
+    season_id: str,
+    discipline: str = "",
+    category: str = "",
+) -> bool:
+    """Return True when a race counts toward World Cup standings.
+
+    Historical rules encoded here:
+    - OWG counted only in 1998/2002/2006/2010.
+    - WCH counted from 1990 with exceptions:
+      1991 no, 1993 no, 2014 no, 2018 no, 2022+ no.
+    - Partial Olympic-year WCH that counted:
+      1998 pursuit/team, 2002 mass-start, 2006 mixed relay, 2010 mixed relay.
+
+    Team-only 1992 and 1994 WCH editions remain excluded (historically unclear).
+    """
+    et = str(event_type or "").upper()
+    if et == EVENT_TYPE_WC:
+        return True
+
+    end_year = _season_end_year(season_id)
+    if end_year is None:
+        return False
+
+    if et == EVENT_TYPE_OWG:
+        return end_year in {1998, 2002, 2006, 2010}
+
+    if et != EVENT_TYPE_WCH:
+        return False
+
+    if end_year < 1990:
+        return False
+    if end_year in {1991, 1992, 1993, 1994, 2014, 2018}:
+        return False
+    if end_year >= 2022:
+        return False
+
+    disc = _normalize_wc_rule_discipline(discipline, category)
+    if end_year == 1998:
+        return disc in {"PU", "TM"}
+    if end_year == 2002:
+        return disc == "MS"
+    if end_year in {2006, 2010}:
+        return disc == "MR"
+    return True
+
+
 def is_relay_discipline(discipline: str) -> bool:
     """Return True if *discipline* is any relay type."""
     return discipline in RELAY_DISCIPLINES

@@ -43,6 +43,7 @@ from ._common import (
     _ordinal,
     _parse_rank,
     _row_ibu_id,
+    counts_toward_wc_standings,
     detect_event_type,
     is_mixed_relay as _is_mixed_relay,
     is_relay_discipline as _is_relay_disc,
@@ -1978,6 +1979,7 @@ def _compute_nations_pre_race_standings(
         return []
 
     for event in events:
+        event_type = detect_event_type(event)
         event_id = str(event.get("EventId") or "")
         if not event_id:
             continue
@@ -2002,6 +2004,13 @@ def _compute_nations_pre_race_standings(
                 continue
             race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
             race_disc = str(race.get("DisciplineId") or "").upper()
+            if not counts_toward_wc_standings(
+                event_type,
+                season_id,
+                discipline=race_disc,
+                category=race_cat,
+            ):
+                continue
             is_team_race = race_disc in RELAY_DISCIPLINES
             for res in payload.get("Results", []) or []:
                 if is_team_race and not res.get("IsTeam"):
@@ -2210,8 +2219,7 @@ def _collect_wc_individual_races(
         return []
     races_out: list[tuple[datetime.datetime | None, str, str]] = []
     for event in events:
-        if detect_event_type(event) != EVENT_TYPE_WC:
-            continue
+        event_type = detect_event_type(event)
         event_id = str(event.get("EventId") or "")
         if not event_id:
             continue
@@ -2228,6 +2236,13 @@ def _collect_wc_individual_races(
                 continue
             race_disc = str(race.get("DisciplineId") or "").upper()
             if race_disc not in DISCIPLINES:
+                continue
+            if not counts_toward_wc_standings(
+                event_type,
+                season_id,
+                discipline=race_disc,
+                category=race_cat,
+            ):
                 continue
             races_out.append((_start_dt_from_race_row(race), race_id, race_disc))
 

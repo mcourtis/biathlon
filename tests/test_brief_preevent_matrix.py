@@ -1384,6 +1384,54 @@ def test_snapshot_athlete_standings_keeps_non_top10_discipline_points(
     assert f"\t{expected_sp}\t{expected_pu}\t" in out
 
 
+def test_snapshot_standings_excludes_non_counting_major_events(monkeypatch):
+    monkeypatch.setattr(
+        brief,
+        "get_events",
+        lambda season_id, level: [
+            {"EventId": "E_WC", "Description": "BMW IBU World Cup"},
+            {"EventId": "E_WCH", "Description": "BMW IBU World Championships"},
+            {"EventId": "E_OWG", "Description": "Olympic Winter Games"},
+        ],
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_races",
+        lambda event_id: [
+            {
+                "RaceId": f"{event_id}_R1",
+                "catId": "SW",
+                "DisciplineId": "SP",
+                "StartTime": "2026-01-01T10:00:00Z",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_race_results",
+        lambda race_id: {
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "IBUId": race_id[:-3] if race_id.endswith("_R1") else race_id,
+                    "Name": race_id[:-3] if race_id.endswith("_R1") else race_id,
+                    "Nat": "NOR",
+                    "Rank": "1",
+                }
+            ]
+        },
+    )
+
+    standings = brief._compute_preevent_snapshot_standings(
+        "2526",
+        target_race_id="",
+        cutoff_dt=datetime.datetime(2026, 1, 10, tzinfo=datetime.timezone.utc),
+        limit=10,
+    )
+
+    assert [row["IBUId"] for row in standings["athlete"]["SW"]["TS"]] == ["E_WC"]
+
+
 def test_render_relay_tables_pretty_side_by_side(monkeypatch, capsys):
     monkeypatch.setattr(brief.Color, "enabled", classmethod(lambda cls: False))
 

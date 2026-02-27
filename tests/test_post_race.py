@@ -324,6 +324,34 @@ def test_has_newer_relevant_wc_points_race_detects_completed_newer(monkeypatch):
     )
 
 
+def test_collect_wc_individual_races_excludes_non_counting_major_events(monkeypatch):
+    monkeypatch.setattr(
+        postrace,
+        "get_events",
+        lambda season_id, level=1: [
+            {"EventId": "E_WC", "Description": "BMW IBU World Cup"},
+            {"EventId": "E_WCH", "Description": "BMW IBU World Championships"},
+            {"EventId": "E_OWG", "Description": "Olympic Winter Games"},
+        ],
+    )
+    monkeypatch.setattr(
+        postrace,
+        "get_races",
+        lambda event_id: [
+            {
+                "RaceId": f"{event_id}_R1",
+                "DisciplineId": "SP",
+                "catId": "SW",
+                "StartTime": "2026-01-01T10:00:00Z",
+            }
+        ],
+    )
+
+    rows = postrace._collect_wc_individual_races("2526", "SW")
+
+    assert [race_id for _start_dt, race_id, _disc in rows] == ["E_WC_R1"]
+
+
 def test_compute_wc_snapshot_rows_uses_target_cutoff(monkeypatch):
     races = [
         (_dt("2026-01-01T10:00:00Z"), "RACE_OLD", "SP"),

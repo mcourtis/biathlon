@@ -136,6 +136,113 @@ def test_compute_wc_pre_race_standings_uses_strict_cutoff(monkeypatch):
     assert [row["IBUId"] for row in disc_rows] == ["A", "B"]
 
 
+def test_collect_wc_individual_races_applies_major_event_counting_rules(monkeypatch):
+    monkeypatch.setattr(
+        startlist,
+        "get_events",
+        lambda season_id, level=1: [
+            {"EventId": "E_WC", "Description": "BMW IBU World Cup"},
+            {"EventId": "E_WCH", "Description": "BMW IBU World Championships"},
+            {"EventId": "E_OWG", "Description": "Olympic Winter Games"},
+        ],
+    )
+    monkeypatch.setattr(
+        startlist,
+        "get_races",
+        lambda event_id: {
+            "E_WC": [
+                {
+                    "RaceId": "R_WC_SP",
+                    "DisciplineId": "SP",
+                    "catId": "SW",
+                    "StartTime": "1998-01-01T10:00:00Z",
+                }
+            ],
+            "E_WCH": [
+                {
+                    "RaceId": "R_WCH_PU",
+                    "DisciplineId": "PU",
+                    "catId": "SW",
+                    "StartTime": "1998-01-02T10:00:00Z",
+                },
+                {
+                    "RaceId": "R_WCH_SP",
+                    "DisciplineId": "SP",
+                    "catId": "SW",
+                    "StartTime": "1998-01-03T10:00:00Z",
+                },
+            ],
+            "E_OWG": [
+                {
+                    "RaceId": "R_OWG_SP",
+                    "DisciplineId": "SP",
+                    "catId": "SW",
+                    "StartTime": "1998-01-04T10:00:00Z",
+                }
+            ],
+        }[event_id],
+    )
+
+    rows = startlist._collect_wc_individual_races("9798", "SW")
+
+    assert [race_id for _start_dt, race_id, _disc in rows] == [
+        "R_WC_SP",
+        "R_WCH_PU",
+        "R_OWG_SP",
+    ]
+
+
+def test_compute_nations_pre_race_standings_excludes_non_counting_major_events(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        startlist,
+        "get_events",
+        lambda season_id, level=1: [
+            {"EventId": "E_WC", "Description": "BMW IBU World Cup"},
+            {"EventId": "E_OWG", "Description": "Olympic Winter Games"},
+            {"EventId": "E_WCH", "Description": "BMW IBU World Championships"},
+        ],
+    )
+    monkeypatch.setattr(
+        startlist,
+        "get_races",
+        lambda event_id: [
+            {
+                "RaceId": f"{event_id}_R1",
+                "DisciplineId": "SP",
+                "catId": "SW",
+                "StartTime": "2026-01-01T10:00:00Z",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        startlist,
+        "get_race_results",
+        lambda race_id: {
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "Rank": "1",
+                    "SO": "1",
+                    "Nat": "NOR",
+                }
+            ]
+        },
+    )
+
+    rows = startlist._compute_nations_pre_race_standings(
+        "2526",
+        "TARGET",
+        _dt("2026-01-10T10:00:00Z"),
+        "SW",
+        limit=10,
+    )
+
+    assert rows[0]["Nat"] == "NOR"
+    assert rows[0]["Score"] == "90"
+
+
 def test_fetch_olympic_individual_podium_uses_strict_cutoff(monkeypatch):
     cutoff = _dt("2026-02-15T12:00:00Z")
     monkeypatch.setattr(

@@ -52,6 +52,7 @@ from ._common import (
     DISCIPLINE_LEADER_MARKER,
     GENERAL_LEADER_MARKER,
     U23_LEADER_MARKER,
+    counts_toward_wc_standings,
     _format_section_title,
     _has_completed_relay_results,
     _ordinal,
@@ -1126,8 +1127,7 @@ def _collect_wc_individual_races(
 
     races_out: list[tuple[datetime.datetime | None, str, str]] = []
     for event in events:
-        if detect_event_type(event) != EVENT_TYPE_WC:
-            continue
+        event_type = detect_event_type(event)
         event_id = event.get("EventId")
         if not event_id:
             continue
@@ -1144,6 +1144,13 @@ def _collect_wc_individual_races(
                 continue
             race_disc = str(race.get("DisciplineId") or "").upper()
             if not _is_individual_like_discipline(race_disc):
+                continue
+            if not counts_toward_wc_standings(
+                event_type,
+                season_id,
+                discipline=race_disc,
+                category=race_cat,
+            ):
                 continue
             races_out.append((_start_dt_from_race_row(race), race_id, race_disc))
 

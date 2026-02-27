@@ -51,6 +51,7 @@ from ._common import (
     _ordinal,
     _parse_rank,
     _row_ibu_id,
+    counts_toward_wc_standings,
     detect_event_type,
     is_relay_discipline,
     _select_race_interactive,
@@ -1831,8 +1832,7 @@ def _compute_preevent_snapshot_standings(
 
     race_meta_by_id: dict[str, tuple[str, str]] = {}
     for event in events:
-        if detect_event_type(event) != EVENT_TYPE_WC:
-            continue
+        event_type = detect_event_type(event)
         event_id = str(event.get("EventId") or "")
         if not event_id:
             continue
@@ -1856,6 +1856,13 @@ def _compute_preevent_snapshot_standings(
             if (
                 race_disc not in {"SP", "PU", "IN", "MS", "SI"}
                 and race_disc not in RELAY_DISCIPLINES
+            ):
+                continue
+            if not counts_toward_wc_standings(
+                event_type,
+                season_id,
+                discipline=race_disc,
+                category=race_cat,
             ):
                 continue
             race_meta_by_id[race_id] = (race_cat, race_disc)
