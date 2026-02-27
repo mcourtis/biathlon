@@ -57,6 +57,10 @@ INDIVIDUAL_EQUIVALENT_DISCIPLINES = {"IN", "SI"}
 MAJOR_EVENT_LEVELS = (1, 2, 3)
 RACE_SEASON_RE = re.compile(r"^BT(?P<season>\d{4})")
 SEASON_TEXT_RE = re.compile(r"^(?P<s1>\d{2})\s*/\s*(?P<s2>\d{2})$")
+# Winter Olympics cadence:
+# - 4-year cycle through 1992 (e.g. 1984, 1988, 1992)
+# - one-time 2-year gap to 1994 after IOC schedule change
+# - then 4-year alternating cycle thereafter
 OLYMPIC_SEASON_IDS = [
     "2526",
     "2122",
@@ -67,9 +71,9 @@ OLYMPIC_SEASON_IDS = [
     "0102",
     "9798",
     "9394",
-    "8990",
-    "8586",
-    "8182",
+    "9192",
+    "8788",
+    "8384",
 ]
 
 # Display names for 3-letter country/NOC codes used in IBU results.
@@ -2833,13 +2837,20 @@ def _season_to_olympic_year(season_id: str) -> str:
     """Convert season ID (e.g., '2122') to Olympic year (e.g., '2022')."""
     if len(season_id) != 4:
         return season_id
+    first_part = season_id[0:2]
     second_part = season_id[2:4]
+    if not first_part.isdigit() or not second_part.isdigit():
+        return season_id
     try:
+        start_suffix = int(first_part)
         year_suffix = int(second_part)
-        # Determine century: 90+ is 1900s, otherwise 2000s
-        if year_suffix >= 90:
-            return str(1900 + year_suffix)
-        return str(2000 + year_suffix)
+        # Biathlon season ids are two-digit year pairs (e.g. 93/94 -> "9394").
+        # Seasons starting in 80-99 map to 19xx; 00-79 map to 20xx.
+        # Handle century-crossing seasons like 99/00 by rolling to the next century.
+        base_century = 1900 if start_suffix >= 80 else 2000
+        if start_suffix > year_suffix:
+            base_century += 100
+        return str(base_century + year_suffix)
     except ValueError:
         return season_id
 

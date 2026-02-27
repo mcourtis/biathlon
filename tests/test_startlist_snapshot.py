@@ -11,6 +11,27 @@ def _dt(value: str) -> datetime.datetime:
     return datetime.datetime.fromisoformat(value.replace("Z", "+00:00"))
 
 
+def test_olympic_season_ids_keep_1992_gap_and_4y_cycles_before() -> None:
+    ids = startlist.OLYMPIC_SEASON_IDS
+    idx_9394 = ids.index("9394")
+    assert ids[idx_9394 + 1] == "9192"
+    assert ids[idx_9394 + 2] == "8788"
+    assert ids[idx_9394 + 3] == "8384"
+
+    years = [int(startlist._season_to_olympic_year(season_id)) for season_id in ids]
+    diffs = [years[i] - years[i + 1] for i in range(len(years) - 1)]
+    assert diffs.count(2) == 1
+    assert diffs[ids.index("9394")] == 2
+    assert set(diffs) <= {2, 4}
+
+
+def test_season_to_olympic_year_handles_1900s_and_2000s() -> None:
+    assert startlist._season_to_olympic_year("2526") == "2026"
+    assert startlist._season_to_olympic_year("9192") == "1992"
+    assert startlist._season_to_olympic_year("8384") == "1984"
+    assert startlist._season_to_olympic_year("9900") == "2000"
+
+
 def test_filter_results_before_cutoff_excludes_target_and_future(monkeypatch):
     cutoff = _dt("2026-01-10T10:00:00Z")
     start_by_race = {
