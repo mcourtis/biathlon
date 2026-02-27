@@ -438,6 +438,7 @@ PREEVENT_CATEGORY_CODES = ("WC", "WCH", "OWG")
 PREEVENT_SECTION_EVENT_FACTS = "event_facts"
 PREEVENT_SECTION_EVENT_AGENDA = "event_agenda"
 PREEVENT_SECTION_LAST_10_EDITIONS = "last_10_editions_venue"
+PREEVENT_SECTION_PREVIOUS_PODIUM = "previous_podium_venue"
 PREEVENT_SECTION_ATHLETE_STANDINGS = "athlete_standings"
 PREEVENT_SECTION_RELAY_STANDINGS = "relay_standings"
 PREEVENT_SECTION_NATIONS_CUP = "nations_cup_standings"
@@ -448,6 +449,7 @@ PREEVENT_SECTION_ORDER = [
     PREEVENT_SECTION_EVENT_FACTS,
     PREEVENT_SECTION_EVENT_AGENDA,
     PREEVENT_SECTION_LAST_10_EDITIONS,
+    PREEVENT_SECTION_PREVIOUS_PODIUM,
     PREEVENT_SECTION_ATHLETE_STANDINGS,
     PREEVENT_SECTION_RELAY_STANDINGS,
     PREEVENT_SECTION_NATIONS_CUP,
@@ -459,6 +461,7 @@ PREEVENT_SECTION_TITLES = {
     PREEVENT_SECTION_EVENT_FACTS: "Event Facts",
     PREEVENT_SECTION_EVENT_AGENDA: "Event Agenda",
     PREEVENT_SECTION_LAST_10_EDITIONS: "Last 10 Editions at <venue>",
+    PREEVENT_SECTION_PREVIOUS_PODIUM: "Previous Podiums at <venue>",
     PREEVENT_SECTION_ATHLETE_STANDINGS: "Athlete Standings",
     PREEVENT_SECTION_RELAY_STANDINGS: "Relay Standings",
     PREEVENT_SECTION_NATIONS_CUP: "Nations Cup Standings",
@@ -475,6 +478,7 @@ PREEVENT_SECTION_MATRIX = {
     PREEVENT_SECTION_EVENT_FACTS: _preevent_matrix_row(True, True, True),
     PREEVENT_SECTION_EVENT_AGENDA: _preevent_matrix_row(True, True, True),
     PREEVENT_SECTION_LAST_10_EDITIONS: _preevent_matrix_row(True, True, True),
+    PREEVENT_SECTION_PREVIOUS_PODIUM: _preevent_matrix_row(True, True, True),
     PREEVENT_SECTION_ATHLETE_STANDINGS: _preevent_matrix_row(True, True, True),
     PREEVENT_SECTION_RELAY_STANDINGS: _preevent_matrix_row(True, True, True),
     PREEVENT_SECTION_NATIONS_CUP: _preevent_matrix_row(True, True, True),
@@ -1070,28 +1074,11 @@ def _build_recent_venue_edition_rows(
 ) -> list[list[str | int]]:
     if venue_events is None:
         venue_events = _collect_venue_level1_events(venue_name)
-    venue_events = list(venue_events)
-    if reference_date is not None:
-        venue_events = [
-            entry
-            for entry in venue_events
-            if (
-                (parsed := parse_date(entry.get("start_date") or "")) is None
-                or parsed <= reference_date
-            )
-        ]
-    if not venue_events:
-        return []
-
-    def _start_date(entry: dict) -> datetime.date:
-        parsed = parse_date(entry.get("start_date") or "")
-        return parsed if parsed is not None else datetime.date.min
-
-    venue_events.sort(
-        key=lambda entry: (_start_date(entry), str(entry.get("event_id") or "")),
-        reverse=True,
+    selected = _select_recent_venue_edition_entries(
+        list(venue_events), limit=limit, reference_date=reference_date
     )
-    selected = venue_events[: max(0, int(limit))]
+    if not selected:
+        return []
 
     event_ids = [str(entry.get("event_id") or "") for entry in selected]
     race_counts_by_event: dict[str, dict[str, int]] = {}
@@ -1123,6 +1110,53 @@ def _build_recent_venue_edition_rows(
     return rows
 
 
+def _select_recent_venue_edition_entries(
+    venue_events: list[dict],
+    limit: int = 10,
+    reference_date: datetime.date | None = None,
+) -> list[dict]:
+    entries = list(venue_events)
+    if reference_date is not None:
+        entries = [
+            entry
+            for entry in entries
+            if (
+                (parsed := parse_date(entry.get("start_date") or "")) is None
+                or parsed <= reference_date
+            )
+        ]
+    if not entries:
+        return []
+
+    def _start_date(entry: dict) -> datetime.date:
+        parsed = parse_date(entry.get("start_date") or "")
+        return parsed if parsed is not None else datetime.date.min
+
+    entries.sort(
+        key=lambda entry: (_start_date(entry), str(entry.get("event_id") or "")),
+        reverse=True,
+    )
+    return entries[: max(0, int(limit))]
+
+
+def _recent_edition_row_styles(
+    selected_entries: list[dict],
+    highlight_event_ids: set[str] | None = None,
+) -> list[str]:
+    highlight_ids = {
+        str(event_id).strip()
+        for event_id in (highlight_event_ids or set())
+        if str(event_id).strip()
+    }
+    if not highlight_ids:
+        return ["" for _ in selected_entries]
+    styles: list[str] = []
+    for entry in selected_entries:
+        event_id = str(entry.get("event_id") or "").strip()
+        styles.append("highlight" if event_id in highlight_ids else "")
+    return styles
+
+
 def _race_type_presence_mark(value: object) -> str:
     if isinstance(value, int):
         count = value
@@ -1135,6 +1169,499 @@ def _race_type_presence_mark(value: object) -> str:
         except ValueError:
             return "-"
     return "X" if count > 0 else "-"
+
+
+def _sorted_races_for_history(
+    races: list[dict],
+) -> list[tuple[datetime.datetime | None, str, dict]]:
+    fallback_dt = datetime.datetime.max.replace(tzinfo=datetime.timezone.utc)
+    ordered: list[tuple[datetime.datetime | None, str, dict]] = []
+    for race in races:
+        race_id = str(race.get("RaceId") or race.get("Id") or "").strip()
+        if not race_id:
+            continue
+        start_raw = str(race.get("StartTime") or race.get("StartDate") or "")
+        start_dt = parse_start_datetime(start_raw)
+        ordered.append((start_dt, race_id, race))
+    ordered.sort(key=lambda item: (item[0] is None, item[0] or fallback_dt, item[1]))
+    return ordered
+
+
+def _build_upcoming_podium_disciplines(
+    races: list[dict],
+) -> list[tuple[str, str]]:
+    discipline_order: list[str] = []
+    for _start_dt, _race_id, race in _sorted_races_for_history(races):
+        race_cat = str(race.get("catId") or race.get("CatId") or "").strip().upper()
+        if race_cat not in {"SW", "SM"}:
+            continue
+        disc = _normalize_race_discipline_for_sequence(race.get("DisciplineId"))
+        if disc not in VENUE_RACE_TYPE_CODES:
+            continue
+        if disc not in discipline_order:
+            discipline_order.append(disc)
+
+    return [(disc, DISCIPLINE_NAMES.get(disc, disc)) for disc in discipline_order]
+
+
+def _build_event_gender_discipline_race_ids(
+    races: list[dict],
+) -> dict[str, dict[str, list[str]]]:
+    race_ids_by_gender: dict[str, dict[str, list[str]]] = {"SW": {}, "SM": {}}
+    for _start_dt, race_id, race in _sorted_races_for_history(races):
+        race_cat = str(race.get("catId") or race.get("CatId") or "").strip().upper()
+        if race_cat not in race_ids_by_gender:
+            continue
+        disc = _normalize_race_discipline_for_sequence(race.get("DisciplineId"))
+        if disc not in VENUE_RACE_TYPE_CODES:
+            continue
+        race_ids_by_gender[race_cat].setdefault(disc, []).append(race_id)
+    return race_ids_by_gender
+
+
+def _first_alpha_char(text: str) -> str:
+    return next((ch.upper() for ch in str(text or "") if ch.isalpha()), "")
+
+
+def _is_upper_token(token: str) -> bool:
+    letters = [ch for ch in str(token or "") if ch.isalpha()]
+    return bool(letters) and "".join(letters).upper() == "".join(letters)
+
+
+def _initial_and_rest_name(
+    text: str, family_name: str = "", given_name: str = ""
+) -> str:
+    full = str(text or "").strip()
+    family = str(family_name or "").strip()
+    given = str(given_name or "").strip()
+
+    if family:
+        initial = _first_alpha_char(given) or _first_alpha_char(full)
+        return f"{initial}. {family}" if initial else family
+
+    parts = [part for part in full.split() if part]
+    if not parts:
+        return ""
+    if len(parts) == 1:
+        return parts[0]
+
+    if len(parts[0]) == 1 and parts[0].isalpha():
+        return f"{parts[0].upper()}. {' '.join(parts[1:])}"
+
+    lead_upper_count = 0
+    for token in parts:
+        if _is_upper_token(token):
+            lead_upper_count += 1
+        else:
+            break
+    trail_upper_count = 0
+    for token in reversed(parts):
+        if _is_upper_token(token):
+            trail_upper_count += 1
+        else:
+            break
+
+    if 0 < lead_upper_count < len(parts):
+        last_name = " ".join(parts[:lead_upper_count])
+        given_part = " ".join(parts[lead_upper_count:])
+        initial = _first_alpha_char(given_part)
+        return f"{initial}. {last_name}" if initial else last_name
+
+    if 0 < trail_upper_count < len(parts):
+        last_name = " ".join(parts[len(parts) - trail_upper_count :])
+        given_part = " ".join(parts[: len(parts) - trail_upper_count])
+        initial = _first_alpha_char(given_part)
+        return f"{initial}. {last_name}" if initial else last_name
+
+    initial = _first_alpha_char(parts[0])
+    last_name = parts[-1]
+    return f"{initial}. {last_name}" if initial else last_name
+
+
+def _podium_name_from_result_row(
+    row: dict, is_team_race: bool, lineup_names: list[str] | None = None
+) -> str:
+    nat = str(row.get("Nat") or "").strip().upper()
+    if is_team_race:
+        team = _normalize_team_name(row)
+        if not team and nat:
+            team = _country_display(nat) or nat
+        if not team:
+            team = "-"
+        lineup = [name for name in (lineup_names or []) if name]
+        if lineup:
+            return f"{team} ({', '.join(lineup)})"
+        return team
+
+    name = str(
+        row.get("Name") or row.get("ShortName") or row.get("FamilyName") or ""
+    ).strip()
+    if name:
+        return _initial_and_rest_name(
+            name,
+            family_name=str(row.get("FamilyName") or ""),
+            given_name=str(row.get("GivenName") or ""),
+        )
+    if nat:
+        return _country_display(nat) or nat
+    return "-"
+
+
+def _relay_lineup_names(payload: dict, team_row: dict) -> list[str]:
+    results = list(payload.get("Results") or [])
+    team_bib = str(team_row.get("Bib") or "").strip()
+    team_nat = str(team_row.get("Nat") or "").strip().upper()
+    if not team_bib and not team_nat:
+        return []
+
+    lineup_candidates: list[tuple[int, str]] = []
+    for row in results:
+        if row.get("IsTeam"):
+            continue
+        row_bib = str(row.get("Bib") or "").strip()
+        row_nat = str(row.get("Nat") or "").strip().upper()
+        if team_bib:
+            if row_bib != team_bib:
+                continue
+        elif team_nat and row_nat != team_nat:
+            continue
+        name = str(
+            row.get("Name") or row.get("ShortName") or row.get("FamilyName") or ""
+        )
+        display_name = _initial_and_rest_name(
+            name,
+            family_name=str(row.get("FamilyName") or ""),
+            given_name=str(row.get("GivenName") or ""),
+        )
+        if not display_name:
+            continue
+        leg = _parse_leg_value(row.get("Leg"))
+        leg_sort = leg if leg is not None else 999
+        lineup_candidates.append((leg_sort, display_name))
+
+    lineup_candidates.sort(key=lambda item: (item[0], item[1]))
+    seen: set[str] = set()
+    lineup: list[str] = []
+    for _leg_sort, display_name in lineup_candidates:
+        if display_name in seen:
+            continue
+        seen.add(display_name)
+        lineup.append(display_name)
+    return lineup
+
+
+def _split_relay_country_lineup(value: object) -> tuple[str, list[str]]:
+    text = str(value or "").strip()
+    if not text or text == "-":
+        return "-", []
+    if text.endswith(")") and " (" in text:
+        country, lineup_text = text.rsplit(" (", 1)
+        lineup_body = lineup_text[:-1].strip()
+        lineup_names = [name.strip() for name in lineup_body.split(",") if name.strip()]
+        return country.strip() or "-", lineup_names
+    return text, []
+
+
+def _relay_medal_country_formatter(medal: str) -> Callable[[str, int], str]:
+    key = str(medal or "").strip().lower()
+
+    def _formatter(cell_str: str, _row_idx: int) -> str:
+        if cell_str.strip() in {"", "-"}:
+            return cell_str
+        if key == "gold":
+            return Color.gold(cell_str)
+        if key == "silver":
+            return Color.silver(cell_str)
+        if key == "bronze":
+            return Color.bronze(cell_str)
+        return cell_str
+
+    return _formatter
+
+
+def _relay_athletes_cell_formatter(cell_str: str, _row_idx: int) -> str:
+    text = str(cell_str or "").strip()
+    if text in {"", "-"}:
+        return cell_str
+    return Color.dim(text)
+
+
+def _extract_race_podium_cells(
+    payload: dict, is_team_race: bool
+) -> tuple[str, str, str]:
+    results = list(payload.get("Results") or [])
+    if not results:
+        return "-", "-", "-"
+    if is_team_race:
+        if not _has_completed_relay_results(payload):
+            return "-", "-", "-"
+    elif not _has_completed_results(payload):
+        return "-", "-", "-"
+
+    medals = {1: "-", 2: "-", 3: "-"}
+    for row in results:
+        if is_team_race and not row.get("IsTeam"):
+            continue
+        if not is_team_race and row.get("IsTeam"):
+            continue
+        rank_val = _parse_rank(
+            row.get("Rank") or row.get("SO") or row.get("ResultOrder")
+        )
+        if rank_val not in {1, 2, 3}:
+            continue
+        if medals[rank_val] != "-":
+            continue
+        lineup_names = _relay_lineup_names(payload, row) if is_team_race else None
+        medals[rank_val] = _podium_name_from_result_row(
+            row, is_team_race, lineup_names=lineup_names
+        )
+        if all(medals[rank] != "-" for rank in (1, 2, 3)):
+            break
+
+    return medals[1], medals[2], medals[3]
+
+
+def _build_previous_venue_podium_rows(
+    races: list[dict],
+    venue_events: list[dict],
+    reference_date: datetime.date | None = None,
+    exclude_event_ids: set[str] | None = None,
+    edition_limit: int = 5,
+) -> tuple[list[tuple[str, str]], dict[str, list[list[str]]]]:
+    disciplines = _build_upcoming_podium_disciplines(races)
+    rows_by_discipline: dict[str, list[list[str]]] = {
+        disc: [] for disc, _ in disciplines
+    }
+    historical_events = _filter_events_to_reference_date(
+        list(venue_events),
+        reference_date,
+        exclude_event_ids=exclude_event_ids,
+    )
+    if not historical_events:
+        return disciplines, rows_by_discipline
+
+    def _start_date(entry: dict) -> datetime.date:
+        parsed = parse_date(entry.get("start_date") or "")
+        return parsed if parsed is not None else datetime.date.min
+
+    historical_events.sort(
+        key=lambda entry: (_start_date(entry), str(entry.get("event_id") or "")),
+        reverse=True,
+    )
+    if not historical_events:
+        return disciplines, rows_by_discipline
+
+    event_ids = [
+        str(entry.get("event_id") or "").strip()
+        for entry in historical_events
+        if str(entry.get("event_id") or "").strip()
+    ]
+
+    races_by_event_id: dict[str, list[dict]] = {}
+    if event_ids:
+        with ThreadPoolExecutor(max_workers=_max_workers(len(event_ids))) as executor:
+            race_futures = {
+                executor.submit(get_races, event_id): event_id for event_id in event_ids
+            }
+            for race_future in as_completed(race_futures):
+                event_id = race_futures[race_future]
+                try:
+                    races_by_event_id[event_id] = race_future.result()
+                except BiathlonError:
+                    races_by_event_id[event_id] = []
+
+    race_id_map_by_event: dict[str, dict[str, dict[str, list[str]]]] = {}
+    for event_id in event_ids:
+        race_id_map_by_event[event_id] = _build_event_gender_discipline_race_ids(
+            races_by_event_id.get(event_id, [])
+        )
+
+    selected_entries_by_discipline: dict[str, list[dict]] = {}
+    for disc, _label in disciplines:
+        selected: list[dict] = []
+        for entry in historical_events:
+            event_id = str(entry.get("event_id") or "").strip()
+            if not event_id:
+                continue
+            race_map = race_id_map_by_event.get(event_id, {})
+            has_discipline = bool(
+                race_map.get("SW", {}).get(disc) or race_map.get("SM", {}).get(disc)
+            )
+            if not has_discipline:
+                continue
+            selected.append(entry)
+            if len(selected) >= max(0, int(edition_limit)):
+                break
+        selected_entries_by_discipline[disc] = selected
+
+    race_ids_to_fetch: set[str] = set()
+    for disc, _label in disciplines:
+        for entry in selected_entries_by_discipline.get(disc, []):
+            event_id = str(entry.get("event_id") or "").strip()
+            if not event_id:
+                continue
+            race_map = race_id_map_by_event.get(event_id, {})
+            for gender in ("SW", "SM"):
+                race_ids = race_map.get(gender, {}).get(disc, [])
+                if race_ids:
+                    race_id = str(race_ids[0] or "").strip()
+                    if race_id:
+                        race_ids_to_fetch.add(race_id)
+
+    results_by_race_id: dict[str, dict] = {}
+    if race_ids_to_fetch:
+        with ThreadPoolExecutor(
+            max_workers=_max_workers(len(race_ids_to_fetch))
+        ) as executor:
+            result_futures = {
+                executor.submit(get_race_results, race_id): race_id
+                for race_id in race_ids_to_fetch
+            }
+            for result_future in as_completed(result_futures):
+                race_id = result_futures[result_future]
+                try:
+                    results_by_race_id[race_id] = result_future.result()
+                except BiathlonError:
+                    results_by_race_id[race_id] = {}
+
+    for disc, _label in disciplines:
+        selected_entries = selected_entries_by_discipline.get(disc, [])
+        for entry in selected_entries:
+            event_id = str(entry.get("event_id") or "").strip()
+            if not event_id:
+                continue
+            event = cast(dict, entry.get("event") or {})
+            event_type = detect_event_type(event)
+            event_type_label = _preevent_category_code(event_type)
+            edition = str(entry.get("start_date") or entry.get("season_id") or "-")
+            race_map = race_id_map_by_event.get(event_id, {})
+            row = [edition, event_type_label]
+            for gender in ("SW", "SM"):
+                race_ids = race_map.get(gender, {}).get(disc, [])
+                race_id = str(race_ids[0] or "") if race_ids else ""
+                if not race_id:
+                    row.extend(["-", "-", "-"])
+                    continue
+                payload = results_by_race_id.get(race_id, {})
+                row.extend(
+                    list(
+                        _extract_race_podium_cells(
+                            payload,
+                            is_team_race=disc in RELAY_DISCIPLINES,
+                        )
+                    )
+                )
+            rows_by_discipline.setdefault(disc, []).append(row)
+
+    return disciplines, rows_by_discipline
+
+
+def _render_preevent_previous_podium_tables(
+    venue_name: str,
+    races: list[dict],
+    venue_events: list[dict],
+    reference_date: datetime.date | None,
+    args: argparse.Namespace,
+    exclude_event_ids: set[str] | None = None,
+    edition_limit: int = 5,
+) -> None:
+    print(_preevent_heading(2, f"Previous Podiums at {venue_name}", args))
+    disciplines, rows_by_discipline = _build_previous_venue_podium_rows(
+        races,
+        venue_events,
+        reference_date=reference_date,
+        exclude_event_ids=exclude_event_ids,
+        edition_limit=edition_limit,
+    )
+    if not disciplines:
+        print("none")
+        print()
+        return
+
+    print()
+    output_format = get_output_format(args)
+    headers = [
+        "Edition",
+        "Type",
+        "Gold",
+        "Silver",
+        "Bronze",
+        "Gold",
+        "Silver",
+        "Bronze",
+    ]
+    for disc, label in disciplines:
+        print(_preevent_heading(3, label, args))
+        discipline_rows = rows_by_discipline.get(disc, [])
+        if not discipline_rows:
+            print("none")
+            print()
+            continue
+        if disc in RELAY_DISCIPLINES:
+            split_headers = [
+                "Edition",
+                "Type",
+                "Country",
+                "Athletes",
+                "Country",
+                "Athletes",
+                "Country",
+                "Athletes",
+            ]
+            women_rows: list[list[str]] = []
+            men_rows: list[list[str]] = []
+            for row in discipline_rows:
+                women_line = row[:2]
+                men_line = row[:2]
+                for medal_cell in row[2:5]:
+                    country, lineup_names = _split_relay_country_lineup(medal_cell)
+                    athletes = "/".join(lineup_names) if lineup_names else "-"
+                    women_line.extend([country, athletes])
+                for medal_cell in row[5:8]:
+                    country, lineup_names = _split_relay_country_lineup(medal_cell)
+                    athletes = "/".join(lineup_names) if lineup_names else "-"
+                    men_line.extend([country, athletes])
+                women_rows.append(women_line)
+                men_rows.append(men_line)
+            for gender_label, gender_rows in (
+                ("Women", women_rows),
+                ("Men", men_rows),
+            ):
+                print(_preevent_heading(4, gender_label, args))
+                if not gender_rows:
+                    print("none")
+                    print()
+                    continue
+                render_table(
+                    split_headers,
+                    gender_rows,
+                    output_format=output_format,
+                    alignments=["left"] * len(split_headers),
+                    column_separators={2, 4, 6},
+                    group_headers=[(2, 4, "GOLD"), (4, 6, "SILVER"), (6, 8, "BRONZE")],
+                    group_headers_position="inline",
+                    cell_formatters=[
+                        None,
+                        None,
+                        _relay_medal_country_formatter("gold"),
+                        _relay_athletes_cell_formatter,
+                        _relay_medal_country_formatter("silver"),
+                        _relay_athletes_cell_formatter,
+                        _relay_medal_country_formatter("bronze"),
+                        _relay_athletes_cell_formatter,
+                    ],
+                )
+                print()
+            continue
+        render_table(
+            headers,
+            discipline_rows,
+            output_format=output_format,
+            alignments=["left", "left"] + ["left"] * max(0, len(headers) - 2),
+            column_separators={2, 5},
+            group_headers=[(2, 5, "Women"), (5, 8, "Men")],
+        )
+        print()
 
 
 def _parse_leg_value(value: object) -> int | None:
@@ -2705,6 +3232,11 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
 
     if _preevent_section_enabled(PREEVENT_SECTION_LAST_10_EDITIONS, category_code):
         print(_preevent_heading(2, f"Last 10 Editions at {venue_name}", args))
+        recent_edition_entries = _select_recent_venue_edition_entries(
+            venue_events,
+            limit=10,
+            reference_date=venue_reference_date,
+        )
         recent_edition_rows = _build_recent_venue_edition_rows(
             venue_name,
             limit=10,
@@ -2732,10 +3264,24 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
                 output_format=get_output_format(args),
                 alignments=["left", "left"] + ["left" for _ in VENUE_RACE_TYPE_COLUMNS],
                 column_separators={2},
+                row_styles=_recent_edition_row_styles(
+                    recent_edition_entries, highlight_event_ids={event_id}
+                ),
                 cell_formatters=[None, None]
                 + [_format_edition_mark for _ in VENUE_RACE_TYPE_COLUMNS],
             )
             print()
+
+    if _preevent_section_enabled(PREEVENT_SECTION_PREVIOUS_PODIUM, category_code):
+        _render_preevent_previous_podium_tables(
+            venue_name,
+            races,
+            venue_events=venue_events,
+            reference_date=venue_reference_date,
+            args=args,
+            exclude_event_ids={event_id},
+            edition_limit=5,
+        )
 
     if _preevent_section_enabled(PREEVENT_SECTION_ATHLETE_STANDINGS, category_code):
         print(
@@ -5452,6 +5998,11 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
 
     if _postevent_section_enabled(POSTEVENT_SECTION_LAST_10_EDITIONS, category_code):
         print(_preevent_heading(2, f"Last 10 Editions at {venue_name}", args))
+        recent_edition_entries = _select_recent_venue_edition_entries(
+            venue_events,
+            limit=10,
+            reference_date=reference_date,
+        )
         recent_edition_rows = _build_recent_venue_edition_rows(
             venue_name,
             limit=10,
@@ -5479,6 +6030,9 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
                 output_format=output_format,
                 alignments=["left", "left"] + ["left" for _ in VENUE_RACE_TYPE_COLUMNS],
                 column_separators={2},
+                row_styles=_recent_edition_row_styles(
+                    recent_edition_entries, highlight_event_ids={event_id}
+                ),
                 cell_formatters=[None, None]
                 + [_format_edition_mark for _ in VENUE_RACE_TYPE_COLUMNS],
             )
