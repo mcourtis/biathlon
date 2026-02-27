@@ -2,6 +2,7 @@
 
 from biathlon.constants import (
     RELAY_DISCIPLINE,
+    RELAY_DISCIPLINES,
     INDIVIDUAL_DISCIPLINES,
     SHOTS_PER_DISCIPLINE,
     SKI_LAPS,
@@ -23,6 +24,9 @@ class TestDisciplineConstants:
 
     def test_relay_not_in_individual(self):
         assert "RL" not in INDIVIDUAL_DISCIPLINES
+
+    def test_legacy_team_in_relay_disciplines(self):
+        assert "TM" in RELAY_DISCIPLINES
 
 
 class TestShotsPerDiscipline:

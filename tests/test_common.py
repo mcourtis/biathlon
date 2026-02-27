@@ -118,6 +118,9 @@ class TestIsRelayDiscipline:
     def test_relay(self):
         assert is_relay_discipline("RL") is True
 
+    def test_legacy_team(self):
+        assert is_relay_discipline("TM") is True
+
     def test_single_mixed(self):
         assert is_relay_discipline("SR") is True
 

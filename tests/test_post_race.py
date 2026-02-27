@@ -4,7 +4,7 @@ import argparse
 import datetime
 
 from biathlon.api import BiathlonError
-from biathlon.commands import postrace
+from biathlon.commands import achievements, postrace
 
 
 def _dt(value: str) -> datetime.datetime:
@@ -192,6 +192,109 @@ def test_render_olympic_medal_sections_uses_inclusive_cutoff(monkeypatch):
     assert sec == 3
     assert captured["podiums_include_cutoff"] is True
     assert captured["medals_include_cutoff"] is True
+
+
+def test_render_olympic_medal_sections_dynamic_keeps_relay_start_counts(monkeypatch):
+    race_meta = [
+        {
+            "race_id": "RREL1",
+            "discipline": "RL",
+            "cat": "SM",
+            "start_dt": _dt("2018-02-20T10:00:00Z"),
+        },
+        {
+            "race_id": "RREL2",
+            "discipline": "RL",
+            "cat": "SM",
+            "start_dt": _dt("2022-02-20T10:00:00Z"),
+        },
+    ]
+    payload_by_race = {
+        "RREL1": {
+            "Competition": {"DisciplineId": "RL", "catId": "SM"},
+            "Results": [
+                {"IsTeam": True, "Rank": "1", "Nat": "NOR"},
+                {"IsTeam": True, "Rank": "2", "Nat": "GER"},
+                {"IsTeam": True, "Rank": "3", "Nat": "FRA"},
+                {"IsTeam": True, "Rank": "4", "Nat": "SWE"},
+                {
+                    "IsTeam": False,
+                    "IBUId": "MFOUR",
+                    "Name": "Martin Fourcade",
+                    "Nat": "NOR",
+                },
+            ],
+        },
+        "RREL2": {
+            "Competition": {"DisciplineId": "RL", "catId": "SM"},
+            "Results": [
+                {"IsTeam": True, "Rank": "1", "Nat": "GER"},
+                {"IsTeam": True, "Rank": "2", "Nat": "FRA"},
+                {"IsTeam": True, "Rank": "3", "Nat": "SWE"},
+                {"IsTeam": True, "Rank": "4", "Nat": "NOR"},
+                {
+                    "IsTeam": False,
+                    "IBUId": "MFOUR",
+                    "Name": "Martin Fourcade",
+                    "Nat": "NOR",
+                },
+            ],
+        },
+    }
+
+    monkeypatch.setattr(
+        achievements,
+        "_resolve_season_selection",
+        lambda scope, season_arg: (["2122"], "all", {"2122": [{"EventId": "E2122"}]}),
+    )
+    monkeypatch.setattr(
+        achievements,
+        "_collect_race_meta",
+        lambda season_ids, scope_events, category: list(race_meta),
+    )
+    monkeypatch.setattr(
+        achievements,
+        "_fetch_race_payloads",
+        lambda race_meta: dict(payload_by_race),
+    )
+    monkeypatch.setattr(
+        postrace,
+        "_get_past_olympic_relay_podiums",
+        lambda discipline, category, cutoff_dt=None, include_cutoff=False: [],
+    )
+    monkeypatch.setattr(
+        postrace,
+        "_get_all_olympic_medals",
+        lambda category, cutoff_dt=None, include_cutoff=False: ([], {}),
+    )
+
+    captured_athlete_rows: list[list[str]] = []
+
+    def fake_render_table(headers, rows, **kwargs):
+        if len(headers) == 19 and headers[1] == "Athlete":
+            captured_athlete_rows.extend(rows)
+
+    monkeypatch.setattr(postrace, "render_table", fake_render_table)
+
+    sec = postrace._render_olympic_medal_sections(
+        argparse.Namespace(format="tsv"),
+        0,
+        "RL",
+        "SM",
+        True,
+        set(),
+        {"MFOUR"},
+        set(),
+        set(),
+        cutoff_dt=_dt("2026-02-15T12:00:00Z"),
+        use_dynamic_all_olympic_stats=True,
+    )
+
+    assert sec == 3
+    martin_row = next(
+        row for row in captured_athlete_rows if row[1] == "Martin Fourcade"
+    )
+    assert martin_row[18] == "2"
 
 
 def test_has_newer_relevant_wc_points_race_detects_completed_newer(monkeypatch):

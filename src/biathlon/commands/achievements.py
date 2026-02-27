@@ -59,6 +59,11 @@ WC_TITLE_FIELDS = [
     ("MS", "Mass Start", "mass_start"),
 ]
 
+# 2002 exception: in Olympic season 2001/02, Oslo WC event included the
+# World Championships mass-start races (not on Olympic program then).
+LEGACY_WCH_EVENT_ID_2002_OSLO = "BT0102SWRLCP09"
+LEGACY_WCH_MARKER_MS_ONLY = "_legacy_wch_ms_only"
+
 
 def _parse_birth_date_value(value: object) -> datetime.date | None:
     text = str(value or "").strip()
@@ -181,7 +186,21 @@ def _fetch_events_for_seasons(season_ids: list[str]) -> dict[str, list[dict]]:
 
 
 def _filter_scope_events(events: list[dict], scope: str) -> list[dict]:
-    return [event for event in events if detect_event_type(event) == scope]
+    selected = [event for event in events if detect_event_type(event) == scope]
+    if scope != EVENT_TYPE_WCH:
+        return selected
+
+    # Include Oslo 2002 WC event as WCH scope, but only for mass-start races.
+    seen_ids = {str(event.get("EventId") or "") for event in selected}
+    for event in events:
+        event_id = str(event.get("EventId") or "")
+        if event_id != LEGACY_WCH_EVENT_ID_2002_OSLO or event_id in seen_ids:
+            continue
+        tagged = dict(event)
+        tagged[LEGACY_WCH_MARKER_MS_ONLY] = True
+        selected.append(tagged)
+        seen_ids.add(event_id)
+    return selected
 
 
 def _pick_current_or_last_major_season(events_by_season: dict[str, list[dict]]) -> str:
@@ -279,12 +298,14 @@ def _collect_race_meta(
     scope_events: dict[str, list[dict]],
     category: str,
 ) -> list[dict]:
-    event_ids: list[tuple[str, str]] = []
+    event_ids: list[tuple[str, str, bool]] = []
     for sid in season_ids:
         for event in scope_events.get(sid, []):
             event_id = str(event.get("EventId") or "")
             if event_id:
-                event_ids.append((sid, event_id))
+                event_ids.append(
+                    (sid, event_id, bool(event.get(LEGACY_WCH_MARKER_MS_ONLY)))
+                )
 
     if not event_ids:
         return []
@@ -294,11 +315,11 @@ def _collect_race_meta(
         max_workers=_max_workers(len(event_ids), cap=12)
     ) as executor:
         futures = {
-            executor.submit(get_races, event_id): (sid, event_id)
-            for sid, event_id in event_ids
+            executor.submit(get_races, event_id): (sid, event_id, ms_only)
+            for sid, event_id, ms_only in event_ids
         }
         for future in as_completed(futures):
-            sid, event_id = futures[future]
+            sid, event_id, ms_only = futures[future]
             try:
                 races = list(future.result())
             except BiathlonError:
@@ -308,6 +329,8 @@ def _collect_race_meta(
                 if not race_id:
                     continue
                 discipline = str(race.get("DisciplineId") or "").upper()
+                if ms_only and discipline != "MS":
+                    continue
                 race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
                 if not _race_matches_category(discipline, race_cat, category):
                     continue
@@ -534,8 +557,6 @@ def _aggregate_achievements(
                     continue
                 nat = str(row.get("Nat") or "")
                 medal_for_nat = medal_by_nat.get(nat)
-                if not medal_for_nat:
-                    continue
                 ibu_id = _row_ibu_id(row)
                 name = str(row.get("Name") or row.get("ShortName") or "")
                 key = ibu_id or f"{name}|{nat}"
@@ -561,7 +582,8 @@ def _aggregate_achievements(
                     athlete_stats[key]["name"], name
                 )
                 _add_race(athlete_stats[key], is_relay=True)
-                _add_medal(athlete_stats[key], medal_for_nat, is_relay=True)
+                if medal_for_nat:
+                    _add_medal(athlete_stats[key], medal_for_nat, is_relay=True)
             continue
 
         seen_keys_individual: set[str] = set()

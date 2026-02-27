@@ -4,7 +4,8 @@
 RELAY_DISCIPLINE = "RL"
 SINGLE_MIXED_RELAY_DISCIPLINE = "SR"
 INDIVIDUAL_DISCIPLINES = {"SP", "PU", "IN", "MS", "SI"}
-RELAY_DISCIPLINES = frozenset({"RL", "SR", "MR"})
+# Includes legacy Team events (TM) so historical team races are handled as relay/team.
+RELAY_DISCIPLINES = frozenset({"RL", "SR", "MR", "TM"})
 
 # Relay category codes
 RELAY_WOMEN_CAT = "SW"
@@ -32,6 +33,7 @@ DISCIPLINE_NAMES = {
     "IN": "Individual",
     "MS": "Mass Start",
     "RL": "Relay",
+    "TM": "Team",
     "SR": "Single Mixed Relay",
     "MR": "Mixed Relay",
     "SI": "Short Individual",

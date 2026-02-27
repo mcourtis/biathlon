@@ -193,6 +193,77 @@ def _mock_world_cup_dataset(monkeypatch) -> None:
     )
 
 
+def test_filter_scope_events_world_includes_legacy_oslo_2002_mass_start_event():
+    events = [
+        {
+            "EventId": "BT0102SWRLCP09",
+            "Description": "Ruhrgas World Cup 9",
+            "ShortDescription": "Oslo Holmenkollen",
+        },
+        {
+            "EventId": "BT2425SWRLCH__",
+            "Description": "IBU World Championships Lenzerheide",
+        },
+    ]
+
+    filtered_wch = achievements._filter_scope_events(
+        events, achievements.EVENT_TYPE_WCH
+    )
+    ids = [str(event.get("EventId") or "") for event in filtered_wch]
+    assert "BT2425SWRLCH__" in ids
+    assert "BT0102SWRLCP09" in ids
+
+    legacy = next(
+        event for event in filtered_wch if event.get("EventId") == "BT0102SWRLCP09"
+    )
+    assert legacy.get(achievements.LEGACY_WCH_MARKER_MS_ONLY) is True
+
+
+def test_collect_race_meta_legacy_wch_event_filters_to_mass_start(monkeypatch):
+    monkeypatch.setattr(
+        achievements,
+        "get_races",
+        lambda event_id: [
+            {
+                "RaceId": "BT0102SWRLCP09SWSP",
+                "DisciplineId": "SP",
+                "catId": "SW",
+                "StartTime": "2002-03-21T11:00:00Z",
+            },
+            {
+                "RaceId": "BT0102SWRLCP09SMPU",
+                "DisciplineId": "PU",
+                "catId": "SM",
+                "StartTime": "2002-03-23T14:00:00Z",
+            },
+            {
+                "RaceId": "BT0102SWRLCP09SMMS",
+                "DisciplineId": "MS",
+                "catId": "SM",
+                "StartTime": "2002-03-24T14:00:00Z",
+            },
+            {
+                "RaceId": "BT0102SWRLCP09SWMS",
+                "DisciplineId": "MS",
+                "catId": "SW",
+                "StartTime": "2002-03-24T12:30:00Z",
+            },
+        ],
+    )
+
+    scope_events = {
+        "0102": [
+            {
+                "EventId": "BT0102SWRLCP09",
+                achievements.LEGACY_WCH_MARKER_MS_ONLY: True,
+            }
+        ]
+    }
+    race_meta = achievements._collect_race_meta(["0102"], scope_events, "SM")
+
+    assert [row["race_id"] for row in race_meta] == ["BT0102SWRLCP09SMMS"]
+
+
 def test_achievements_default_women_athlete_table(monkeypatch, capsys):
     _mock_world_cup_dataset(monkeypatch)
 
@@ -203,6 +274,105 @@ def test_achievements_default_women_athlete_table(monkeypatch, capsys):
     assert "# Achievements" in out
     assert "World Cup" in out
     assert "1\tAlice\tNOR\tF\t-\t2\t1\t0\t3\t1\t0\t0\t1\t1\t1\t0\t2\t3\t1\t2\n" in out
+
+
+def test_aggregate_achievements_relay_races_include_non_podium_starts():
+    race_meta = [
+        {"race_id": "RREL1", "discipline": "RL", "cat": "SM"},
+        {"race_id": "RREL2", "discipline": "RL", "cat": "SM"},
+    ]
+    payload_by_race = {
+        "RREL1": {
+            "Competition": {"DisciplineId": "RL", "catId": "SM"},
+            "Results": [
+                {"IsTeam": True, "Rank": "1", "Nat": "NOR"},
+                {"IsTeam": True, "Rank": "2", "Nat": "GER"},
+                {"IsTeam": True, "Rank": "3", "Nat": "FRA"},
+                {"IsTeam": True, "Rank": "4", "Nat": "SWE"},
+                {
+                    "IsTeam": False,
+                    "IBUId": "MFOUR",
+                    "Name": "Martin Fourcade",
+                    "Nat": "NOR",
+                },
+            ],
+        },
+        "RREL2": {
+            "Competition": {"DisciplineId": "RL", "catId": "SM"},
+            "Results": [
+                {"IsTeam": True, "Rank": "1", "Nat": "GER"},
+                {"IsTeam": True, "Rank": "2", "Nat": "FRA"},
+                {"IsTeam": True, "Rank": "3", "Nat": "SWE"},
+                {"IsTeam": True, "Rank": "4", "Nat": "NOR"},
+                {
+                    "IsTeam": False,
+                    "IBUId": "MFOUR",
+                    "Name": "Martin Fourcade",
+                    "Nat": "NOR",
+                },
+            ],
+        },
+    }
+
+    rows, races_used = achievements._aggregate_achievements(
+        race_meta, payload_by_race, "SM", by_country=False
+    )
+
+    assert races_used == 2
+    martin = next(row for row in rows if row.get("ibu_id") == "MFOUR")
+    assert martin["gold_relay"] == 1
+    assert martin["races_relay"] == 2
+    assert martin["races"] == 2
+
+
+def test_aggregate_achievements_legacy_team_races_count_as_relay():
+    race_meta = [
+        {"race_id": "RTM1", "discipline": "TM", "cat": "SM"},
+        {"race_id": "RTM2", "discipline": "TM", "cat": "SM"},
+    ]
+    payload_by_race = {
+        "RTM1": {
+            "Competition": {"DisciplineId": "TM", "catId": "SM"},
+            "Results": [
+                {"IsTeam": True, "Rank": "1", "Nat": "NOR"},
+                {"IsTeam": True, "Rank": "2", "Nat": "GER"},
+                {"IsTeam": True, "Rank": "3", "Nat": "FRA"},
+                {
+                    "IsTeam": False,
+                    "IBUId": "MFOUR",
+                    "Name": "Martin Fourcade",
+                    "Nat": "NOR",
+                },
+            ],
+        },
+        "RTM2": {
+            "Competition": {"DisciplineId": "TM", "catId": "SM"},
+            "Results": [
+                {"IsTeam": True, "Rank": "1", "Nat": "GER"},
+                {"IsTeam": True, "Rank": "2", "Nat": "FRA"},
+                {"IsTeam": True, "Rank": "3", "Nat": "SWE"},
+                {"IsTeam": True, "Rank": "4", "Nat": "NOR"},
+                {
+                    "IsTeam": False,
+                    "IBUId": "MFOUR",
+                    "Name": "Martin Fourcade",
+                    "Nat": "NOR",
+                },
+            ],
+        },
+    }
+
+    rows, races_used = achievements._aggregate_achievements(
+        race_meta, payload_by_race, "SM", by_country=False
+    )
+
+    assert races_used == 2
+    martin = next(row for row in rows if row.get("ibu_id") == "MFOUR")
+    assert martin["races"] == 2
+    assert martin["races_ind"] == 0
+    assert martin["races_relay"] == 2
+    assert martin["gold_ind"] == 0
+    assert martin["gold_relay"] == 1
 
 
 def test_achievements_country_mode(monkeypatch, capsys):
