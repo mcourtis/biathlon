@@ -1124,10 +1124,16 @@ def _build_recent_venue_edition_rows(
 
 
 def _race_type_presence_mark(value: object) -> str:
-    try:
-        count = int(value)
-    except (TypeError, ValueError):
-        return "-"
+    if isinstance(value, int):
+        count = value
+    else:
+        text = str(value or "").strip()
+        if not text:
+            return "-"
+        try:
+            count = int(text)
+        except ValueError:
+            return "-"
     return "X" if count > 0 else "-"
 
 
@@ -1299,15 +1305,15 @@ def _collect_current_season_participant_keys(
 
     race_meta_by_id: dict[str, str] = {}
     with ThreadPoolExecutor(max_workers=_max_workers(len(event_ids))) as executor:
-        futures = {
+        race_futures = {
             executor.submit(get_races, event_id): event_id for event_id in event_ids
         }
-        for future in as_completed(futures):
+        for race_future in as_completed(race_futures):
             try:
-                races = future.result()
+                event_races = race_future.result()
             except BiathlonError:
                 continue
-            for race in races:
+            for race in event_races:
                 race_id = str(race.get("RaceId") or race.get("Id") or "").strip()
                 if not race_id:
                     continue
@@ -1322,15 +1328,15 @@ def _collect_current_season_participant_keys(
 
     participant_keys: set[str] = set()
     with ThreadPoolExecutor(max_workers=_max_workers(len(race_meta_by_id))) as executor:
-        futures = {
+        result_futures = {
             executor.submit(get_race_results, race_id): race_id
             for race_id in race_meta_by_id
         }
-        for future in as_completed(futures):
-            race_id = futures[future]
+        for result_future in as_completed(result_futures):
+            race_id = result_futures[result_future]
             disc_id = race_meta_by_id[race_id]
             try:
-                payload = future.result()
+                payload = result_future.result()
             except BiathlonError:
                 continue
 
@@ -1384,16 +1390,16 @@ def _build_decorated_athlete_rows_for_events(
     }
     race_meta_by_id: dict[str, tuple[str, str, str]] = {}
     with ThreadPoolExecutor(max_workers=_max_workers(len(event_ids))) as executor:
-        futures = {
+        race_futures = {
             executor.submit(get_races, event_id): event_id for event_id in event_ids
         }
-        for future in as_completed(futures):
-            event_id = futures[future]
+        for race_future in as_completed(race_futures):
+            event_id = race_futures[race_future]
             try:
-                races = future.result()
+                event_races = race_future.result()
             except BiathlonError:
                 continue
-            for race in races:
+            for race in event_races:
                 race_id = str(race.get("RaceId") or race.get("Id") or "").strip()
                 if not race_id:
                     continue
@@ -1417,15 +1423,15 @@ def _build_decorated_athlete_rows_for_events(
     athlete_gender_strict_votes: dict[str, dict[str, int]] = {}
     current_season_participants: set[str] = set()
     with ThreadPoolExecutor(max_workers=_max_workers(len(race_meta_by_id))) as executor:
-        futures = {
+        result_futures = {
             executor.submit(get_race_results, race_id): race_id
             for race_id in race_meta_by_id
         }
-        for future in as_completed(futures):
-            race_id = futures[future]
+        for result_future in as_completed(result_futures):
+            race_id = result_futures[result_future]
             cat_id, disc_id, race_season_id = race_meta_by_id[race_id]
             try:
-                payload = future.result()
+                payload = result_future.result()
             except BiathlonError:
                 continue
 
@@ -1647,7 +1653,7 @@ def _build_decorated_athlete_rows_for_events(
         silver = int(stats["silver"])
         bronze = int(stats["bronze"])
         total = gold + silver + bronze
-        races = int(stats["races"])
+        total_races = int(stats["races"])
         gold_ind = int(stats.get("gold_ind", 0))
         silver_ind = int(stats.get("silver_ind", 0))
         bronze_ind = int(stats.get("bronze_ind", 0))
@@ -1668,7 +1674,7 @@ def _build_decorated_athlete_rows_for_events(
                 str(silver),
                 str(bronze),
                 str(total),
-                str(races),
+                str(total_races),
                 str(gold_ind),
                 str(silver_ind),
                 str(bronze_ind),
@@ -2681,7 +2687,7 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
         )
         render_table(
             ["Country", "WC Editions", "WCH Editions", "OWG Editions"],
-            [[event_country, wc_editions, wch_editions, owg_editions]],
+            [[event_country, str(wc_editions), str(wch_editions), str(owg_editions)]],
             output_format=get_output_format(args),
         )
         print()
@@ -5269,11 +5275,11 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
     ]
     race_payloads: dict[str, dict] = {}
     with ThreadPoolExecutor(max_workers=_max_workers(len(race_ids))) as executor:
-        futures: dict[Any, str] = {
+        race_result_futures: dict[Any, str] = {
             executor.submit(get_race_results, race_id): race_id for race_id in race_ids
         }
-        for future in as_completed(futures):
-            race_id = futures[future]
+        for future in as_completed(race_result_futures):
+            race_id = race_result_futures[future]
             try:
                 race_payloads[race_id] = future.result()
             except BiathlonError:
@@ -5386,12 +5392,12 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
             with ThreadPoolExecutor(
                 max_workers=_max_workers(len(ibu_list))
             ) as executor:
-                futures: dict[Any, str] = {
+                all_results_futures: dict[Any, str] = {
                     executor.submit(get_all_results, ibu_id): ibu_id
                     for ibu_id in ibu_list
                 }
-                for future in as_completed(futures):
-                    ibu_id = futures[future]
+                for future in as_completed(all_results_futures):
+                    ibu_id = all_results_futures[future]
                     try:
                         payload = future.result()
                         all_results_cache[ibu_id] = list(payload.get("Results") or [])
@@ -5423,7 +5429,7 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
         )
         render_table(
             ["Country", "WC Editions", "WCH Editions", "OWG Editions"],
-            [[event_country, wc_editions, wch_editions, owg_editions]],
+            [[event_country, str(wc_editions), str(wch_editions), str(owg_editions)]],
             output_format=output_format,
         )
         print()
