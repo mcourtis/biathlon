@@ -358,6 +358,74 @@ def test_build_venue_decorated_athlete_rows_uses_medal_columns(monkeypatch):
     assert all(style == "highlight_plain" for style in row_styles)
 
 
+def test_build_venue_decorated_athlete_rows_prefers_strict_gender_votes(monkeypatch):
+    monkeypatch.setattr(brief, "get_current_season_id", lambda: "2526")
+    monkeypatch.setattr(brief, "get_seasons", lambda: [{"SeasonId": "2526"}])
+    monkeypatch.setattr(
+        brief,
+        "get_events",
+        lambda season_id, level: (
+            [
+                {
+                    "EventId": "EVT1",
+                    "Organizer": "Kontiolahti",
+                    "Description": "BMW IBU World Cup",
+                    "StartDate": "2026-01-10",
+                }
+            ]
+            if season_id == "2526" and level == 1
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_races",
+        lambda event_id: (
+            [
+                {"RaceId": "R_MX", "catId": "MX", "DisciplineId": "SR"},
+                {"RaceId": "R_SW", "catId": "SW", "DisciplineId": "SP"},
+            ]
+            if event_id == "EVT1"
+            else []
+        ),
+    )
+    payloads = {
+        "R_MX": {
+            "Results": [
+                {"IsTeam": True, "Bib": "7", "Nat": "FRA", "Rank": "1"},
+                {
+                    "IsTeam": False,
+                    "IBUId": "F1",
+                    "Name": "SIMON Julia",
+                    "Nat": "FRA",
+                    "Bib": "7",
+                    "Leg": "2",
+                },
+            ]
+        },
+        "R_SW": {
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "IBUId": "F1",
+                    "Name": "Julia SIMON",
+                    "Nat": "FRA",
+                    "Rank": "1",
+                }
+            ]
+        },
+    }
+    monkeypatch.setattr(brief, "get_race_results", lambda race_id: payloads[race_id])
+
+    rows, _row_styles = brief._build_venue_decorated_athlete_rows(
+        "Kontiolahti", limit=10
+    )
+
+    simon = next(row for row in rows if row[1] in {"SIMON Julia", "Julia SIMON"})
+    assert simon[2] == "FRA"
+    assert simon[3] == "F"
+
+
 def test_build_venue_decorated_athlete_rows_respects_global_highlight_keys(monkeypatch):
     monkeypatch.setattr(brief, "get_current_season_id", lambda: "2526")
     monkeypatch.setattr(
@@ -421,6 +489,89 @@ def test_build_venue_decorated_athlete_rows_respects_global_highlight_keys(monke
 
     assert rows
     assert row_styles == ["highlight_plain"]
+
+
+def test_build_venue_decorated_athlete_rows_single_mixed_relay_counts_medal_once(
+    monkeypatch,
+):
+    monkeypatch.setattr(brief, "get_current_season_id", lambda: "2526")
+    monkeypatch.setattr(brief, "get_seasons", lambda: [{"SeasonId": "2526"}])
+    monkeypatch.setattr(
+        brief,
+        "get_events",
+        lambda season_id, level: (
+            [
+                {
+                    "EventId": "EVT1",
+                    "Organizer": "Kontiolahti",
+                    "Description": "BMW IBU World Cup",
+                    "StartDate": "2026-01-10",
+                }
+            ]
+            if season_id == "2526" and level == 1
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_races",
+        lambda event_id: (
+            [{"RaceId": "R_MX", "catId": "MX", "DisciplineId": "SR"}]
+            if event_id == "EVT1"
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_race_results",
+        lambda race_id: {
+            "Results": [
+                {"IsTeam": True, "Bib": "7", "Nat": "FRA", "Rank": "1"},
+                {
+                    "IsTeam": False,
+                    "IBUId": "F1",
+                    "Name": "Fiona",
+                    "Nat": "FRA",
+                    "Bib": "7",
+                    "Leg": "1",
+                },
+                {
+                    "IsTeam": False,
+                    "IBUId": "M1",
+                    "Name": "Marc",
+                    "Nat": "FRA",
+                    "Bib": "7",
+                    "Leg": "2",
+                },
+                {
+                    "IsTeam": False,
+                    "IBUId": "F1",
+                    "Name": "Fiona",
+                    "Nat": "FRA",
+                    "Bib": "7",
+                    "Leg": "3",
+                },
+                {
+                    "IsTeam": False,
+                    "IBUId": "M1",
+                    "Name": "Marc",
+                    "Nat": "FRA",
+                    "Bib": "7",
+                    "Leg": "4",
+                },
+            ]
+        },
+    )
+
+    rows, _styles = brief._build_venue_decorated_athlete_rows("Kontiolahti", limit=10)
+
+    fiona = next(row for row in rows if row[1] == "Fiona")
+    marc = next(row for row in rows if row[1] == "Marc")
+
+    assert fiona[4:9] == ["1", "0", "0", "1", "1"]
+    assert fiona[14:19] == ["1", "0", "0", "1", "1"]
+    assert marc[4:9] == ["1", "0", "0", "1", "1"]
+    assert marc[14:19] == ["1", "0", "0", "1", "1"]
 
 
 def test_render_decorated_tables_renumbers_rank_per_gender(capsys):
@@ -1037,6 +1188,40 @@ def test_render_preevent_agenda_non_wc_hides_season_race_columns(monkeypatch, ca
     assert "Date\tDay\tTime\tCategory\tDiscipline\n" in out
     assert "Season Race" not in out
     assert "Season Race Full" not in out
+
+
+def test_render_preevent_agenda_sets_column_separators_for_wc(monkeypatch):
+    captured: list[tuple[list[str], list[list[str]], dict]] = []
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured.append((headers, rows, kwargs))
+
+    monkeypatch.setattr(brief, "render_table", fake_render_table)
+    monkeypatch.setattr(
+        brief,
+        "_build_season_race_sequence_maps",
+        lambda *a, **k: ({("SW", "R1"): "1/9"}, {("SW", "R1"): "1/17"}),
+    )
+
+    brief._render_preevent_agenda(
+        [
+            {
+                "RaceId": "R1",
+                "catId": "SW",
+                "DisciplineId": "SP",
+                "StartTime": "2026-02-10T13:05:00Z",
+            }
+        ],
+        argparse.Namespace(format="pretty"),
+        season_id="2526",
+        event_type=brief.EVENT_TYPE_WC,
+        event_id="EVT1",
+        level=1,
+    )
+
+    assert captured
+    _headers, _rows, kwargs = captured[0]
+    assert kwargs.get("column_separators") == {3, 5}
 
 
 def test_snapshot_athlete_standings_pretty_adds_leader_markers(monkeypatch, capsys):
