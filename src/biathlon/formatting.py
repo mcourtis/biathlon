@@ -381,6 +381,8 @@ def render_table(
             return Color.highlight(text)
         if style == "highlight_plain":
             return Color.highlight_plain(text)
+        if style == "upcoming":
+            return Color.light_blue(text, bold=True)
         if style == "gold":
             return Color.gold(text)
         if style == "silver":

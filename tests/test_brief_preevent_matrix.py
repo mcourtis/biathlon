@@ -29,6 +29,9 @@ def test_preevent_matrix_sample_cells_match_spec():
         brief.PREEVENT_SECTION_LAST_10_EDITIONS, "WCH"
     )
     assert brief._preevent_section_enabled(
+        brief.PREEVENT_SECTION_PREVIOUS_WINNERS, "WCH"
+    )
+    assert brief._preevent_section_enabled(
         brief.PREEVENT_SECTION_PREVIOUS_PODIUM, "WCH"
     )
     assert brief._preevent_section_enabled(
@@ -381,17 +384,19 @@ def test_previous_venue_podium_rows_follow_upcoming_races_and_limit(monkeypatch)
                     f"Bianca WSilver{year}",
                     f"Chloe WBronze{year}",
                 )
+                nat = "NOR"
             else:
                 names = (
                     f"Adam MGold{year}",
                     f"Bruno MSilver{year}",
                     f"Chris MBronze{year}",
                 )
+                nat = "FRA"
             return {
                 "Results": [
-                    {"IsTeam": False, "Name": names[0], "Rank": "1"},
-                    {"IsTeam": False, "Name": names[1], "Rank": "2"},
-                    {"IsTeam": False, "Name": names[2], "Rank": "3"},
+                    {"IsTeam": False, "Name": names[0], "Nat": nat, "Rank": "1"},
+                    {"IsTeam": False, "Name": names[1], "Nat": nat, "Rank": "2"},
+                    {"IsTeam": False, "Name": names[2], "Nat": nat, "Rank": "3"},
                 ]
             }
         if disc == "RL":
@@ -435,18 +440,309 @@ def test_previous_venue_podium_rows_follow_upcoming_races_and_limit(monkeypatch)
         "2020-01-10",
     ]
     assert individual_rows[0][2:5] == [
-        "A. WGold2025",
-        "B. WSilver2025",
-        "C. WBronze2025",
+        "A. WGold2025 (NOR)",
+        "B. WSilver2025 (NOR)",
+        "C. WBronze2025 (NOR)",
     ]
     assert individual_rows[0][5:8] == [
-        "A. MGold2025",
-        "B. MSilver2025",
-        "C. MBronze2025",
+        "A. MGold2025 (FRA)",
+        "B. MSilver2025 (FRA)",
+        "C. MBronze2025 (FRA)",
     ]
     assert relay_rows[0][2:5] == ["Norway", "France", "Sweden"]
     assert relay_rows[0][5:8] == ["-", "-", "-"]
     assert relay_rows[3][2:5] == ["Germany", "Sweden", "Norway"]
+
+
+def test_previous_venue_winner_rows_include_date_discipline_and_gender(monkeypatch):
+    upcoming_races = [
+        {
+            "RaceId": "CUR_SW_IN",
+            "catId": "SW",
+            "DisciplineId": "IN",
+            "StartTime": "2026-01-10T10:00:00Z",
+        },
+        {
+            "RaceId": "CUR_SM_IN",
+            "catId": "SM",
+            "DisciplineId": "IN",
+            "StartTime": "2026-01-10T12:00:00Z",
+        },
+        {
+            "RaceId": "CUR_SW_RL",
+            "catId": "SW",
+            "DisciplineId": "RL",
+            "StartTime": "2026-01-11T10:00:00Z",
+        },
+    ]
+    venue_events = [
+        {
+            "event_id": "EVT_CUR",
+            "season_id": "2526",
+            "start_date": "2026-01-10",
+            "event": {"Description": "BMW IBU World Cup"},
+        },
+        {
+            "event_id": "EVT_2025",
+            "season_id": "2425",
+            "start_date": "2025-01-10",
+            "event": {"Description": "BMW IBU World Cup"},
+        },
+        {
+            "event_id": "EVT_2024",
+            "season_id": "2324",
+            "start_date": "2024-01-10",
+            "event": {"Description": "BMW IBU World Cup"},
+        },
+        {
+            "event_id": "EVT_2023",
+            "season_id": "2223",
+            "start_date": "2023-01-10",
+            "event": {"Description": "BMW IBU World Cup"},
+        },
+        {
+            "event_id": "EVT_2022",
+            "season_id": "2122",
+            "start_date": "2022-01-10",
+            "event": {"Description": "BMW IBU World Cup"},
+        },
+        {
+            "event_id": "EVT_2021",
+            "season_id": "2021",
+            "start_date": "2021-01-10",
+            "event": {"Description": "BMW IBU World Cup"},
+        },
+        {
+            "event_id": "EVT_2020",
+            "season_id": "1920",
+            "start_date": "2020-01-10",
+            "event": {"Description": "BMW IBU World Cup"},
+        },
+    ]
+
+    def fake_get_races(event_id: str):
+        if event_id == "EVT_2025":
+            return [
+                {
+                    "RaceId": "EVT_2025_SW_PU",
+                    "catId": "SW",
+                    "DisciplineId": "PU",
+                    "StartTime": "2025-01-09T10:00:00Z",
+                },
+                {
+                    "RaceId": "EVT_2025_SW_IN",
+                    "catId": "SW",
+                    "DisciplineId": "IN",
+                    "StartTime": "2025-01-10T10:00:00Z",
+                },
+                {
+                    "RaceId": "EVT_2025_SM_IN",
+                    "catId": "SM",
+                    "DisciplineId": "IN",
+                    "StartTime": "2025-01-10T12:00:00Z",
+                },
+                {
+                    "RaceId": "EVT_2025_SW_RL",
+                    "catId": "SW",
+                    "DisciplineId": "RL",
+                    "StartTime": "2025-01-11T10:00:00Z",
+                },
+                {
+                    "RaceId": "EVT_2025_SM_RL",
+                    "catId": "SM",
+                    "DisciplineId": "RL",
+                    "StartTime": "2025-01-11T12:00:00Z",
+                },
+            ]
+        if event_id == "EVT_2024":
+            return [
+                {
+                    "RaceId": "EVT_2024_SW_SP",
+                    "catId": "SW",
+                    "DisciplineId": "SP",
+                    "StartTime": "2024-01-09T10:00:00Z",
+                },
+                {
+                    "RaceId": "EVT_2024_SM_SP",
+                    "catId": "SM",
+                    "DisciplineId": "SP",
+                    "StartTime": "2024-01-09T12:00:00Z",
+                },
+                {
+                    "RaceId": "EVT_2024_SW_IN",
+                    "catId": "SW",
+                    "DisciplineId": "IN",
+                    "StartTime": "2024-01-10T10:00:00Z",
+                },
+                {
+                    "RaceId": "EVT_2024_SM_IN",
+                    "catId": "SM",
+                    "DisciplineId": "IN",
+                    "StartTime": "2024-01-10T12:00:00Z",
+                },
+                {
+                    "RaceId": "EVT_2024_MX_RL",
+                    "catId": "MX",
+                    "DisciplineId": "RL",
+                    "StartTime": "2024-01-11T10:00:00Z",
+                },
+                {
+                    "RaceId": "EVT_2024_MX_SR",
+                    "catId": "MX",
+                    "DisciplineId": "SR",
+                    "StartTime": "2024-01-12T10:00:00Z",
+                },
+            ]
+        if event_id in {"EVT_2023", "EVT_2022", "EVT_2021", "EVT_2020"}:
+            year = event_id.split("_")[1]
+            return [
+                {
+                    "RaceId": f"{event_id}_SW_IN",
+                    "catId": "SW",
+                    "DisciplineId": "IN",
+                    "StartTime": f"{year}-01-10T10:00:00Z",
+                },
+                {
+                    "RaceId": f"{event_id}_SM_IN",
+                    "catId": "SM",
+                    "DisciplineId": "IN",
+                    "StartTime": f"{year}-01-10T12:00:00Z",
+                },
+            ]
+        return []
+
+    monkeypatch.setattr(brief, "get_races", fake_get_races)
+
+    def fake_get_race_results(race_id: str):
+        parts = race_id.split("_")
+        year = parts[1]
+        cat = parts[2]
+        disc = parts[3]
+        if disc == "PU":
+            winner = f"Alice WPursuit{year}" if cat == "SW" else f"Adam MPursuit{year}"
+            nat = "NOR" if cat == "SW" else "FRA"
+            return {
+                "Results": [{"IsTeam": False, "Name": winner, "Nat": nat, "Rank": "1"}]
+            }
+        if disc == "SP":
+            winner = f"Alice WSprint{year}" if cat == "SW" else f"Adam MSprint{year}"
+            nat = "NOR" if cat == "SW" else "FRA"
+            return {
+                "Results": [{"IsTeam": False, "Name": winner, "Nat": nat, "Rank": "1"}]
+            }
+        if disc == "IN":
+            winner = f"Alice WWinner{year}" if cat == "SW" else f"Adam MWinner{year}"
+            nat = "NOR" if cat == "SW" else "FRA"
+            return {
+                "Results": [{"IsTeam": False, "Name": winner, "Nat": nat, "Rank": "1"}]
+            }
+        if disc == "RL":
+            winner_nat = "SWE" if cat == "MX" else ("NOR" if cat == "SW" else "FRA")
+            return {"Results": [{"IsTeam": True, "Nat": winner_nat, "Rank": "1"}]}
+        if disc == "SR":
+            winner_nat = "GER"
+            return {"Results": [{"IsTeam": True, "Nat": winner_nat, "Rank": "1"}]}
+        return {"Results": []}
+
+    monkeypatch.setattr(brief, "get_race_results", fake_get_race_results)
+
+    rows = brief._build_previous_venue_winner_rows(
+        upcoming_races,
+        venue_events,
+        reference_date=datetime.date(2026, 1, 10),
+        exclude_event_ids={"EVT_CUR"},
+        edition_limit=5,
+    )
+
+    assert rows == [
+        ["Pursuit", "2025-01-09", "A. WPursuit2025 (NOR)", "-", "-"],
+        [
+            "Individual",
+            "2025-01-10",
+            "A. WWinner2025 (NOR)",
+            "2025-01-10",
+            "A. MWinner2025 (FRA)",
+        ],
+        ["Relay", "2025-01-11", "NORWAY", "2025-01-11", "FRANCE"],
+        [
+            "Sprint",
+            "2024-01-09",
+            "A. WSprint2024 (NOR)",
+            "2024-01-09",
+            "A. MSprint2024 (FRA)",
+        ],
+        [
+            "Individual",
+            "2024-01-10",
+            "A. WWinner2024 (NOR)",
+            "2024-01-10",
+            "A. MWinner2024 (FRA)",
+        ],
+        ["Mixed Relay", "2024-01-11", "SWEDEN", "2024-01-11", "SWEDEN"],
+        ["Single Mixed Relay", "2024-01-12", "GERMANY", "2024-01-12", "GERMANY"],
+        [
+            "Individual",
+            "2023-01-10",
+            "A. WWinner2023 (NOR)",
+            "2023-01-10",
+            "A. MWinner2023 (FRA)",
+        ],
+        [
+            "Individual",
+            "2022-01-10",
+            "A. WWinner2022 (NOR)",
+            "2022-01-10",
+            "A. MWinner2022 (FRA)",
+        ],
+        [
+            "Individual",
+            "2021-01-10",
+            "A. WWinner2021 (NOR)",
+            "2021-01-10",
+            "A. MWinner2021 (FRA)",
+        ],
+    ]
+
+
+def test_relay_athletes_cell_formatter_highlights_current_season_participants(
+    monkeypatch,
+):
+    monkeypatch.setattr(brief.Color, "highlight_plain", lambda text: f"<H>{text}</H>")
+    monkeypatch.setattr(brief.Color, "dim", lambda text: f"<D>{text}</D>")
+
+    formatter = brief._relay_athletes_cell_formatter({"I TANDREVOLD"})
+
+    assert (
+        formatter("I. Tandrevold/K. Knotten", 0)
+        == "<H>I. Tandrevold</H>/<D>K. Knotten</D>"
+    )
+
+
+def test_winner_name_cell_formatter_highlights_athlete_only(monkeypatch):
+    monkeypatch.setattr(brief.Color, "highlight_plain", lambda text: f"<H>{text}</H>")
+    formatter = brief._winner_name_cell_formatter({"ONE W", "I TANDREVOLD"})
+
+    assert formatter("W. One (NOR)", 0) == "<H>W. One (NOR)</H>"
+    assert (
+        formatter("NORWAY (I. Tandrevold, K. Knotten)", 0)
+        == "NORWAY (<H>I. Tandrevold</H>, K. Knotten)"
+    )
+    assert formatter("NORWAY", 0) == "NORWAY"
+
+
+def test_winner_name_cell_formatter_dims_non_recent_athletes(monkeypatch):
+    monkeypatch.setattr(brief.Color, "dim", lambda text: f"<D>{text}</D>")
+    formatter = brief._winner_name_cell_formatter(
+        highlight_name_keys=set(),
+        recent_name_keys={"ONE W", "I TANDREVOLD"},
+    )
+
+    assert formatter("W. One (NOR)", 0) == "W. One (NOR)"
+    assert formatter("A. Other (FRA)", 0) == "<D>A. Other (FRA)</D>"
+    assert (
+        formatter("NORWAY (I. Tandrevold, K. Knotten)", 0)
+        == "NORWAY (I. Tandrevold, <D>K. Knotten</D>)"
+    )
 
 
 def test_extract_race_podium_cells_relay_includes_lineup():
@@ -532,44 +828,36 @@ def test_render_previous_podium_tables_splits_relay_gender_tables(monkeypatch, c
     assert table_calls[0]["headers"] == [
         "Edition",
         "Type",
-        "Country",
-        "Athletes",
-        "Country",
-        "Athletes",
-        "Country",
-        "Athletes",
+        "GOLD",
+        "SILVER",
+        "BRONZE",
     ]
     assert table_calls[0]["rows"] == [
-        ["2025-01-10", "WC", "WG", "-", "WS", "-", "WB", "-"]
+        ["2025-01-10", "WC", "WG", "WS", "WB"],
+        ["", "", "-", "-", "-"],
     ]
     assert table_calls[1]["headers"] == [
         "Edition",
         "Type",
-        "Country",
-        "Athletes",
-        "Country",
-        "Athletes",
-        "Country",
-        "Athletes",
+        "GOLD",
+        "SILVER",
+        "BRONZE",
     ]
     assert table_calls[1]["rows"] == [
-        ["2025-01-10", "WC", "MG", "-", "MS", "-", "MB", "-"]
+        ["2025-01-10", "WC", "MG", "MS", "MB"],
+        ["", "", "-", "-", "-"],
     ]
-    assert table_calls[0]["kwargs"]["group_headers"] == [
-        (2, 4, "GOLD"),
-        (4, 6, "SILVER"),
-        (6, 8, "BRONZE"),
-    ]
-    assert table_calls[0]["kwargs"]["group_headers_position"] == "inline"
+    assert table_calls[0]["kwargs"]["row_styles"] == ["", "dim"]
+    assert table_calls[1]["kwargs"]["row_styles"] == ["", "dim"]
     assert table_calls[2]["headers"] == [
         "Edition",
         "Type",
-        "Gold",
-        "Silver",
-        "Bronze",
-        "Gold",
-        "Silver",
-        "Bronze",
+        "GOLD",
+        "SILVER",
+        "BRONZE",
+        "GOLD",
+        "SILVER",
+        "BRONZE",
     ]
     assert table_calls[2]["kwargs"]["group_headers"] == [(2, 5, "Women"), (5, 8, "Men")]
 
@@ -1293,12 +1581,16 @@ def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "# Event Brief - Ruhpolding" in out
     assert "## Event Facts" in out
-    assert "Country\tWC Editions\tWCH Editions\tOWG Editions" in out
+    assert "## Event Facts\n\nCountry\tWC Editions\tWCH Editions\tOWG Editions" in out
     assert "Germany\t2\t0\t1" in out
     assert "## Last 10 Editions at Ruhpolding" in out
+    assert "## Previous Winners at Ruhpolding" in out
     assert "## Previous Podiums at Ruhpolding" in out
     assert out.index("## Event Agenda") < out.index("## Last 10 Editions at Ruhpolding")
     assert out.index("## Last 10 Editions at Ruhpolding") < out.index(
+        "## Previous Winners at Ruhpolding"
+    )
+    assert out.index("## Previous Winners at Ruhpolding") < out.index(
         "## Previous Podiums at Ruhpolding"
     )
     assert out.index("## Previous Podiums at Ruhpolding") < out.index(
@@ -1310,8 +1602,17 @@ def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
     )
     assert "2026-01-10\tWC\tX\t-\t-\t-\t-\t-\t-" in out
     assert "### Sprint" in out
-    assert "Edition\tType\tGold\tSilver\tBronze\tGold\tSilver\tBronze" in out
-    assert "2025-12-30\tWC\tW. One\t-\t-\tM. One\t-\t-" in out
+    assert (
+        "## Previous Winners at Ruhpolding\n\nDiscipline\tDate\tWinner\tDate\tWinner"
+        in out
+    )
+    assert "Sprint\t2026-01-01\tW. One (NOR)\t2026-01-01\tM. One (FRA)" in out
+    assert "Mixed Relay\t2026-01-03\tSWEDEN\t2026-01-03\tSWEDEN" in out
+    assert "Edition\tType\tGOLD\tSILVER\tBRONZE\tGOLD\tSILVER\tBRONZE" in out
+    assert (
+        "### Sprint\nEdition\tType\tGOLD\tSILVER\tBRONZE\tGOLD\tSILVER\tBRONZE" in out
+    )
+    assert "2025-12-30\tWC\tW. One (NOR)\t-\t-\tM. One (FRA)\t-\t-" in out
     assert "2026-02-01\tWCH" not in out
     assert "## Event Agenda" in out
     assert "## Athlete Standings" in out
