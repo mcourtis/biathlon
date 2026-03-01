@@ -17,6 +17,7 @@ from ..api import (
 )
 from ..constants import (
     CAT_TO_GENDER,
+    EVENT_TYPE_LABELS,
     GENDER_TO_CAT,
     INDIVIDUAL_DISCIPLINES,
     RELAY_DISCIPLINE,
@@ -37,6 +38,7 @@ from ..formatting import (
 from ..utils import (
     extract_results,
     get_first_time,
+    parse_date,
     parse_relay_shootings,
     parse_time_seconds,
 )
@@ -45,6 +47,7 @@ from ._common import (
     _lookup_analytic_time,
     _max_workers,
     _prefetch_analytic_maps,
+    detect_event_type,
 )
 from .results import _has_completed_results
 from .standings import find_cup_id
@@ -291,6 +294,7 @@ def handle_shooting(args: argparse.Namespace) -> int:
     scope_label = f"season {season_id}" if not args.event and not args.race else ""
     race_ids: set[str] = set()
     race_meta: list[dict] = []
+    event_date_label = ""
 
     def add_results_from_race(race_id: str, discipline_hint: str = "") -> None:
         nonlocal scope_label, current_cat_id, current_gender
@@ -397,6 +401,26 @@ def handle_shooting(args: argparse.Namespace) -> int:
             event_id = ev.get("EventId")
             if not event_id:
                 continue
+            if args.event and not event_date_label:
+                start_d = parse_date(
+                    ev.get("StartDate") or ev.get("FirstCompetitionDate") or ""
+                )
+                end_d = parse_date(ev.get("EndDate") or "")
+                date_str = ""
+                if start_d:
+                    if end_d and end_d != start_d:
+                        if end_d.month != start_d.month:
+                            date_str = f"{start_d.strftime('%b')} {start_d.day}–{end_d.strftime('%b')} {end_d.day}, {start_d.year}"
+                        else:
+                            date_str = f"{start_d.strftime('%b')} {start_d.day}–{end_d.day}, {start_d.year}"
+                    else:
+                        date_str = (
+                            f"{start_d.strftime('%b')} {start_d.day}, {start_d.year}"
+                        )
+                ev_type = detect_event_type(ev)
+                ev_type_label = EVENT_TYPE_LABELS.get(ev_type, "")
+                parts = [p for p in [date_str, ev_type_label] if p]
+                event_date_label = "  ·  ".join(parts)
             for race in get_races(event_id):
                 race_id = race.get("RaceId") or race.get("Id") or ""
                 discipline_hint = str(race.get("DisciplineId") or "").upper()
@@ -844,10 +868,29 @@ def handle_shooting(args: argparse.Namespace) -> int:
         if limit_n > 0:
             render_rows = render_rows[:limit_n]
 
+    # Build race type description from actual disciplines in scope
+    disciplines_in_meta = {m["discipline"] for m in race_meta}
+    has_indiv = bool(disciplines_in_meta & INDIVIDUAL_DISCIPLINES)
+    has_relay = RELAY_DISCIPLINE in disciplines_in_meta
+    has_smr = SINGLE_MIXED_RELAY_DISCIPLINE in disciplines_in_meta
+    race_type_parts: list[str] = []
+    if has_indiv:
+        race_type_parts.append("individual")
+    if has_relay:
+        race_type_parts.append("relay")
+    if has_smr:
+        race_type_parts.append("single mixed relay")
+    race_type_str = (" + ".join(race_type_parts) + " races") if race_type_parts else ""
+
     print()
     print(
         f"# Shooting accuracy — {current_gender} — {scope_label or (f'season {season_id}' if not args.race else args.race)}"
     )
+    if args.event and event_date_label:
+        print(f"  {event_date_label}")
+    if race_type_str:
+        print(f"  {race_type_str}")
+    print()
     highlight_headers = None
     column_separators = (
         {headers.index("Clean Races %")}
