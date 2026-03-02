@@ -892,11 +892,11 @@ def handle_shooting(args: argparse.Namespace) -> int:
         print(f"  {race_type_str}")
     print()
     highlight_headers = None
-    column_separators = (
-        {headers.index("Clean Races %")}
-        if pretty and "Clean Races %" in headers
-        else None
-    )
+    if pretty:
+        sep_labels = ["Races", "Misses", "Accuracy", "Clean Races %", "Avg Stage Shoot"]
+        column_separators = {headers.index(h) for h in sep_labels if h in headers}
+    else:
+        column_separators = None
     if pretty:
         highlight_set = set()
         if not show_sort_rank:
@@ -919,6 +919,23 @@ def handle_shooting(args: argparse.Namespace) -> int:
         highlight_headers = [
             headers.index(label) for label in highlight_set if label in headers
         ]
+    right_align_cols = {
+        "WCRank",
+        "Races",
+        "Stages",
+        "Shots",
+        "Misses",
+        "ProneMisses",
+        "StandingMisses",
+        "Accuracy",
+        "ProneAccuracy",
+        "StandingAccuracy",
+        "Clean Races %",
+        "Clean Stage %",
+        "Avg Stage Shoot",
+        "Avg Stage Range",
+    }
+    alignments = ["right" if h in right_align_cols else None for h in headers]
     render_table(
         headers,
         render_rows,
@@ -926,6 +943,7 @@ def handle_shooting(args: argparse.Namespace) -> int:
         cell_formatters=cell_formatters,
         highlight_headers=highlight_headers,
         column_separators=column_separators,
+        alignments=alignments,
     )
     print()
     return 0
