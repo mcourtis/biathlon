@@ -2678,6 +2678,61 @@ def _render_wc_standings_sections(
         )
 
 
+def _no_startlist_message(
+    race_payloads: dict[str, dict],
+    race_event_map: dict[str, str],
+) -> str:
+    """Build an informative message listing next event's scheduled races."""
+    entries: list[tuple[datetime.datetime | None, str, str, dict]] = []
+    for rid, payload in race_payloads.items():
+        comp = payload.get("Competition") or {}
+        start_raw = comp.get("StartTime") or comp.get("StartDate")
+        start_dt = parse_start_datetime(
+            start_raw if isinstance(start_raw, str) else None
+        )
+        entries.append((start_dt, race_event_map.get(rid, ""), rid, payload))
+
+    if not entries:
+        return "No startlists published yet"
+
+    entries.sort(key=lambda e: (e[0] is None, e[0]))
+    next_event_id = entries[0][1]
+
+    lines = ["\nNo startlists published yet. Next scheduled races:\n"]
+    idx = 1
+    for start_dt, event_id, _rid, payload in entries:
+        if event_id != next_event_id:
+            continue
+        comp = payload.get("Competition") or {}
+        sport_evt = payload.get("SportEvt") or {}
+        event_type = detect_event_type(sport_evt)
+        event_label = EVENT_TYPE_LABELS.get(event_type, event_type)
+        cat = str(comp.get("catId") or comp.get("CatId") or "")
+        disc = str(comp.get("DisciplineId") or "")
+        disc_label = _discipline_display_label(disc, cat)
+        venue = sport_evt.get("Organizer") or sport_evt.get("ShortDescription") or ""
+        cat_label = {"SW": "Women", "SM": "Men", "MX": "Mixed"}.get(cat, cat)
+        race_label = (
+            f"{cat_label} {disc_label}"
+            if cat_label == "Mixed"
+            else f"{cat_label}'s {disc_label}"
+        )
+        if start_dt is not None:
+            local_dt = start_dt.astimezone()
+            tz_name = local_dt.tzname() or ""
+            day_ord = _ordinal(local_dt.day)
+            start_str = f"{local_dt.strftime('%B')} {day_ord} {local_dt.year} at {local_dt.strftime('%H:%M')} {tz_name}".strip()
+        else:
+            raw = comp.get("StartTime") or comp.get("StartDate") or ""
+            start_str = str(raw).replace("T", " ").rstrip("Z").strip()
+        lines.append(f"  {idx}. {event_label} - {venue} - {race_label}")
+        if start_str:
+            lines.append(f"     Start: {start_str}")
+        lines.append("")
+        idx += 1
+    return "\n".join(lines)
+
+
 def _find_all_startlist_races() -> list[tuple[str, dict]]:
     """Find all races with startlists available.
 
@@ -2706,17 +2761,24 @@ def _find_all_startlist_races() -> list[tuple[str, dict]]:
         active_event_ids.append(event_id)
 
     if not active_event_ids:
-        raise BiathlonError("No World Cup races with startlists found")
+        raise BiathlonError("No upcoming events found for this season")
 
-    # Fetch races for all events in parallel
+    # Fetch races for all events in parallel, tracking race → event mapping
     all_races: list[dict] = []
+    race_event_map: dict[str, str] = {}
     with ThreadPoolExecutor(
         max_workers=_max_workers(len(active_event_ids))
     ) as executor:
         futures = {executor.submit(get_races, eid): eid for eid in active_event_ids}
         for future in as_completed(futures):
+            eid = futures[future]
             try:
-                all_races.extend(future.result())
+                event_races = future.result()
+                for r in event_races:
+                    rid = r.get("RaceId") or r.get("Id")
+                    if rid:
+                        race_event_map[rid] = eid
+                all_races.extend(event_races)
             except BiathlonError:
                 continue
 
@@ -2726,7 +2788,7 @@ def _find_all_startlist_races() -> list[tuple[str, dict]]:
     ]
 
     if not race_ids:
-        raise BiathlonError("No World Cup races with startlists found")
+        raise BiathlonError("No races found for upcoming events")
 
     # Fetch race results in parallel to check for startlists
     race_payloads: dict[str, dict] = {}
@@ -2754,7 +2816,7 @@ def _find_all_startlist_races() -> list[tuple[str, dict]]:
         races.append((start_dt, rid, payload))
 
     if not races:
-        raise BiathlonError("No World Cup races with startlists found")
+        raise BiathlonError(_no_startlist_message(race_payloads, race_event_map))
 
     # Sort by start datetime (chronological); unknown dates last
     races.sort(key=lambda entry: (entry[0] is None, entry[0]))
