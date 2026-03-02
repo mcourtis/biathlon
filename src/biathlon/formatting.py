@@ -331,6 +331,7 @@ def render_table(
     alignments: list[str] | None = None,
     highlight_headers: list[int] | None = None,
     highlight_header_styles: dict[int, str] | None = None,
+    header_alignments: dict[int, str] | None = None,
     show_headers: bool = True,
     column_separators: set[int] | None = None,
     group_headers: list[tuple[int, int, str]] | None = None,
@@ -479,6 +480,8 @@ def render_table(
         alignment = "left"
         if alignments and idx < len(alignments) and alignments[idx]:
             alignment = alignments[idx]
+        if header_alignments and idx in header_alignments:
+            alignment = header_alignments[idx]
         text = _pad_cell(str(h), widths[idx], alignment)
         if highlight_header_styles and idx in highlight_header_styles:
             style = highlight_header_styles[idx]
@@ -486,6 +489,12 @@ def render_table(
                 return Color.highlight(text)
             if style == "highlight_soft":
                 return Color.highlight_soft(text)
+            if style == "gold":
+                return Color.gold(text)
+            if style == "silver":
+                return Color.silver(text)
+            if style == "bronze":
+                return Color.bronze(text)
         if highlight_headers and idx in highlight_headers:
             return Color.highlight(text)
         # Bold headers by default

@@ -264,14 +264,14 @@ def _render_venue_history_table(
 
     # For medal columns, filter by gold > 0; for venue columns, filter by wins > 0
     if use_medal_columns:
-        alltime_decorated = [s for s in alltime_stats if s.get("gold", 0) > 0]
+        alltime_decorated = [s for s in alltime_stats if s.get("Gold", 0) > 0]
         # Sort by total medals, then gold, silver, bronze
         alltime_decorated.sort(
             key=lambda s: (
-                s.get("gold", 0) + s.get("silver", 0) + s.get("bronze", 0),
-                s.get("gold", 0),
-                s.get("silver", 0),
-                s.get("bronze", 0),
+                s.get("Gold", 0) + s.get("Silver", 0) + s.get("Bronze", 0),
+                s.get("Gold", 0),
+                s.get("Silver", 0),
+                s.get("Bronze", 0),
             ),
             reverse=True,
         )
@@ -303,9 +303,9 @@ def _render_venue_history_table(
             if stats.get("ibu_id", "") in current_season_ids:
                 highlight_rows.add(idx)
             if use_medal_columns:
-                gold = stats.get("gold", 0)
-                silver = stats.get("silver", 0)
-                bronze = stats.get("bronze", 0)
+                gold = stats.get("Gold", 0)
+                silver = stats.get("Silver", 0)
+                bronze = stats.get("Bronze", 0)
                 total = gold + silver + bronze
                 venue_rows.append(
                     [
@@ -354,8 +354,8 @@ def _render_venue_history_table(
         alltime_experienced.sort(
             key=lambda s: (
                 s["races"],
-                s.get("gold", 0) + s.get("silver", 0) + s.get("bronze", 0),
-                s.get("gold", 0),
+                s.get("Gold", 0) + s.get("Silver", 0) + s.get("Bronze", 0),
+                s.get("Gold", 0),
             ),
             reverse=True,
         )
@@ -387,9 +387,9 @@ def _render_venue_history_table(
         if stats.get("ibu_id", "") in current_season_ids:
             highlight_rows.add(idx)
         if use_medal_columns:
-            gold = stats.get("gold", 0)
-            silver = stats.get("silver", 0)
-            bronze = stats.get("bronze", 0)
+            gold = stats.get("Gold", 0)
+            silver = stats.get("Silver", 0)
+            bronze = stats.get("Bronze", 0)
             total = gold + silver + bronze
             venue_rows.append(
                 [
@@ -1570,7 +1570,7 @@ def _build_previous_venue_winner_rows(
     reference_date: datetime.date | None = None,
     exclude_event_ids: set[str] | None = None,
     edition_limit: int = 5,
-) -> list[list[str]]:
+) -> tuple[list[list[str]], set[int]]:
     _ = races
     discipline_order = [code for code, _label in VENUE_RACE_TYPE_COLUMNS]
     historical_events = _filter_events_to_reference_date(
@@ -1579,7 +1579,7 @@ def _build_previous_venue_winner_rows(
         exclude_event_ids=exclude_event_ids,
     )
     if not historical_events or not discipline_order or edition_limit <= 0:
-        return []
+        return [], set()
 
     def _start_date(entry: dict) -> datetime.date:
         parsed = parse_date(entry.get("start_date") or "")
@@ -1596,7 +1596,7 @@ def _build_previous_venue_winner_rows(
         if str(entry.get("event_id") or "").strip()
     ]
     if not event_ids:
-        return []
+        return [], set()
 
     races_by_event_id: dict[str, list[dict]] = {}
     with ThreadPoolExecutor(max_workers=_max_workers(len(event_ids))) as executor:
@@ -1672,11 +1672,13 @@ def _build_previous_venue_winner_rows(
                     results_by_race_id[race_id] = {}
 
     winner_rows: list[list[str]] = []
+    row_separators: set[int] = set()
     for entry in historical_events:
         event_id = str(entry.get("event_id") or "").strip()
         if not event_id:
             continue
         race_map = race_id_map_by_event.get(event_id, {})
+        event_start_row = len(winner_rows)
         for disc in discipline_order:
             women_race_ids = race_map.get("SW", {}).get(disc, [])
             men_race_ids = race_map.get("SM", {}).get(disc, [])
@@ -1716,7 +1718,9 @@ def _build_previous_venue_winner_rows(
                     men_winner,
                 ]
             )
-    return winner_rows
+        if event_start_row > 0 and len(winner_rows) > event_start_row:
+            row_separators.add(event_start_row)
+    return winner_rows, row_separators
 
 
 def _build_previous_venue_podium_rows(
@@ -1868,7 +1872,7 @@ def _render_preevent_previous_winners_table(
 ) -> None:
     print(_preevent_heading(2, f"Previous Winners at {venue_name}", args))
     print()
-    winner_rows = _build_previous_venue_winner_rows(
+    winner_rows, winner_row_separators = _build_previous_venue_winner_rows(
         races,
         venue_events,
         reference_date=reference_date,
@@ -1889,6 +1893,7 @@ def _render_preevent_previous_winners_table(
         output_format=get_output_format(args),
         alignments=["left", "left", "left", "left", "left"],
         column_separators={1, 3},
+        row_separators=winner_row_separators or None,
         group_headers=[(1, 3, "Women"), (3, 5, "Men")],
         cell_formatters=[None, None, winner_formatter, None, winner_formatter],
     )
@@ -1921,15 +1926,19 @@ def _render_preevent_previous_podium_tables(
 
     output_format = get_output_format(args)
     relay_athletes_formatter = _relay_athletes_cell_formatter(highlight_keys)
+    podium_name_formatter = _winner_name_cell_formatter(
+        highlight_name_keys=highlight_keys,
+        recent_name_keys=highlight_keys,
+    )
     headers = [
         "Edition",
         "Type",
-        "GOLD",
-        "SILVER",
-        "BRONZE",
-        "GOLD",
-        "SILVER",
-        "BRONZE",
+        "Gold",
+        "Silver",
+        "Bronze",
+        "Gold",
+        "Silver",
+        "Bronze",
     ]
     for disc, label in disciplines:
         print(_preevent_heading(3, label, args))
@@ -1943,21 +1952,19 @@ def _render_preevent_previous_podium_tables(
             split_headers = [
                 "Edition",
                 "Type",
-                "GOLD",
-                "SILVER",
-                "BRONZE",
+                "Gold",
+                "Silver",
+                "Bronze",
             ]
             women_rows: list[list[str]] = []
             men_rows: list[list[str]] = []
             women_row_styles: list[str] = []
             men_row_styles: list[str] = []
 
-            def _medal_or_lineup_formatter(medal: str) -> Callable[[str, int], str]:
-                country_formatter = _relay_medal_country_formatter(medal)
-
+            def _medal_or_lineup_formatter(_medal: str) -> Callable[[str, int], str]:
                 def _formatter(cell_str: str, row_idx: int) -> str:
                     if row_idx % 2 == 0:
-                        return country_formatter(cell_str, row_idx)
+                        return cell_str
                     return relay_athletes_formatter(cell_str, row_idx)
 
                 return _formatter
@@ -1988,6 +1995,7 @@ def _render_preevent_previous_podium_tables(
                 ("Men", men_rows),
             ):
                 print(_preevent_heading(4, gender_label, args))
+                print()
                 if not gender_rows:
                     print("none")
                     print()
@@ -1997,16 +2005,18 @@ def _render_preevent_previous_podium_tables(
                     gender_rows,
                     output_format=output_format,
                     alignments=["left"] * len(split_headers),
-                    column_separators={2},
+                    column_separators={2, 3, 4},
                     row_styles=(
                         women_row_styles if gender_label == "Women" else men_row_styles
                     ),
+                    highlight_header_styles={2: "gold", 3: "silver", 4: "bronze"},
+                    header_alignments={2: "center", 3: "center", 4: "center"},
                     cell_formatters=[
                         None,
                         None,
-                        _medal_or_lineup_formatter("gold"),
-                        _medal_or_lineup_formatter("silver"),
-                        _medal_or_lineup_formatter("bronze"),
+                        _medal_or_lineup_formatter("Gold"),
+                        _medal_or_lineup_formatter("Silver"),
+                        _medal_or_lineup_formatter("Bronze"),
                     ],
                 )
                 print()
@@ -2018,15 +2028,31 @@ def _render_preevent_previous_podium_tables(
             alignments=["left", "left"] + ["left"] * max(0, len(headers) - 2),
             column_separators={2, 5},
             group_headers=[(2, 5, "Women"), (5, 8, "Men")],
+            highlight_header_styles={
+                2: "gold",
+                3: "silver",
+                4: "bronze",
+                5: "gold",
+                6: "silver",
+                7: "bronze",
+            },
+            header_alignments={
+                2: "center",
+                3: "center",
+                4: "center",
+                5: "center",
+                6: "center",
+                7: "center",
+            },
             cell_formatters=[
                 None,
                 None,
-                _relay_medal_country_formatter("gold"),
-                _relay_medal_country_formatter("silver"),
-                _relay_medal_country_formatter("bronze"),
-                _relay_medal_country_formatter("gold"),
-                _relay_medal_country_formatter("silver"),
-                _relay_medal_country_formatter("bronze"),
+                podium_name_formatter,
+                podium_name_formatter,
+                podium_name_formatter,
+                podium_name_formatter,
+                podium_name_formatter,
+                podium_name_formatter,
             ],
         )
         print()
@@ -2483,9 +2509,9 @@ def _build_decorated_athlete_rows_for_events(
                         "name": name or key,
                         "nat": nat,
                         "gender": row_gender,
-                        "gold": 0,
-                        "silver": 0,
-                        "bronze": 0,
+                        "Gold": 0,
+                        "Silver": 0,
+                        "Bronze": 0,
                         "gold_ind": 0,
                         "silver_ind": 0,
                         "bronze_ind": 0,
@@ -2527,19 +2553,19 @@ def _build_decorated_athlete_rows_for_events(
                 if rank_val in {1, 2, 3} and key not in race_medal_awarded_keys:
                     race_medal_awarded_keys.add(key)
                     if rank_val == 1:
-                        stats["gold"] = int(stats["gold"]) + 1
+                        stats["Gold"] = int(stats["Gold"]) + 1
                         if is_team_race:
                             stats["gold_team"] = int(stats["gold_team"]) + 1
                         else:
                             stats["gold_ind"] = int(stats["gold_ind"]) + 1
                     elif rank_val == 2:
-                        stats["silver"] = int(stats["silver"]) + 1
+                        stats["Silver"] = int(stats["Silver"]) + 1
                         if is_team_race:
                             stats["silver_team"] = int(stats["silver_team"]) + 1
                         else:
                             stats["silver_ind"] = int(stats["silver_ind"]) + 1
                     elif rank_val == 3:
-                        stats["bronze"] = int(stats["bronze"]) + 1
+                        stats["Bronze"] = int(stats["Bronze"]) + 1
                         if is_team_race:
                             stats["bronze_team"] = int(stats["bronze_team"]) + 1
                         else:
@@ -2583,25 +2609,25 @@ def _build_decorated_athlete_rows_for_events(
     decorated = [
         (key, stats)
         for key, stats in athlete_stats.items()
-        if int(stats["gold"]) > 0
-        or int(stats["silver"]) > 0
-        or int(stats["bronze"]) > 0
+        if int(stats["Gold"]) > 0
+        or int(stats["Silver"]) > 0
+        or int(stats["Bronze"]) > 0
     ]
     if not decorated:
         return [], []
 
     decorated.sort(
         key=lambda item: (
-            -int(item[1]["gold"]),
+            -int(item[1]["Gold"]),
             -int(item[1].get("gold_ind", 0)),
             -int(item[1].get("gold_team", 0)),
-            -int(item[1]["silver"]),
+            -int(item[1]["Silver"]),
             -int(item[1].get("silver_ind", 0)),
             -int(item[1].get("silver_team", 0)),
-            -int(item[1]["bronze"]),
+            -int(item[1]["Bronze"]),
             -int(item[1].get("bronze_ind", 0)),
             -int(item[1].get("bronze_team", 0)),
-            -(int(item[1]["gold"]) + int(item[1]["silver"]) + int(item[1]["bronze"])),
+            -(int(item[1]["Gold"]) + int(item[1]["Silver"]) + int(item[1]["Bronze"])),
             -(
                 int(item[1].get("gold_ind", 0))
                 + int(item[1].get("silver_ind", 0))
@@ -2628,9 +2654,9 @@ def _build_decorated_athlete_rows_for_events(
         else current_season_participants
     )
     for rank, (athlete_key, stats) in enumerate(decorated, start=1):
-        gold = int(stats["gold"])
-        silver = int(stats["silver"])
-        bronze = int(stats["bronze"])
+        gold = int(stats["Gold"])
+        silver = int(stats["Silver"])
+        bronze = int(stats["Bronze"])
         total = gold + silver + bronze
         total_races = int(stats["races"])
         gold_ind = int(stats.get("gold_ind", 0))
@@ -3371,6 +3397,7 @@ def _render_snapshot_athlete_standings_table(
     reference_date: datetime.date | None = None,
 ) -> None:
     print(_preevent_heading(3, title, args))
+    print()
     display_rows = list(total_rows[:10])
     if not display_rows:
         print("none")
