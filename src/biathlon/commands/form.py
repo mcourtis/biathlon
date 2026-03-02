@@ -17,6 +17,7 @@ from ..api import (
     get_races,
 )
 from ..constants import (
+    CATEGORY_DISPLAY_NAMES,
     GENDER_TO_CAT,
     INDIVIDUAL_DISCIPLINES,
     RELAY_DISCIPLINE,
@@ -1104,6 +1105,17 @@ def _render_form_table(
     output_format = get_output_format(args)
     row_styles = [rank_style(r["row"][0]) for r in rows] if pretty else None
 
+    # Build column separators: fixed ones + between-event boundaries in race columns
+    if pretty:
+        column_separators: set[int] = {4, race_col_offset}
+        for i in range(1, len(completed_race_ids)):
+            if race_to_event.get(completed_race_ids[i]) != race_to_event.get(
+                completed_race_ids[i - 1]
+            ):
+                column_separators.add(race_col_offset + i)
+    else:
+        column_separators = None
+
     # Build cell formatters for coloring
     # Skip Rank (0), Biathlete (1), Nat (2), WC (3) — start formatters at Current/Season
     cell_formatters: list[Callable | None] | None = None
@@ -1180,6 +1192,7 @@ def _render_form_table(
         row_styles=row_styles,
         highlight_headers=highlight_headers if pretty else None,
         cell_formatters=cell_formatters,
+        column_separators=column_separators,
     )
 
     return 0
@@ -1310,12 +1323,14 @@ def _render_combined_table(
     pretty = is_pretty_output(args)
     output_format = get_output_format(args)
     row_styles = [rank_style(e["rank"]) for e in combined] if pretty else None
+    column_separators = {3, 4} if pretty else None
 
     render_table(
         headers,
         rows,
         output_format=output_format,
         row_styles=row_styles,
+        column_separators=column_separators,
     )
 
     return 0
@@ -1399,6 +1414,10 @@ def handle_form(args: argparse.Namespace) -> int:
         if data is None:
             return 1
 
+        gender_label = CATEGORY_DISPLAY_NAMES.get(data.gender_cat, data.gender_cat)
+        print(f"# World Cup Form — {gender_label} — season {data.season_id}")
+        print()
+
         # Compute athletes for all three modes
         course_athletes = _compute_athletes(
             data,
@@ -1474,6 +1493,10 @@ def handle_form(args: argparse.Namespace) -> int:
     data = _fetch_form_data(args, gender_cat)
     if data is None:
         return 1
+
+    gender_label = CATEGORY_DISPLAY_NAMES.get(data.gender_cat, data.gender_cat)
+    print(f"# World Cup Form — {gender_label} — season {data.season_id}")
+    print()
 
     # Compute athletes for all three modes
     result_athletes = _compute_athletes(
