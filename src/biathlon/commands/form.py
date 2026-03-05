@@ -1107,12 +1107,13 @@ def _render_form_table(
 
     # Build column separators: fixed ones + between-event boundaries in race columns
     if pretty:
-        column_separators: set[int] | None = {4, race_col_offset}
+        _seps: set[int] = {4, race_col_offset}
         for i in range(1, len(completed_race_ids)):
             if race_to_event.get(completed_race_ids[i]) != race_to_event.get(
                 completed_race_ids[i - 1]
             ):
-                column_separators.add(race_col_offset + i)
+                _seps.add(race_col_offset + i)
+        column_separators: set[int] | None = _seps
     else:
         column_separators = None
 
