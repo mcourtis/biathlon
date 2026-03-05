@@ -151,6 +151,13 @@ Cumulate season statistics:
 
 ```bash
 biathlon cumulate results
+biathlon cumulate ski
+biathlon cumulate pursuit
+biathlon cumulate course
+biathlon cumulate range
+biathlon cumulate shooting
+biathlon cumulate miss
+biathlon cumulate penalty
 biathlon cumulate remontada --men
 biathlon cumulate cleansheet
 biathlon cumulate cleansheet --sort percentage
@@ -161,13 +168,17 @@ Shooting accuracy:
 ```bash
 biathlon shooting
 biathlon shooting --men
+biathlon shooting --race BT2526SWRLCP01SWSP
+biathlon shooting --season 2425
+biathlon shooting --include-relay all
+biathlon shooting --sort hit-pct --min 50 --limit 30
 ```
 
-Athlete form (course time or shooting across recent races):
+Athlete form (course time ranks and shooting across recent races):
 
 ```bash
 biathlon form
-biathlon form --men --shoot
+biathlon form --men
 biathlon form --startlist
 biathlon form --season --top 10
 biathlon form --nat FRA,NOR

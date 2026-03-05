@@ -446,7 +446,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=66,
         dest="min_pct",
         metavar="PCT",
-        help="Minimum race participation percentage (0-100, default: 50)",
+        help="Minimum race participation percentage (0-100, default: 66)",
     )
     cumulate_cleansheet.set_defaults(func=handle_cumulate_cleansheet)
 
