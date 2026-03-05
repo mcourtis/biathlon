@@ -646,7 +646,7 @@ def test_previous_venue_winner_rows_include_date_discipline_and_gender(monkeypat
 
     monkeypatch.setattr(brief, "get_race_results", fake_get_race_results)
 
-    rows = brief._build_previous_venue_winner_rows(
+    rows, _separators = brief._build_previous_venue_winner_rows(
         upcoming_races,
         venue_events,
         reference_date=datetime.date(2026, 1, 10),
@@ -828,9 +828,9 @@ def test_render_previous_podium_tables_splits_relay_gender_tables(monkeypatch, c
     assert table_calls[0]["headers"] == [
         "Edition",
         "Type",
-        "GOLD",
-        "SILVER",
-        "BRONZE",
+        "Gold",
+        "Silver",
+        "Bronze",
     ]
     assert table_calls[0]["rows"] == [
         ["2025-01-10", "WC", "WG", "WS", "WB"],
@@ -839,9 +839,9 @@ def test_render_previous_podium_tables_splits_relay_gender_tables(monkeypatch, c
     assert table_calls[1]["headers"] == [
         "Edition",
         "Type",
-        "GOLD",
-        "SILVER",
-        "BRONZE",
+        "Gold",
+        "Silver",
+        "Bronze",
     ]
     assert table_calls[1]["rows"] == [
         ["2025-01-10", "WC", "MG", "MS", "MB"],
@@ -852,12 +852,12 @@ def test_render_previous_podium_tables_splits_relay_gender_tables(monkeypatch, c
     assert table_calls[2]["headers"] == [
         "Edition",
         "Type",
-        "GOLD",
-        "SILVER",
-        "BRONZE",
-        "GOLD",
-        "SILVER",
-        "BRONZE",
+        "Gold",
+        "Silver",
+        "Bronze",
+        "Gold",
+        "Silver",
+        "Bronze",
     ]
     assert table_calls[2]["kwargs"]["group_headers"] == [(2, 5, "Women"), (5, 8, "Men")]
 
@@ -1608,9 +1608,9 @@ def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
     )
     assert "Sprint\t2026-01-01\tW. One (NOR)\t2026-01-01\tM. One (FRA)" in out
     assert "Mixed Relay\t2026-01-03\tSWEDEN\t2026-01-03\tSWEDEN" in out
-    assert "Edition\tType\tGOLD\tSILVER\tBRONZE\tGOLD\tSILVER\tBRONZE" in out
+    assert "Edition\tType\tGold\tSilver\tBronze\tGold\tSilver\tBronze" in out
     assert (
-        "### Sprint\nEdition\tType\tGOLD\tSILVER\tBRONZE\tGOLD\tSILVER\tBRONZE" in out
+        "### Sprint\nEdition\tType\tGold\tSilver\tBronze\tGold\tSilver\tBronze" in out
     )
     assert "2025-12-30\tWC\tW. One (NOR)\t-\t-\tM. One (FRA)\t-\t-" in out
     assert "2026-02-01\tWCH" not in out

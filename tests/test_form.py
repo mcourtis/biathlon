@@ -1,6 +1,7 @@
 """Tests for form command handler."""
 
 import argparse
+import types
 
 from biathlon.commands import form
 
@@ -252,7 +253,11 @@ def test_handle_form_rejects_empty_nat_filter(capsys):
 def test_handle_form_standard_defaults_min_to_fifty(monkeypatch):
     seen_min_pct: list[int | None] = []
 
-    monkeypatch.setattr(form, "_fetch_form_data", lambda _args, _cat: object())
+    monkeypatch.setattr(
+        form,
+        "_fetch_form_data",
+        lambda _args, _cat: types.SimpleNamespace(gender_cat=_cat, season_id="2526"),
+    )
     monkeypatch.setattr(
         form,
         "_compute_athletes",
@@ -290,7 +295,11 @@ def test_handle_form_startlist_defaults_min_to_zero(monkeypatch):
             "Results": [{"IsTeam": False, "IBUId": "A1"}],
         },
     )
-    monkeypatch.setattr(form, "_fetch_form_data", lambda _args, _cat: object())
+    monkeypatch.setattr(
+        form,
+        "_fetch_form_data",
+        lambda _args, _cat: types.SimpleNamespace(gender_cat=_cat, season_id="2526"),
+    )
     monkeypatch.setattr(
         form,
         "_compute_athletes",
@@ -329,7 +338,11 @@ def test_handle_form_startlist_keeps_explicit_min(monkeypatch):
             "Results": [{"IsTeam": False, "IBUId": "A1"}],
         },
     )
-    monkeypatch.setattr(form, "_fetch_form_data", lambda _args, _cat: object())
+    monkeypatch.setattr(
+        form,
+        "_fetch_form_data",
+        lambda _args, _cat: types.SimpleNamespace(gender_cat=_cat, season_id="2526"),
+    )
     monkeypatch.setattr(
         form,
         "_compute_athletes",
@@ -360,7 +373,11 @@ def test_handle_form_startlist_keeps_explicit_min(monkeypatch):
 def test_handle_form_standard_passes_nat_filter_to_all_tables(monkeypatch):
     seen_nat_filters: list[set[str] | None] = []
 
-    monkeypatch.setattr(form, "_fetch_form_data", lambda _args, _cat: object())
+    monkeypatch.setattr(
+        form,
+        "_fetch_form_data",
+        lambda _args, _cat: types.SimpleNamespace(gender_cat=_cat, season_id="2526"),
+    )
     monkeypatch.setattr(
         form,
         "_compute_athletes",
@@ -402,7 +419,11 @@ def test_handle_form_startlist_passes_nat_filter_to_all_tables(monkeypatch):
             "Results": [{"IsTeam": False, "IBUId": "A1"}],
         },
     )
-    monkeypatch.setattr(form, "_fetch_form_data", lambda _args, _cat: object())
+    monkeypatch.setattr(
+        form,
+        "_fetch_form_data",
+        lambda _args, _cat: types.SimpleNamespace(gender_cat=_cat, season_id="2526"),
+    )
     monkeypatch.setattr(
         form,
         "_compute_athletes",
