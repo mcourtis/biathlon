@@ -935,7 +935,7 @@ def handle_shooting(args: argparse.Namespace) -> int:
         "Avg Stage Shoot",
         "Avg Stage Range",
     }
-    alignments = ["right" if h in right_align_cols else None for h in headers]
+    alignments = ["right" if h in right_align_cols else "left" for h in headers]
     render_table(
         headers,
         render_rows,
