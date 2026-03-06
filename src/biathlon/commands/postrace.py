@@ -2113,7 +2113,10 @@ def _collect_discipline_race_ids(
                     continue
                 race_disc = str(race.get("DisciplineId") or "").upper()
                 race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
-                if race_disc != discipline or (cat_id and race_cat != cat_id):
+                disc_group = (
+                    {"IN", "SI"} if discipline in ("IN", "SI") else {discipline}
+                )
+                if race_disc not in disc_group or (cat_id and race_cat != cat_id):
                     continue
                 start_dt = _start_dt_from_race_row(race)
                 if cutoff_dt is not None:
@@ -3476,7 +3479,11 @@ def handle_post_race(args: argparse.Namespace) -> int:
         sorted_countries, sorted_athletes, medal_races_used = (
             _build_discipline_medal_counts(disc_race_ids, is_relay)
         )
-        disc_name = DISCIPLINE_NAMES.get(discipline, discipline)
+        disc_name = (
+            "Individual"
+            if discipline in ("IN", "SI")
+            else DISCIPLINE_NAMES.get(discipline, discipline)
+        )
         cat_name = CATEGORY_DISPLAY_NAMES.get(medal_cat_id, medal_cat_id)
 
         # Country medal table — WCH only (OWG shown in Olympic medal sections, WC removed)
