@@ -629,6 +629,16 @@ def _preevent_heading(level: int, text: str, args: argparse.Namespace) -> str:
     return _format_section_title(f"{marks} {str(text).strip()}", args)
 
 
+def _print_blank_lines(count: int = 1) -> None:
+    for _ in range(max(0, int(count))):
+        print()
+
+
+def _print_postevent_heading(level: int, text: str, args: argparse.Namespace) -> None:
+    print(_preevent_heading(level, text, args))
+    print()
+
+
 def _normalize_race_discipline_for_sequence(value: object) -> str:
     disc = str(value or "").strip().upper()
     return "IN" if disc == "SI" else disc
@@ -950,6 +960,104 @@ def _combine_country_rows(
                 row.get("Score") or row.get("Points") or "0"
             )
     return rows
+
+
+def _event_nations_points_from_completed_races(
+    completed_races: list[tuple[str, dict]],
+) -> dict[str, dict[str, float]]:
+    """Return Nations Cup points earned during the current event by sex."""
+    event_points: dict[str, dict[str, float]] = {"SW": {}, "SM": {}}
+
+    for _race_id, payload in completed_races:
+        comp = payload.get("Competition") or {}
+        race_cat = str(comp.get("catId") or comp.get("CatId") or "").upper()
+        race_disc = _normalize_discipline_id(str(comp.get("DisciplineId") or ""))
+        if race_cat not in {"SW", "SM", "MX"}:
+            continue
+
+        is_relay_race = is_relay_discipline(race_disc)
+        if not (is_relay_race or race_disc in _NC_INDIVIDUAL_DISCS):
+            continue
+
+        is_mixed_relay_race = race_disc in {"MR", "SR"}
+        target_cats = ("SW", "SM") if race_cat == "MX" else (race_cat,)
+
+        for res in payload.get("Results") or []:
+            if is_relay_race and not res.get("IsTeam"):
+                continue
+            if not is_relay_race and res.get("IsTeam"):
+                continue
+
+            nat = str(res.get("Nat") or "").strip().upper()
+            if not nat:
+                continue
+
+            nc_pts: float | None = None
+            nc_raw = res.get("NC")
+            if nc_raw not in (None, ""):
+                try:
+                    nc_pts = float(str(nc_raw).replace(",", ""))
+                except ValueError:
+                    nc_pts = None
+
+            if nc_pts is None:
+                rank_val = _parse_rank(
+                    res.get("Rank") or res.get("SO") or res.get("ResultOrder")
+                )
+                if rank_val is None:
+                    continue
+                nc_pts = _get_nc_points(
+                    rank_val,
+                    is_relay=is_relay_race,
+                    mixed=is_mixed_relay_race,
+                )
+
+            if nc_pts <= 0:
+                continue
+
+            for cat in target_cats:
+                event_points[cat][nat] = event_points[cat].get(nat, 0.0) + nc_pts
+
+    return event_points
+
+
+def _derive_postevent_nations_before_rows(
+    after_nations: dict[str, list[dict]],
+    completed_races: list[tuple[str, dict]],
+) -> dict[str, list[dict]]:
+    """Build pre-event Nations Cup rows from post-event totals minus event points."""
+    event_points = _event_nations_points_from_completed_races(completed_races)
+    before_nations: dict[str, list[dict]] = {}
+
+    for cat in ("SW", "SM"):
+        points_by_nat: dict[str, float] = {}
+        names_by_nat: dict[str, str] = {}
+        for row in after_nations.get(cat, []):
+            nat = str(row.get("Nat") or "").strip().upper()
+            if not nat:
+                continue
+            points_by_nat[nat] = _row_points_value(row)
+            if nat not in names_by_nat:
+                team_name = _normalize_team_name(row)
+                if team_name:
+                    names_by_nat[nat] = team_name
+
+        before_points_by_nat = {
+            nat: max(0.0, points - event_points[cat].get(nat, 0.0))
+            for nat, points in points_by_nat.items()
+        }
+        before_nations[cat] = _rows_from_country_points(
+            before_points_by_nat,
+            names_by_nat,
+            limit=0,
+        )
+
+    before_nations["ALL"] = _combine_country_rows(
+        [before_nations.get("SW", []), before_nations.get("SM", [])],
+        limit=0,
+        one_decimal=True,
+    )
+    return before_nations
 
 
 def _resolve_event_type_and_venue(
@@ -5555,7 +5663,7 @@ def _render_postevent_athlete_standings(
 
     if not any(rows for _title, cats in section_specs for _cat, rows, _before in cats):
         print("none")
-        print()
+        _print_blank_lines(2)
         return
 
     cat_labels = {"SW": "Women", "SM": "Men"}
@@ -5624,7 +5732,6 @@ def _render_postevent_athlete_standings(
             )
         )
 
-    print()
     for section_title, cat_specs in section_specs:
         if not any(rows for _cat, rows, _before in cat_specs):
             continue
@@ -5641,7 +5748,7 @@ def _render_postevent_athlete_standings(
             left_label = cat_labels.get(left_cat, left_cat)
             right_label = cat_labels.get(right_cat, right_cat)
             if left_lines or right_lines:
-                print(_preevent_heading(3, section_title, args))
+                _print_postevent_heading(3, section_title, args)
                 table_sep = "  │  "
                 left_lines_out = left_lines if left_lines else ["none"]
                 right_lines_out = right_lines if right_lines else ["none"]
@@ -5658,18 +5765,18 @@ def _render_postevent_athlete_standings(
                     left_lines_out, right_lines_out, sep=table_sep
                 )
                 print("\n".join(merged))
-                print()
+                _print_blank_lines(2)
         else:
             # Stacked layout (non-pretty or single category)
             for cat_id, after_rows, before_rows in cat_specs:
                 gender_suffix = f" — {cat_labels.get(cat_id, cat_id)}"
-                print(_preevent_heading(3, section_title + gender_suffix, args))
+                _print_postevent_heading(3, section_title + gender_suffix, args)
                 lines = table_builder(cat_id, after_rows, before_rows)
                 if not lines:
                     print("none")
                 else:
                     print("\n".join(lines))
-                print()
+                _print_blank_lines(2)
 
 
 def _render_postevent_relay_standings(
@@ -5706,7 +5813,7 @@ def _render_postevent_relay_standings(
     ]
     if not any(rows for _label, rows, _before in main_specs):
         print("none")
-        print()
+        _print_blank_lines(2)
         return
 
     def _build_country_table_lines(
@@ -5737,13 +5844,13 @@ def _render_postevent_relay_standings(
     def _render_stacked(
         title: str, after_rows: list[dict], before_rows: list[dict]
     ) -> None:
-        print(_preevent_heading(3, title, args))
+        _print_postevent_heading(3, title, args)
         delta_rows, _ = _build_postevent_country_delta_rows(
             after_rows, before_rows, limit=10
         )
         if not delta_rows:
             print("none")
-            print()
+            _print_blank_lines(2)
             return
         if pretty:
             delta_rows = _align_postevent_country_merged_delta_cells(delta_rows)
@@ -5759,9 +5866,8 @@ def _render_postevent_relay_standings(
                 points_fmt,
             ],
         )
-        print()
+        _print_blank_lines(2)
 
-    print()
     if pretty and any(rows for _label, rows, _before in main_specs):
         table_sep = "  │  "
         tables_out = [
@@ -5780,7 +5886,7 @@ def _render_postevent_relay_standings(
         for next_lines in tables_out[1:]:
             merged = _merge_tables_side_by_side(merged, next_lines, sep=table_sep)
         print("\n".join(merged))
-        print()
+        _print_blank_lines(2)
     else:
         relay_titles = [
             "Women Relay",
@@ -5819,7 +5925,7 @@ def _render_postevent_nations_standings(
     ]
     if not any(rows for _title, rows, _before in all_specs):
         print("none")
-        print()
+        _print_blank_lines(2)
         return
 
     def _build_country_table_lines(
@@ -5850,13 +5956,13 @@ def _render_postevent_nations_standings(
     def _render_stacked(
         title: str, after_rows: list[dict], before_rows: list[dict]
     ) -> None:
-        print(_preevent_heading(3, title, args))
+        _print_postevent_heading(3, title, args)
         delta_rows, _ = _build_postevent_country_delta_rows(
             after_rows, before_rows, limit=10
         )
         if not delta_rows:
             print("none")
-            print()
+            _print_blank_lines(2)
             return
         if pretty:
             delta_rows = _align_postevent_country_merged_delta_cells(delta_rows)
@@ -5872,9 +5978,8 @@ def _render_postevent_nations_standings(
                 points_fmt,
             ],
         )
-        print()
+        _print_blank_lines(2)
 
-    print()
     if pretty:
         table_sep = "  │  "
         tables_out = [
@@ -5893,7 +5998,7 @@ def _render_postevent_nations_standings(
         for next_lines in tables_out[1:]:
             merged = _merge_tables_side_by_side(merged, next_lines, sep=table_sep)
         print("\n".join(merged))
-        print()
+        _print_blank_lines(2)
     else:
         for title, after_rows, before_rows in all_specs:
             _render_stacked(title, after_rows, before_rows)
@@ -5908,8 +6013,7 @@ def _render_postevent_decorated_delta_split_tables(
     per_gender_limit: int = 10,
     gender_filter: str | None = None,
 ) -> None:
-    print(_preevent_heading(2, title, args))
-    print()
+    _print_postevent_heading(2, title, args)
 
     output_format = get_output_format(args)
     headers = [
@@ -5938,8 +6042,7 @@ def _render_postevent_decorated_delta_split_tables(
         if gender_filter is None or gender_filter == code
     ]
     for gender_label, gender_code in gender_pairs:
-        print(_preevent_heading(3, gender_label, args))
-        print()
+        _print_postevent_heading(3, gender_label, args)
         rows, row_styles = _build_postevent_decorated_delta_rows(
             after_rows,
             before_rows,
@@ -5950,8 +6053,7 @@ def _render_postevent_decorated_delta_split_tables(
         )
         if not rows:
             print("none")
-            print()
-            print()
+            _print_blank_lines(2)
             continue
         render_table(
             headers,
@@ -5961,8 +6063,7 @@ def _render_postevent_decorated_delta_split_tables(
             group_headers=[(3, 8, "All"), (8, 13, "Individual"), (13, 18, "Team")],
             row_styles=row_styles if is_pretty_output(args) else None,
         )
-        print()
-        print()
+        _print_blank_lines(2)
 
 
 def _render_postevent_best_performances(
@@ -5971,6 +6072,7 @@ def _render_postevent_best_performances(
     all_results_cache: dict[str, list[dict]],
     race_start_cache: dict[str, datetime.datetime | None],
     output_format: OutputFormat,
+    event_type: str = "",
 ) -> None:
     MAX_DISPLAY_RANK = 25
     MAJOR_LEVELS = {"WC", "WCH", "OWG"}
@@ -5988,16 +6090,16 @@ def _render_postevent_best_performances(
         "NS",
     }
     warning_keys: set[str] = set()
+    major_event_type = str(event_type or "").upper()
+    show_event_type_milestones = major_event_type in MAJOR_LEVELS
+    event_type_label = EVENT_TYPE_LABELS.get(major_event_type, major_event_type)
     consolidated_rows: list[
         tuple[str, bool, str, str, str, int, str, str, str, str]
     ] = []
 
-    print(
-        _preevent_heading(
-            2, POSTEVENT_SECTION_TITLES[POSTEVENT_SECTION_BEST_PERFORMANCES], args
-        )
+    _print_postevent_heading(
+        2, POSTEVENT_SECTION_TITLES[POSTEVENT_SECTION_BEST_PERFORMANCES], args
     )
-    print()
 
     def _prev_label(value: int | None, scope: str) -> str:
         if value is None:
@@ -6082,11 +6184,23 @@ def _render_postevent_best_performances(
         disc_label = DISCIPLINE_NAMES.get(disc, disc)
         disc_label_lc = disc_label.lower()
         if is_relay:
-            all_label = "Best Relay Results (all discipline)"
-            discipline_label = f"Best Relay Results ({disc_label_lc})"
+            all_label = "Best career team result (all discipline)"
+            discipline_label = f"Best career team results ({disc_label_lc})"
+            event_type_all_label = (
+                f"Best {event_type_label} team result (all discipline)"
+            )
+            event_type_disc_label = (
+                f"Best {event_type_label} team results ({disc_label_lc})"
+            )
         else:
-            all_label = "Best Individual Result (all discipline)"
-            discipline_label = f"Best Individual Results ({disc_label_lc})"
+            all_label = "Best career indiv result (all discipline)"
+            discipline_label = f"Best career indiv results ({disc_label_lc})"
+            event_type_all_label = (
+                f"Best {event_type_label} indiv result (all discipline)"
+            )
+            event_type_disc_label = (
+                f"Best {event_type_label} indiv results ({disc_label_lc})"
+            )
 
         seen_ids: set[str] = set()
         perf_rows: list[tuple[str, str, int, str, str, str, str]] = []
@@ -6162,7 +6276,41 @@ def _render_postevent_best_performances(
 
             is_best_all = prior_best_all is None or current_rank < prior_best_all
             is_best_disc = prior_best_disc is None or current_rank < prior_best_disc
-            if not is_best_all and not is_best_disc:
+
+            if show_event_type_milestones:
+                prior_best_evt_all = min(
+                    (
+                        rv
+                        for res, rv in prior_same_type
+                        if str(res.get("Level") or "").upper() == major_event_type
+                    ),
+                    default=None,
+                )
+                prior_best_evt_disc = min(
+                    (
+                        rv
+                        for res, rv in prior_rows
+                        if _result_discipline_id(res) == disc
+                        and str(res.get("Level") or "").upper() == major_event_type
+                    ),
+                    default=None,
+                )
+                is_best_evt_all = (
+                    prior_best_evt_all is None or current_rank < prior_best_evt_all
+                )
+                is_best_evt_disc = (
+                    prior_best_evt_disc is None or current_rank < prior_best_evt_disc
+                )
+            else:
+                prior_best_evt_all = prior_best_evt_disc = None
+                is_best_evt_all = is_best_evt_disc = False
+
+            if (
+                not is_best_all
+                and not is_best_disc
+                and not is_best_evt_all
+                and not is_best_evt_disc
+            ):
                 continue
 
             if is_best_all:
@@ -6177,7 +6325,7 @@ def _render_postevent_best_performances(
                         _prev_label(prior_best_all, "all discipline"),
                     )
                 )
-            else:
+            elif is_best_disc:
                 perf_rows.append(
                     (
                         gender,
@@ -6187,6 +6335,36 @@ def _render_postevent_best_performances(
                         entry["nat"],
                         discipline_label,
                         _prev_label(prior_best_disc, disc_label_lc),
+                    )
+                )
+            elif is_best_evt_all:
+                perf_rows.append(
+                    (
+                        gender,
+                        ibu_id,
+                        current_rank,
+                        entry["name"],
+                        entry["nat"],
+                        event_type_all_label,
+                        _prev_label(
+                            prior_best_evt_all,
+                            f"all discipline, {event_type_label}",
+                        ),
+                    )
+                )
+            elif is_best_evt_disc:
+                perf_rows.append(
+                    (
+                        gender,
+                        ibu_id,
+                        current_rank,
+                        entry["name"],
+                        entry["nat"],
+                        event_type_disc_label,
+                        _prev_label(
+                            prior_best_evt_disc,
+                            f"{disc_label_lc}, {event_type_label}",
+                        ),
                     )
                 )
 
@@ -6219,15 +6397,15 @@ def _render_postevent_best_performances(
 
     if not consolidated_rows:
         print("none")
-        print()
+        _print_blank_lines(2)
         return
 
     for gender_label, gender_code in (("Women", "F"), ("Men", "M")):
-        print(_preevent_heading(3, gender_label, args))
+        _print_postevent_heading(3, gender_label, args)
         gender_rows = [row for row in consolidated_rows if row[0] == gender_code]
         if not gender_rows:
             print("none")
-            print()
+            _print_blank_lines(2)
             continue
 
         athlete_ids = [row[2] for row in gender_rows if row[2]]
@@ -6237,11 +6415,11 @@ def _render_postevent_best_performances(
             ("Indiv Races", False),
             ("Team Races", True),
         ):
-            print(_preevent_heading(4, race_type_label, args))
+            _print_postevent_heading(4, race_type_label, args)
             scoped_rows = [row for row in gender_rows if row[1] == include_team_races]
             if not scoped_rows:
                 print("none")
-                print()
+                _print_blank_lines(2)
                 continue
 
             # Group by athlete first, while ordering athlete groups by:
@@ -6348,7 +6526,7 @@ def _render_postevent_best_performances(
                 row_styles=row_styles,
                 column_separators={2, 5},
             )
-            print()
+            _print_blank_lines(2)
 
 
 def _milestone_hits(
@@ -6745,19 +6923,19 @@ def _render_postevent_race_milestone_section(
 ) -> None:
     if not rows:
         print("none")
-        print()
+        _print_blank_lines(2)
         return
 
     for scope_label in (event_scope_label, "WC+WCH+OWG"):
-        print(_preevent_heading(3, scope_label, args))
+        _print_postevent_heading(3, scope_label, args)
         for gender_label, gender_code in (("Women", "F"), ("Men", "M")):
-            print(_preevent_heading(4, gender_label, args))
+            _print_postevent_heading(4, gender_label, args)
             scoped_rows = [
                 row for row in rows if row[0] == scope_label and row[1] == gender_code
             ]
             if not scoped_rows:
                 print("none")
-                print()
+                _print_blank_lines(2)
                 continue
             step_by_type = {"Race": 5, "Indiv Race": 5, "Team Race": 2}
             top_keys_by_type: dict[str, set[tuple[str, str]]] = {}
@@ -6792,7 +6970,7 @@ def _render_postevent_race_milestone_section(
             ]
             if not scoped_rows:
                 print("none")
-                print()
+                _print_blank_lines(2)
                 continue
             athlete_max: dict[tuple[str, str], int] = {}
             for (
@@ -6838,7 +7016,7 @@ def _render_postevent_race_milestone_section(
                 output_format=output_format,
                 column_separators={2, 4},
             )
-            print()
+            _print_blank_lines(2)
 
 
 def _render_postevent_win_milestone_section(
@@ -6849,15 +7027,15 @@ def _render_postevent_win_milestone_section(
 ) -> None:
     if not rows:
         print("none")
-        print()
+        _print_blank_lines(2)
         return
 
     for scope_label in (event_scope_label, "WC+WCH+OWG"):
-        print(_preevent_heading(3, scope_label, args))
+        _print_postevent_heading(3, scope_label, args)
         scoped_rows = [row for row in rows if row[0] == scope_label]
         if not scoped_rows:
             print("none")
-            print()
+            _print_blank_lines(2)
             continue
         athlete_max: dict[tuple[str, str], int] = {}
         for _scope, milestone, _type, athlete, nat, _race_name, _race_id in scoped_rows:
@@ -6885,7 +7063,7 @@ def _render_postevent_win_milestone_section(
             output_format=output_format,
             column_separators={2, 4},
         )
-        print()
+        _print_blank_lines(2)
 
 
 def handle_brief_postevent(args: argparse.Namespace) -> int:
@@ -7132,21 +7310,18 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
         )
 
     print()
-    print(_preevent_heading(1, f"Event Brief - {venue_name}", args))
-    print()
+    _print_postevent_heading(1, f"Event Brief - {venue_name}", args)
 
     if _postevent_section_enabled(POSTEVENT_SECTION_EVENT_FACTS, category_code):
-        print(
-            _preevent_heading(
-                2, POSTEVENT_SECTION_TITLES[POSTEVENT_SECTION_EVENT_FACTS], args
-            )
+        _print_postevent_heading(
+            2, POSTEVENT_SECTION_TITLES[POSTEVENT_SECTION_EVENT_FACTS], args
         )
         render_table(
             ["Country", "WC Editions", "WCH Editions", "OWG Editions"],
             [[event_country, str(wc_editions), str(wch_editions), str(owg_editions)]],
             output_format=output_format,
         )
-        print()
+        _print_blank_lines(2)
 
     if _postevent_section_enabled(POSTEVENT_SECTION_EVENT_AGENDA, category_code):
         level_raw = (current_event or {}).get("Level")
@@ -7163,9 +7338,10 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
             event_id,
             level=event_level,
         )
+        _print_blank_lines(1)
 
     if _postevent_section_enabled(POSTEVENT_SECTION_LAST_10_EDITIONS, category_code):
-        print(_preevent_heading(2, f"Last 10 Editions at {venue_name}", args))
+        _print_postevent_heading(2, f"Last 10 Editions at {venue_name}", args)
         recent_edition_entries = _select_recent_venue_edition_entries(
             venue_events,
             limit=10,
@@ -7179,7 +7355,7 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
         )
         if not recent_edition_rows:
             print("none")
-            print()
+            _print_blank_lines(2)
         else:
             display_rows: list[list[str]] = []
             for row in recent_edition_rows:
@@ -7204,13 +7380,11 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
                 cell_formatters=[None, None]
                 + [_format_edition_mark for _ in VENUE_RACE_TYPE_COLUMNS],
             )
-            print()
+            _print_blank_lines(2)
 
     if _postevent_section_enabled(POSTEVENT_SECTION_ATHLETE_STANDINGS, category_code):
-        print(
-            _preevent_heading(
-                2, POSTEVENT_SECTION_TITLES[POSTEVENT_SECTION_ATHLETE_STANDINGS], args
-            )
+        _print_postevent_heading(
+            2, POSTEVENT_SECTION_TITLES[POSTEVENT_SECTION_ATHLETE_STANDINGS], args
         )
         _render_postevent_athlete_standings(
             args,
@@ -7221,10 +7395,8 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
         )
 
     if _postevent_section_enabled(POSTEVENT_SECTION_RELAY_STANDINGS, category_code):
-        print(
-            _preevent_heading(
-                2, POSTEVENT_SECTION_TITLES[POSTEVENT_SECTION_RELAY_STANDINGS], args
-            )
+        _print_postevent_heading(
+            2, POSTEVENT_SECTION_TITLES[POSTEVENT_SECTION_RELAY_STANDINGS], args
         )
         _render_postevent_relay_standings(
             args,
@@ -7233,10 +7405,12 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
         )
 
     if _postevent_section_enabled(POSTEVENT_SECTION_NATIONS_CUP, category_code):
-        print(
-            _preevent_heading(
-                2, POSTEVENT_SECTION_TITLES[POSTEVENT_SECTION_NATIONS_CUP], args
-            )
+        before_standings["nations"] = _derive_postevent_nations_before_rows(
+            cast(dict[str, list[dict]], after_standings["nations"]),
+            completed_races,
+        )
+        _print_postevent_heading(
+            2, POSTEVENT_SECTION_TITLES[POSTEVENT_SECTION_NATIONS_CUP], args
         )
         _render_postevent_nations_standings(
             args,
@@ -7251,6 +7425,7 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
             all_results_cache,
             race_start_cache,
             output_format,
+            event_type=event_type,
         )
 
     if _postevent_section_enabled(POSTEVENT_SECTION_DECORATED_VENUE, category_code):
@@ -7305,13 +7480,35 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
             per_gender_limit=10,
         )
 
-    if win_milestones_enabled:
-        print(
-            _preevent_heading(
-                2, POSTEVENT_SECTION_TITLES[POSTEVENT_SECTION_WIN_MILESTONES], args
+    if _postevent_section_enabled(
+        POSTEVENT_SECTION_DECORATED_MAJOR_EVENTS, category_code
+    ):
+        before_major_rows, _before_major_styles = (
+            _build_major_events_decorated_athlete_rows(
+                reference_date=reference_date,
+                exclude_event_ids={event_id},
+                limit=0,
             )
         )
-        print()
+        after_major_rows, after_major_styles = (
+            _build_major_events_decorated_athlete_rows(
+                reference_date=reference_date,
+                limit=0,
+            )
+        )
+        _render_postevent_decorated_delta_split_tables(
+            "Most Decorated Athletes at World Cup / WCH / OWG",
+            before_major_rows,
+            after_major_rows,
+            after_major_styles,
+            args,
+            per_gender_limit=10,
+        )
+
+    if win_milestones_enabled:
+        _print_postevent_heading(
+            2, POSTEVENT_SECTION_TITLES[POSTEVENT_SECTION_WIN_MILESTONES], args
+        )
         _render_postevent_win_milestone_section(
             args,
             event_win_milestone_rows,
@@ -7320,12 +7517,9 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
         )
 
     if race_milestones_enabled:
-        print(
-            _preevent_heading(
-                2, POSTEVENT_SECTION_TITLES[POSTEVENT_SECTION_RACE_MILESTONES], args
-            )
+        _print_postevent_heading(
+            2, POSTEVENT_SECTION_TITLES[POSTEVENT_SECTION_RACE_MILESTONES], args
         )
-        print()
         _render_postevent_race_milestone_section(
             args,
             event_race_milestone_rows,

@@ -64,6 +64,220 @@ def test_postevent_matrix_sample_cells_match_spec():
     assert brief._postevent_section_enabled(
         brief.POSTEVENT_SECTION_DECORATED_EVENT_TYPE, "OWG"
     )
+    assert brief._postevent_section_enabled(
+        brief.POSTEVENT_SECTION_DECORATED_MAJOR_EVENTS, "WC"
+    )
+    assert brief._postevent_section_enabled(
+        brief.POSTEVENT_SECTION_DECORATED_MAJOR_EVENTS, "WCH"
+    )
+    assert brief._postevent_section_enabled(
+        brief.POSTEVENT_SECTION_DECORATED_MAJOR_EVENTS, "OWG"
+    )
+
+
+def test_handle_brief_postevent_adds_blank_lines_between_top_level_sections(
+    monkeypatch, capsys
+):
+    event_id = "E1"
+    monkeypatch.setattr(
+        brief,
+        "_find_event_by_id",
+        lambda value: {
+            "EventId": value,
+            "SeasonId": "2526",
+            "Level": 1,
+            "Organizer": "Kontiolahti",
+        },
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_races",
+        lambda value: [
+            {
+                "RaceId": "R1",
+                "StartTime": "2026-03-05T10:00:00Z",
+                "catId": "SW",
+                "DisciplineId": "IN",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_race_results",
+        lambda value: {
+            "Competition": {
+                "DisciplineId": "IN",
+                "catId": "SW",
+                "StartTime": "2026-03-05T10:00:00Z",
+            },
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "Rank": "1",
+                    "IBUId": "A",
+                    "Nat": "FRA",
+                    "Name": "Alpha",
+                }
+            ],
+            "SportEvt": {"SeasonId": "2526"},
+        },
+    )
+    monkeypatch.setattr(
+        brief,
+        "_resolve_event_type_and_venue",
+        lambda current_event, first_race_id: ("WCH", "Kontiolahti", {}),
+    )
+    monkeypatch.setattr(
+        brief, "_resolve_event_country", lambda *args, **kwargs: "Finland"
+    )
+    monkeypatch.setattr(brief, "_collect_venue_level1_events", lambda venue_name: [])
+    monkeypatch.setattr(
+        brief,
+        "_count_venue_event_editions",
+        lambda venue_name, venue_events, reference_date: (25, 6, 0),
+    )
+    monkeypatch.setattr(
+        brief,
+        "_compute_preevent_snapshot_standings",
+        lambda *args, **kwargs: brief._empty_standings_snapshot(),
+    )
+    monkeypatch.setattr(
+        brief, "_latest_completed_level1_event_id", lambda season_id: ""
+    )
+    monkeypatch.setattr(
+        brief,
+        "_postevent_section_enabled",
+        lambda section_id, category_code: section_id
+        in {
+            brief.POSTEVENT_SECTION_EVENT_FACTS,
+            brief.POSTEVENT_SECTION_EVENT_AGENDA,
+        },
+    )
+
+    rc = brief.handle_brief_postevent(argparse.Namespace(event=event_id, format="tsv"))
+
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert (
+        "## Event Facts\n\n"
+        "Country\tWC Editions\tWCH Editions\tOWG Editions\n"
+        "Finland\t25\t6\t0\n\n\n"
+        "## Event Agenda\n\n"
+    ) in out
+
+
+def test_handle_brief_postevent_renders_decorated_major_events_section(monkeypatch):
+    event_id = "E1"
+    monkeypatch.setattr(
+        brief,
+        "_find_event_by_id",
+        lambda value: {
+            "EventId": value,
+            "SeasonId": "2526",
+            "Level": 1,
+            "Organizer": "Kontiolahti",
+        },
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_races",
+        lambda value: [
+            {
+                "RaceId": "R1",
+                "StartTime": "2026-03-05T10:00:00Z",
+                "catId": "SW",
+                "DisciplineId": "IN",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_race_results",
+        lambda value: {
+            "Competition": {
+                "DisciplineId": "IN",
+                "catId": "SW",
+                "StartTime": "2026-03-05T10:00:00Z",
+            },
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "Rank": "1",
+                    "IBUId": "A",
+                    "Nat": "NOR",
+                    "Name": "Alpha",
+                }
+            ],
+            "SportEvt": {"SeasonId": "2526"},
+        },
+    )
+    monkeypatch.setattr(
+        brief,
+        "_resolve_event_type_and_venue",
+        lambda current_event, first_race_id: ("WCH", "Kontiolahti", {}),
+    )
+    monkeypatch.setattr(brief, "_resolve_event_country", lambda *args, **kwargs: "FIN")
+    monkeypatch.setattr(brief, "_collect_venue_level1_events", lambda venue_name: [])
+    monkeypatch.setattr(
+        brief,
+        "_count_venue_event_editions",
+        lambda venue_name, venue_events, reference_date: (25, 6, 0),
+    )
+    monkeypatch.setattr(
+        brief,
+        "_compute_preevent_snapshot_standings",
+        lambda *args, **kwargs: brief._empty_standings_snapshot(),
+    )
+    monkeypatch.setattr(
+        brief, "_latest_completed_level1_event_id", lambda season_id: ""
+    )
+    monkeypatch.setattr(
+        brief,
+        "_postevent_section_enabled",
+        lambda section_id, category_code: (
+            section_id == brief.POSTEVENT_SECTION_DECORATED_MAJOR_EVENTS
+        ),
+    )
+
+    major_calls: list[dict] = []
+
+    def fake_build_major(**kwargs):
+        major_calls.append(kwargs)
+        if len(major_calls) == 1:
+            return [], []
+        return [["1", "Alpha", "NOR", "F", "1", "0", "0", "1", "1"]], []
+
+    monkeypatch.setattr(
+        brief, "_build_major_events_decorated_athlete_rows", fake_build_major
+    )
+
+    rendered_titles: list[str] = []
+
+    def fake_render(
+        title,
+        before_rows,
+        after_rows,
+        after_row_styles,
+        args,
+        per_gender_limit=10,
+        gender_filter=None,
+    ):
+        rendered_titles.append(title)
+        assert before_rows == []
+        assert after_rows == [["1", "Alpha", "NOR", "F", "1", "0", "0", "1", "1"]]
+        assert per_gender_limit == 10
+
+    monkeypatch.setattr(
+        brief, "_render_postevent_decorated_delta_split_tables", fake_render
+    )
+
+    rc = brief.handle_brief_postevent(argparse.Namespace(event=event_id, format="tsv"))
+
+    assert rc == 0
+    assert len(major_calls) == 2
+    assert major_calls[0]["exclude_event_ids"] == {event_id}
+    assert "exclude_event_ids" not in major_calls[1]
+    assert rendered_titles == ["Most Decorated Athletes at World Cup / WCH / OWG"]
 
 
 def test_build_postevent_athlete_delta_rows_reports_rank_and_points_changes():
@@ -82,8 +296,8 @@ def test_build_postevent_athlete_delta_rows_reports_rank_and_points_changes():
     )
 
     assert rows[0] == ["1 (+1)", "Bravo", "FRA", "130 (+40)"]
-    assert rows[1] == ["2 (new)", "Charlie", "GER", "95 (+95)"]
-    assert rows[2] == ["3 (-2)", "Alpha", "NOR", "100 (=)"]
+    assert rows[1] == ["2 (new)", "Charlie", "GER", "95 (new)"]
+    assert rows[2] == ["3 (-2)", "Alpha", "NOR", "100 (+0)"]
     assert styles == ["highlight_plain", "highlight_plain", "highlight_plain"]
 
 
@@ -153,6 +367,153 @@ def test_build_postevent_country_delta_rows_reports_rank_and_points_changes():
     assert rows[0] == ["1 (+1)", "France", "280 (+80)"]
     assert rows[1] == ["2 (-1)", "Norway", "260.5 (+10)"]
     assert styles == ["highlight_plain", "highlight_plain"]
+
+
+def test_event_nations_points_from_completed_races_skips_mass_start_and_handles_mixed():
+    completed_races = [
+        (
+            "W_IN",
+            {
+                "Competition": {"DisciplineId": "IN", "catId": "SW"},
+                "Results": [
+                    {"IsTeam": False, "Nat": "FRA", "NC": "160"},
+                    {"IsTeam": False, "Nat": "NOR", "NC": "154"},
+                ],
+            },
+        ),
+        (
+            "W_MS",
+            {
+                "Competition": {"DisciplineId": "MS", "catId": "SW"},
+                "Results": [{"IsTeam": False, "Nat": "FRA", "NC": "60"}],
+            },
+        ),
+        (
+            "W_RL",
+            {
+                "Competition": {"DisciplineId": "RL", "catId": "SW"},
+                "Results": [{"IsTeam": True, "Nat": "FRA", "NC": "390"}],
+            },
+        ),
+        (
+            "MX_MR",
+            {
+                "Competition": {"DisciplineId": "MR", "catId": "MX"},
+                "Results": [{"IsTeam": True, "Nat": "SWE", "NC": "210"}],
+            },
+        ),
+    ]
+
+    points = brief._event_nations_points_from_completed_races(completed_races)
+
+    assert points == {
+        "SW": {"FRA": 550.0, "NOR": 154.0, "SWE": 210.0},
+        "SM": {"SWE": 210.0},
+    }
+
+
+def test_event_nations_points_from_completed_races_falls_back_to_nc_table():
+    completed_races = [
+        (
+            "M_SP",
+            {
+                "Competition": {"DisciplineId": "SP", "catId": "SM"},
+                "Results": [{"IsTeam": False, "Nat": "NOR", "Rank": "1"}],
+            },
+        ),
+        (
+            "MX_SR",
+            {
+                "Competition": {"DisciplineId": "SR", "catId": "MX"},
+                "Results": [{"IsTeam": True, "Nat": "FRA", "Rank": "2"}],
+            },
+        ),
+    ]
+
+    points = brief._event_nations_points_from_completed_races(completed_races)
+
+    assert points["SM"]["NOR"] == 160.0
+    assert points["SW"]["FRA"] == 195.0
+    assert points["SM"]["FRA"] == 195.0
+
+
+def test_derive_postevent_nations_before_rows_subtracts_current_event_points():
+    after_nations = {
+        "SW": [
+            {"Rank": "1", "Nat": "FRA", "Name": "France", "Score": "5944"},
+            {"Rank": "2", "Nat": "SWE", "Name": "Sweden", "Score": "5724"},
+        ],
+        "SM": [
+            {"Rank": "1", "Nat": "NOR", "Name": "Norway", "Score": "6232"},
+            {"Rank": "2", "Nat": "FRA", "Name": "France", "Score": "6045"},
+        ],
+        "ALL": [],
+    }
+    completed_races = [
+        (
+            "W_IN",
+            {
+                "Competition": {"DisciplineId": "IN", "catId": "SW"},
+                "Results": [
+                    {"IsTeam": False, "Nat": "FRA", "NC": "160"},
+                    {"IsTeam": False, "Nat": "SWE", "NC": "154"},
+                ],
+            },
+        ),
+        (
+            "W_RL",
+            {
+                "Competition": {"DisciplineId": "RL", "catId": "SW"},
+                "Results": [{"IsTeam": True, "Nat": "FRA", "NC": "390"}],
+            },
+        ),
+        (
+            "M_IN",
+            {
+                "Competition": {"DisciplineId": "IN", "catId": "SM"},
+                "Results": [
+                    {"IsTeam": False, "Nat": "NOR", "NC": "160"},
+                    {"IsTeam": False, "Nat": "FRA", "NC": "154"},
+                ],
+            },
+        ),
+    ]
+
+    before = brief._derive_postevent_nations_before_rows(after_nations, completed_races)
+
+    assert before["SW"][:2] == [
+        {"Rank": 1, "Name": "Sweden", "Nat": "SWE", "Score": "5570"},
+        {"Rank": 2, "Name": "France", "Nat": "FRA", "Score": "5394"},
+    ]
+    assert before["SM"][:2] == [
+        {"Rank": 1, "Name": "Norway", "Nat": "NOR", "Score": "6072"},
+        {"Rank": 2, "Name": "France", "Nat": "FRA", "Score": "5891"},
+    ]
+    assert before["ALL"][:2] == [
+        {"Rank": 1, "Name": "France", "Nat": "FRA", "Score": "11285.0"},
+        {"Rank": 2, "Name": "Norway", "Nat": "NOR", "Score": "6072.0"},
+    ]
+
+
+def test_derive_postevent_nations_before_rows_clamps_negative_values_to_zero():
+    after_nations = {
+        "SW": [{"Rank": "1", "Nat": "FRA", "Name": "France", "Score": "100"}],
+        "SM": [],
+        "ALL": [],
+    }
+    completed_races = [
+        (
+            "W_IN",
+            {
+                "Competition": {"DisciplineId": "IN", "catId": "SW"},
+                "Results": [{"IsTeam": False, "Nat": "FRA", "NC": "160"}],
+            },
+        )
+    ]
+
+    before = brief._derive_postevent_nations_before_rows(after_nations, completed_races)
+
+    assert before["SW"] == [{"Rank": 1, "Name": "France", "Nat": "FRA", "Score": "0"}]
 
 
 def test_fetch_live_postevent_standings_limit_zero_keeps_full_country_rows(monkeypatch):
@@ -326,7 +687,10 @@ def test_render_postevent_relay_standings_uses_merged_delta_cell_formatters(
         kwargs.get("cell_formatters")[0]
         is brief._format_postevent_rank_inline_delta_cell
     )
-    assert kwargs.get("cell_formatters")[2] is brief._format_postevent_inline_delta_cell
+    points_formatter = kwargs.get("cell_formatters")[2]
+    assert callable(points_formatter)
+    assert points_formatter is not brief._format_postevent_inline_delta_cell
+    assert points_formatter("120 (+20)", 0) == "120 (+20)"
 
 
 def test_render_postevent_nations_standings_uses_merged_delta_cell_formatters(
@@ -361,7 +725,10 @@ def test_render_postevent_nations_standings_uses_merged_delta_cell_formatters(
         kwargs.get("cell_formatters")[0]
         is brief._format_postevent_rank_inline_delta_cell
     )
-    assert kwargs.get("cell_formatters")[2] is brief._format_postevent_inline_delta_cell
+    points_formatter = kwargs.get("cell_formatters")[2]
+    assert callable(points_formatter)
+    assert points_formatter is not brief._format_postevent_inline_delta_cell
+    assert points_formatter("240 (+40)", 0) == "240 (+40)"
 
 
 def test_render_postevent_best_performances_consolidates_rows_by_athlete(monkeypatch):
@@ -620,10 +987,84 @@ def test_render_postevent_best_performances_splits_indiv_and_team_races(
     assert "#### Indiv Races" in out
     assert "#### Team Races" in out
     assert len(captured) == 2
-    assert captured[0][1][0][2].startswith("Best Individual")
-    assert captured[1][1][0][2].startswith("Best Relay")
+    assert captured[0][1][0][2].startswith("Best career indiv")
+    assert captured[1][1][0][2].startswith("Best career team")
     assert captured[0][1][0][6] == "R1"
     assert captured[1][1][0][6] == "R2"
+
+
+def test_render_postevent_best_performances_includes_event_scope_milestones(
+    monkeypatch,
+):
+    captured: list[tuple[list[str], list[list[str]], dict]] = []
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured.append((headers, rows, kwargs))
+
+    monkeypatch.setattr(brief, "render_table", fake_render_table)
+    monkeypatch.setattr(brief, "_prefetch_bios", lambda ibu_ids: {})
+    monkeypatch.setattr(brief, "_is_result_at_or_before_target", lambda *a, **k: True)
+
+    brief._render_postevent_best_performances(
+        argparse.Namespace(format="tsv"),
+        completed_races=[
+            (
+                "R1",
+                {
+                    "Competition": {
+                        "DisciplineId": "SP",
+                        "catId": "SW",
+                        "Description": "Sprint",
+                        "StartTime": "2026-02-01T10:00:00Z",
+                    },
+                    "Results": [
+                        {
+                            "IsTeam": False,
+                            "IBUId": "A",
+                            "Name": "Alpha",
+                            "Nat": "FRA",
+                            "Rank": "2",
+                            "IRM": "",
+                            "TotalTime": "25:20.0",
+                        }
+                    ],
+                },
+            )
+        ],
+        all_results_cache={
+            "A": [
+                {
+                    "Level": "WC",
+                    "RaceId": "OLD_WC",
+                    "DisciplineId": "SP",
+                    "Rank": "1",
+                },
+                {
+                    "Level": "OWG",
+                    "RaceId": "OLD_OWG",
+                    "DisciplineId": "IN",
+                    "Rank": "5",
+                },
+            ]
+        },
+        race_start_cache={},
+        output_format="tsv",
+        event_type="OWG",
+    )
+
+    assert len(captured) == 1
+    _headers, rows, _kwargs = captured[0]
+    assert rows == [
+        [
+            "Alpha",
+            "FRA",
+            "Best Olympic Games indiv result (all discipline)",
+            "2",
+            "5th (all discipline, Olympic Games)",
+            "Sprint",
+            "R1",
+        ]
+    ]
 
 
 def test_render_postevent_best_performances_group_sort_uses_delta_then_age_then_name(
@@ -1114,6 +1555,25 @@ def test_render_postevent_race_milestone_section_splits_event_and_career(monkeyp
     assert captured[1][1][0][5] == "R1"
     assert captured[0][2].get("row_separators") is None
     assert captured[1][2].get("row_separators") is None
+
+
+def test_render_postevent_race_milestone_section_adds_blank_lines_between_headers(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        brief, "render_table", lambda headers, rows, **kwargs: print("TABLE")
+    )
+
+    brief._render_postevent_race_milestone_section(
+        argparse.Namespace(format="tsv"),
+        rows=[("WC", "F", 50, "Race", "Alpha", "FRA", "Sprint", "R1")],
+        output_format="tsv",
+        event_scope_label="WC",
+    )
+
+    out = capsys.readouterr().out
+    assert out.startswith("### WC\n\n#### Women\n\nTABLE\n\n\n#### Men\n\nnone\n\n\n")
+    assert "\n### WC+WCH+OWG\n\n#### Women\n\nnone\n\n\n#### Men\n\nnone\n\n\n" in out
 
 
 def test_render_postevent_race_milestone_section_groups_rows_by_athlete(monkeypatch):
