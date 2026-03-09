@@ -47,7 +47,7 @@ from ..utils import (
     parse_start_datetime,
     parse_time_seconds,
 )
-from ._common import _has_completed_relay_results, _row_ibu_id
+from ._common import _has_completed_relay_results, _row_ibu_id, _select_race_interactive
 from .standings import find_cup_id
 
 
@@ -808,7 +808,8 @@ def handle_results(args: argparse.Namespace) -> int:
             disc_code, mixed_mode, cat_filter
         )
     else:
-        race_id, payload = _find_latest_race_with_results_any()
+        candidates = _find_recent_completed_races(5)
+        race_id, payload = _select_race_interactive(candidates)
 
     discipline = _get_discipline(payload)
     show_detail = getattr(args, "detail", False)
