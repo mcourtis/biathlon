@@ -538,6 +538,7 @@ POSTEVENT_SECTION_RELAY_STANDINGS = PREEVENT_SECTION_RELAY_STANDINGS
 POSTEVENT_SECTION_NATIONS_CUP = PREEVENT_SECTION_NATIONS_CUP
 POSTEVENT_SECTION_DECORATED_VENUE = PREEVENT_SECTION_DECORATED_VENUE
 POSTEVENT_SECTION_DECORATED_EVENT_TYPE = PREEVENT_SECTION_DECORATED_EVENT_TYPE
+POSTEVENT_SECTION_DECORATED_MAJOR_EVENTS = "decorated_major_events"
 
 POSTEVENT_SECTION_ORDER = [
     POSTEVENT_SECTION_EVENT_FACTS,
@@ -548,6 +549,7 @@ POSTEVENT_SECTION_ORDER = [
     POSTEVENT_SECTION_NATIONS_CUP,
     POSTEVENT_SECTION_DECORATED_VENUE,
     POSTEVENT_SECTION_DECORATED_EVENT_TYPE,
+    POSTEVENT_SECTION_DECORATED_MAJOR_EVENTS,
     POSTEVENT_SECTION_BEST_PERFORMANCES,
     POSTEVENT_SECTION_WIN_MILESTONES,
     POSTEVENT_SECTION_RACE_MILESTONES,
@@ -581,6 +583,7 @@ POSTEVENT_SECTION_TITLES = {
     POSTEVENT_SECTION_DECORATED_EVENT_TYPE: PREEVENT_SECTION_TITLES[
         PREEVENT_SECTION_DECORATED_EVENT_TYPE
     ],
+    POSTEVENT_SECTION_DECORATED_MAJOR_EVENTS: "Most Decorated Athletes at World Cup / WCH / OWG",
 }
 
 POSTEVENT_SECTION_MATRIX = {
@@ -595,6 +598,7 @@ POSTEVENT_SECTION_MATRIX = {
     POSTEVENT_SECTION_NATIONS_CUP: _preevent_matrix_row(True, False, False),
     POSTEVENT_SECTION_DECORATED_VENUE: _preevent_matrix_row(True, True, True),
     POSTEVENT_SECTION_DECORATED_EVENT_TYPE: _preevent_matrix_row(True, True, True),
+    POSTEVENT_SECTION_DECORATED_MAJOR_EVENTS: _preevent_matrix_row(True, True, True),
 }
 
 
@@ -867,6 +871,10 @@ _NC_REL: dict[int, float] = dict(
         ],
     )
 )
+
+
+# Disciplines eligible for Nations Cup individual points (not Pursuit or Mass Start).
+_NC_INDIVIDUAL_DISCS: frozenset[str] = frozenset({"IN", "SI", "SP"})
 
 
 def _get_nc_points(rank: int, *, is_relay: bool = False, mixed: bool = False) -> float:
@@ -3054,12 +3062,36 @@ def _compute_preevent_snapshot_standings(
                     if rank_val is None:
                         continue
 
-                    points = _get_wc_points(rank_val, mass_start=race_disc == "MS")
-                    if points <= 0:
-                        continue
-
                     nat = str(res.get("Nat") or "").upper()
                     if not nat:
+                        continue
+
+                    # Nations Cup: only awarded at Individual, Sprint, and
+                    # Relay races — NOT Pursuit or Mass Start.
+                    nc_eligible = is_relay_race or race_disc in _NC_INDIVIDUAL_DISCS
+                    if nc_eligible:
+                        is_mixed_relay_race = race_disc in {"MR", "SR"}
+                        nc_pts = _get_nc_points(
+                            rank_val,
+                            is_relay=is_relay_race,
+                            mixed=is_mixed_relay_race,
+                        )
+                        if nc_pts > 0:
+                            if race_cat in {"SW", "SM"}:
+                                nations_points[race_cat][nat] = (
+                                    nations_points[race_cat].get(nat, 0.0) + nc_pts
+                                )
+                            elif race_cat == "MX":
+                                nations_points["SW"][nat] = (
+                                    nations_points["SW"].get(nat, 0.0) + nc_pts
+                                )
+                                nations_points["SM"][nat] = (
+                                    nations_points["SM"].get(nat, 0.0) + nc_pts
+                                )
+
+                    # WC standings: individual points table, ranks 1-40 only.
+                    points = _get_wc_points(rank_val, mass_start=race_disc == "MS")
+                    if points <= 0:
                         continue
 
                     if not is_relay_race and race_cat in {"SW", "SM"}:
@@ -3081,20 +3113,9 @@ def _compute_preevent_snapshot_standings(
                                 )
 
                     if is_relay_race and race_cat in {"SW", "SM", "MX"}:
-                        wc_raw = res.get("WC")
-                        nc_fallback_raw = res.get("NC")
-                        try:
-                            if wc_raw not in (None, ""):
-                                wc_pts = float(wc_raw)
-                            elif nc_fallback_raw not in (None, ""):
-                                wc_pts = float(nc_fallback_raw)
-                            else:
-                                wc_pts = 0.0
-                        except (TypeError, ValueError):
-                            wc_pts = 0.0
-                        relay_points[race_cat][nat] = (
-                            relay_points[race_cat].get(nat, 0.0) + wc_pts
-                        )
+                        relay_points[race_cat][nat] = relay_points[race_cat].get(
+                            nat, 0.0
+                        ) + float(points)
                         relay_names[race_cat].setdefault(
                             nat,
                             str(
@@ -3104,28 +3125,6 @@ def _compute_preevent_snapshot_standings(
                                 or nat
                             ),
                         )
-
-                    nc_raw = res.get("NC")
-                    try:
-                        nc_pts = (
-                            float(nc_raw)
-                            if nc_raw not in (None, "")
-                            else (0.0 if is_relay_race else float(points))
-                        )
-                    except (TypeError, ValueError):
-                        nc_pts = 0.0 if is_relay_race else float(points)
-                    if nc_pts > 0:
-                        if race_cat in {"SW", "SM"}:
-                            nations_points[race_cat][nat] = (
-                                nations_points[race_cat].get(nat, 0.0) + nc_pts
-                            )
-                        elif race_cat == "MX":
-                            nations_points["SW"][nat] = (
-                                nations_points["SW"].get(nat, 0.0) + nc_pts / 2.0
-                            )
-                            nations_points["SM"][nat] = (
-                                nations_points["SM"].get(nat, 0.0) + nc_pts / 2.0
-                            )
 
     athlete_rows: dict[str, dict[str, list[dict]]] = {"SW": {}, "SM": {}}
     for cat in ("SW", "SM"):
@@ -7245,6 +7244,15 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
             after_standings=after_standings,
         )
 
+    if best_performances_enabled:
+        _render_postevent_best_performances(
+            args,
+            completed_races,
+            all_results_cache,
+            race_start_cache,
+            output_format,
+        )
+
     if _postevent_section_enabled(POSTEVENT_SECTION_DECORATED_VENUE, category_code):
         before_rows, _before_styles = _build_venue_decorated_athlete_rows(
             venue_name,
@@ -7295,15 +7303,6 @@ def handle_brief_postevent(args: argparse.Namespace) -> int:
             after_scope_styles,
             args,
             per_gender_limit=10,
-        )
-
-    if best_performances_enabled:
-        _render_postevent_best_performances(
-            args,
-            completed_races,
-            all_results_cache,
-            race_start_cache,
-            output_format,
         )
 
     if win_milestones_enabled:
