@@ -5269,7 +5269,7 @@ class _TtyPreservingBuffer(io.StringIO):
 def _merge_tables_side_by_side(
     left_lines: list[str],
     right_lines: list[str],
-    gap: int = 4,
+    sep: str = "    ",
 ) -> list[str]:
     """Merge two lists of terminal lines into a single side-by-side view."""
     left_width = max((_display_width(line) for line in left_lines), default=0)
@@ -5278,8 +5278,8 @@ def _merge_tables_side_by_side(
     for i in range(n):
         left = left_lines[i] if i < len(left_lines) else ""
         right = right_lines[i] if i < len(right_lines) else ""
-        padding = left_width - _display_width(left) + gap
-        result.append(left + " " * padding + right)
+        padding = left_width - _display_width(left)
+        result.append(left + " " * padding + sep + right)
     return result
 
 
@@ -5555,12 +5555,20 @@ def _render_postevent_athlete_standings(
             right_label = cat_labels.get(right_cat, right_cat)
             if left_lines or right_lines:
                 print(_preevent_heading(3, section_title, args))
-                left_w = max((_display_width(line) for line in left_lines), default=0)
-                header_padding = left_w - _display_width(left_label) + 4
-                print(Color.dim(left_label + " " * header_padding + right_label))
+                table_sep = "  │  "
+                left_lines_out = left_lines if left_lines else ["none"]
+                right_lines_out = right_lines if right_lines else ["none"]
+                left_w = max(
+                    (_display_width(line) for line in left_lines_out), default=0
+                )
+                right_w = max(
+                    (_display_width(line) for line in right_lines_out), default=0
+                )
+                left_header = Color.dim(left_label.upper().center(left_w))
+                right_header = Color.dim(right_label.upper().center(right_w))
+                print(left_header + table_sep + right_header)
                 merged = _merge_tables_side_by_side(
-                    left_lines if left_lines else ["none"],
-                    right_lines if right_lines else ["none"],
+                    left_lines_out, right_lines_out, sep=table_sep
                 )
                 print("\n".join(merged))
                 print()
@@ -5626,6 +5634,7 @@ def _render_postevent_relay_standings(
             continue
         if pretty:
             delta_rows = _align_postevent_country_merged_delta_cells(delta_rows)
+        points_fmt = _make_postevent_delta_scale_formatter(delta_rows, 2)
         render_table(
             ["Rank", "Team", "Points"],
             delta_rows,
@@ -5634,7 +5643,7 @@ def _render_postevent_relay_standings(
             cell_formatters=[
                 _format_postevent_rank_inline_delta_cell,
                 None,
-                _format_postevent_inline_delta_cell,
+                points_fmt,
             ],
         )
         print()
@@ -5682,6 +5691,7 @@ def _render_postevent_nations_standings(
             continue
         if pretty:
             delta_rows = _align_postevent_country_merged_delta_cells(delta_rows)
+        points_fmt = _make_postevent_delta_scale_formatter(delta_rows, 2)
         render_table(
             ["Rank", "Team", "Points"],
             delta_rows,
@@ -5690,7 +5700,7 @@ def _render_postevent_nations_standings(
             cell_formatters=[
                 _format_postevent_rank_inline_delta_cell,
                 None,
-                _format_postevent_inline_delta_cell,
+                points_fmt,
             ],
         )
         print()
