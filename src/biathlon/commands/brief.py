@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
+import io
 import re
 import sys
 import unicodedata
@@ -31,6 +33,7 @@ from ..constants import (
     RELAY_DISCIPLINES,
 )
 from ..formatting import (
+    _display_width,
     is_pretty_output,
     get_output_format,
     Color,
@@ -4888,6 +4891,50 @@ def _align_postevent_country_merged_delta_cells(
     return aligned_rows
 
 
+def _align_postevent_u23_merged_delta_cells(
+    rows: list[list[str]],
+) -> list[list[str]]:
+    """Like _align_postevent_athlete_merged_delta_cells but for U23 rows (points at col 4)."""
+    if not rows:
+        return rows
+
+    rank_parts = [
+        _split_inline_delta_cell_parts(row[0]) if len(row) > 0 else None for row in rows
+    ]
+    points_parts = [
+        _split_inline_delta_cell_parts(row[4]) if len(row) > 4 else None for row in rows
+    ]
+    valid_rank_parts = [parts for parts in rank_parts if parts is not None]
+    valid_points_parts = [parts for parts in points_parts if parts is not None]
+    if not valid_rank_parts and not valid_points_parts:
+        return rows
+
+    rank_value_width = max((len(parts[0]) for parts in valid_rank_parts), default=0)
+    rank_delta_width = max((len(parts[1]) for parts in valid_rank_parts), default=0)
+    points_value_width = max((len(parts[0]) for parts in valid_points_parts), default=0)
+    points_delta_width = max((len(parts[1]) for parts in valid_points_parts), default=0)
+
+    aligned_rows: list[list[str]] = []
+    for idx, row in enumerate(rows):
+        updated = list(row)
+        rank_parts_row = rank_parts[idx] if idx < len(rank_parts) else None
+        points_parts_row = points_parts[idx] if idx < len(points_parts) else None
+        if rank_parts_row is not None:
+            rank_value, rank_delta = rank_parts_row
+            updated[0] = (
+                f"{rank_value.rjust(rank_value_width)} "
+                f"({rank_delta.rjust(rank_delta_width)})"
+            )
+        if points_parts_row is not None:
+            points_value, points_delta = points_parts_row
+            updated[4] = (
+                f"{points_value.rjust(points_value_width)} "
+                f"({points_delta.rjust(points_delta_width)})"
+            )
+        aligned_rows.append(updated)
+    return aligned_rows
+
+
 def _build_postevent_athlete_delta_rows(
     after_rows: list[dict],
     before_rows: list[dict],
@@ -4923,6 +4970,54 @@ def _build_postevent_athlete_delta_rows(
         table_rows.append(
             [
                 f"{current_rank} ({rank_delta_text})",
+                str(row.get("Name") or row.get("ShortName") or ""),
+                str(row.get("Nat") or ""),
+                f"{_format_score_value(current_points)} ({points_delta_text})",
+            ]
+        )
+        row_styles.append("highlight_plain" if changed else "")
+    return table_rows, row_styles
+
+
+def _build_postevent_u23_delta_rows(
+    after_rows: list[dict],
+    before_rows: list[dict],
+    limit: int = 10,
+) -> tuple[list[list[str]], list[str]]:
+    """Like _build_postevent_athlete_delta_rows but uses U23 rank (position in list) for rank/delta."""
+    before_map: dict[str, tuple[int, int, float]] = {}
+    for u23_idx, row in enumerate(before_rows, start=1):
+        key = _athlete_delta_key(row)
+        if not key:
+            continue
+        wc_rank = _row_rank_value(row, u23_idx)
+        before_map[key] = (u23_idx, wc_rank, _row_points_value(row))
+
+    table_rows: list[list[str]] = []
+    row_styles: list[str] = []
+    for u23_idx, row in enumerate(after_rows[:limit], start=1):
+        current_u23_rank = u23_idx
+        current_wc_rank = _row_rank_value(row, u23_idx)
+        current_points = _row_points_value(row)
+        key = _athlete_delta_key(row)
+        previous = before_map.get(key)
+
+        rank_delta_text = "new"
+        points_delta_text = _points_delta_text(None, current_points)
+        changed = True
+        if previous is not None:
+            prev_u23_rank, _prev_wc_rank, previous_points = previous
+            rank_delta_text = _rank_delta_text(prev_u23_rank, current_u23_rank)
+            points_delta_text = _points_delta_text(previous_points, current_points)
+            changed = (
+                prev_u23_rank != current_u23_rank
+                or abs(current_points - previous_points) > 1e-9
+            )
+
+        table_rows.append(
+            [
+                f"{current_u23_rank} ({rank_delta_text})",
+                str(current_wc_rank),
                 str(row.get("Name") or row.get("ShortName") or ""),
                 str(row.get("Nat") or ""),
                 f"{_format_score_value(current_points)} ({points_delta_text})",
@@ -5160,6 +5255,34 @@ def _build_postevent_decorated_delta_rows(
     return table_rows, row_styles
 
 
+class _TtyPreservingBuffer(io.StringIO):
+    """StringIO that delegates isatty() to the real stdout so Color.enabled() stays True."""
+
+    def __init__(self, real_stdout: Any) -> None:
+        super().__init__()
+        self._real_stdout = real_stdout
+
+    def isatty(self) -> bool:
+        return bool(self._real_stdout.isatty())
+
+
+def _merge_tables_side_by_side(
+    left_lines: list[str],
+    right_lines: list[str],
+    gap: int = 4,
+) -> list[str]:
+    """Merge two lists of terminal lines into a single side-by-side view."""
+    left_width = max((_display_width(line) for line in left_lines), default=0)
+    n = max(len(left_lines), len(right_lines))
+    result: list[str] = []
+    for i in range(n):
+        left = left_lines[i] if i < len(left_lines) else ""
+        right = right_lines[i] if i < len(right_lines) else ""
+        padding = left_width - _display_width(left) + gap
+        result.append(left + " " * padding + right)
+    return result
+
+
 def _render_postevent_athlete_standings(
     args: argparse.Namespace,
     before_standings: dict[str, dict],
@@ -5288,42 +5411,49 @@ def _render_postevent_athlete_standings(
             marked_rows.append(marked_row)
         return marked_rows
 
-    specs: list[tuple[str, str, list[dict], list[dict]]] = [
+    # section_specs: list of (section_title, [(cat_id, after_rows, before_rows), ...])
+    SectionCats = list[tuple[str, list[dict], list[dict]]]
+    section_specs: list[tuple[str, SectionCats]] = [
         (
-            "World Cup Total Score — Women",
-            "SW",
-            after_athlete.get("SW", {}).get("TS", []),
-            before_athlete.get("SW", {}).get("TS", []),
-        ),
-        (
-            "World Cup Total Score — Men",
-            "SM",
-            after_athlete.get("SM", {}).get("TS", []),
-            before_athlete.get("SM", {}).get("TS", []),
+            "World Cup Total Score",
+            [
+                (
+                    "SW",
+                    after_athlete.get("SW", {}).get("TS", []),
+                    before_athlete.get("SW", {}).get("TS", []),
+                ),
+                (
+                    "SM",
+                    after_athlete.get("SM", {}).get("TS", []),
+                    before_athlete.get("SM", {}).get("TS", []),
+                ),
+            ],
         ),
     ]
     for disc in disc_order:
         if disc not in disc_set:
             continue
         label = disc_labels.get(disc, disc)
-        specs.append(
+        section_specs.append(
             (
-                f"World Cup {label} Points — Women",
-                "SW",
-                after_athlete.get("SW", {}).get(disc, []),
-                before_athlete.get("SW", {}).get(disc, []),
-            )
-        )
-        specs.append(
-            (
-                f"World Cup {label} Points — Men",
-                "SM",
-                after_athlete.get("SM", {}).get(disc, []),
-                before_athlete.get("SM", {}).get(disc, []),
+                f"World Cup {label} Points",
+                [
+                    (
+                        "SW",
+                        after_athlete.get("SW", {}).get(disc, []),
+                        before_athlete.get("SW", {}).get(disc, []),
+                    ),
+                    (
+                        "SM",
+                        after_athlete.get("SM", {}).get(disc, []),
+                        before_athlete.get("SM", {}).get(disc, []),
+                    ),
+                ],
             )
         )
 
-    for cat_id, gender_label in (("SW", "Women"), ("SM", "Men")):
+    u23_cats: SectionCats = []
+    for cat_id in ("SW", "SM"):
         u23_ids_for_cat = u23_all_ids_by_cat.get(cat_id, set())
         if not u23_ids_for_cat:
             continue
@@ -5332,46 +5462,119 @@ def _render_postevent_athlete_standings(
         u23_after = [r for r in ts_after if _row_ibu_id(r) in u23_ids_for_cat]
         u23_before = [r for r in ts_before if _row_ibu_id(r) in u23_ids_for_cat]
         if u23_after:
-            specs.append((f"U23 — {gender_label}", cat_id, u23_after, u23_before))
+            u23_cats.append((cat_id, u23_after, u23_before))
+    if u23_cats:
+        section_specs.append(("U23", u23_cats))
 
-    if not any(rows for _title, _cat_id, rows, _before in specs):
+    if not any(rows for _title, cats in section_specs for _cat, rows, _before in cats):
         print("none")
         print()
         return
 
-    print()
-    for title, cat_id, after_rows, before_rows in specs:
-        print(_preevent_heading(3, title, args))
-        marked_after_rows = _append_postevent_leader_markers(after_rows, cat_id)
+    cat_labels = {"SW": "Women", "SM": "Men"}
+    output_format = get_output_format(args)
+
+    def _capture_table(render_fn: Callable[[], None]) -> list[str]:
+        buf = _TtyPreservingBuffer(sys.stdout)
+        with contextlib.redirect_stdout(buf):
+            render_fn()
+        return buf.getvalue().rstrip("\n").split("\n")
+
+    def _build_cat_table_lines(
+        cat_id: str, after_rows: list[dict], before_rows: list[dict]
+    ) -> list[str]:
+        marked = _append_postevent_leader_markers(after_rows, cat_id)
         delta_rows, _row_styles = _build_postevent_athlete_delta_rows(
-            marked_after_rows, before_rows, limit=10
+            marked, before_rows, limit=10
         )
         if not delta_rows:
-            print("none")
-            print()
-            continue
+            return []
         if pretty:
             delta_rows = _align_postevent_athlete_merged_delta_cells(delta_rows)
-        name_cell_formatter = _format_leader_markers if pretty else None
-        points_formatter = _make_postevent_delta_scale_formatter(delta_rows, 3)
-        render_table(
-            ["Rank", "Athlete", "Nat", "Points"],
-            delta_rows,
-            output_format=get_output_format(args),
-            alignments=[
-                "right",
-                "left",
-                "left",
-                "right",
-            ],
-            cell_formatters=[
-                _format_postevent_rank_inline_delta_cell,
-                name_cell_formatter,
-                None,
-                points_formatter,
-            ],
+        name_fmt = _format_leader_markers if pretty else None
+        points_fmt = _make_postevent_delta_scale_formatter(delta_rows, 3)
+        return _capture_table(
+            lambda: render_table(
+                ["Rank", "Athlete", "Nat", "Points"],
+                delta_rows,
+                output_format=output_format,
+                alignments=["right", "left", "left", "right"],
+                cell_formatters=[
+                    _format_postevent_rank_inline_delta_cell,
+                    name_fmt,
+                    None,
+                    points_fmt,
+                ],
+            )
         )
-        print()
+
+    def _build_u23_cat_table_lines(
+        cat_id: str, after_rows: list[dict], before_rows: list[dict]
+    ) -> list[str]:
+        marked = _append_postevent_leader_markers(after_rows, cat_id)
+        delta_rows, _row_styles = _build_postevent_u23_delta_rows(
+            marked, before_rows, limit=10
+        )
+        if not delta_rows:
+            return []
+        if pretty:
+            delta_rows = _align_postevent_u23_merged_delta_cells(delta_rows)
+        name_fmt = _format_leader_markers if pretty else None
+        points_fmt = _make_postevent_delta_scale_formatter(delta_rows, 4)
+        return _capture_table(
+            lambda: render_table(
+                ["Rank", "WC", "Athlete", "Nat", "Points"],
+                delta_rows,
+                output_format=output_format,
+                alignments=["right", "right", "left", "left", "right"],
+                cell_formatters=[
+                    _format_postevent_rank_inline_delta_cell,
+                    None,
+                    name_fmt,
+                    None,
+                    points_fmt,
+                ],
+            )
+        )
+
+    print()
+    for section_title, cat_specs in section_specs:
+        if not any(rows for _cat, rows, _before in cat_specs):
+            continue
+        is_u23_section = section_title == "U23"
+        table_builder = (
+            _build_u23_cat_table_lines if is_u23_section else _build_cat_table_lines
+        )
+        if pretty and len(cat_specs) == 2:
+            # Side-by-side layout: Women left, Men right
+            left_cat, left_after, left_before = cat_specs[0]
+            right_cat, right_after, right_before = cat_specs[1]
+            left_lines = table_builder(left_cat, left_after, left_before)
+            right_lines = table_builder(right_cat, right_after, right_before)
+            left_label = cat_labels.get(left_cat, left_cat)
+            right_label = cat_labels.get(right_cat, right_cat)
+            if left_lines or right_lines:
+                print(_preevent_heading(3, section_title, args))
+                left_w = max((_display_width(line) for line in left_lines), default=0)
+                header_padding = left_w - _display_width(left_label) + 4
+                print(Color.dim(left_label + " " * header_padding + right_label))
+                merged = _merge_tables_side_by_side(
+                    left_lines if left_lines else ["none"],
+                    right_lines if right_lines else ["none"],
+                )
+                print("\n".join(merged))
+                print()
+        else:
+            # Stacked layout (non-pretty or single category)
+            for cat_id, after_rows, before_rows in cat_specs:
+                gender_suffix = f" — {cat_labels.get(cat_id, cat_id)}"
+                print(_preevent_heading(3, section_title + gender_suffix, args))
+                lines = table_builder(cat_id, after_rows, before_rows)
+                if not lines:
+                    print("none")
+                else:
+                    print("\n".join(lines))
+                print()
 
 
 def _render_postevent_relay_standings(
