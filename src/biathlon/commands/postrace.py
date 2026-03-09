@@ -2336,10 +2336,10 @@ def _render_best_performances_section(
     disc_label = DISCIPLINE_NAMES.get(discipline, discipline)
     disc_label_lc = disc_label.lower()
     if is_relay:
-        all_label = "Best Relay Results (all discipline)"
-        discipline_label = f"Best Relay Results ({disc_label_lc})"
-        event_type_all_label = f"Best {event_type} Relay Results (all discipline)"
-        event_type_disc_label = f"Best {event_type} Relay Results ({disc_label_lc})"
+        all_label = "Best career team result (all discipline)"
+        discipline_label = f"Best career team results ({disc_label_lc})"
+        event_type_all_label = f"Best {event_type} team result (all discipline)"
+        event_type_disc_label = f"Best {event_type} team results ({disc_label_lc})"
     else:
         all_label = "Best career indiv result (all discipline)"
         discipline_label = f"Best career indiv results ({disc_label_lc})"
