@@ -810,6 +810,73 @@ def _format_score_value(score: float) -> str:
     return f"{score:.1f}"
 
 
+# Nations Cup individual points table (IBU rules).
+# ranks 1-10: fixed, 11-80: -1/rank, 81-110: -2/rank, 111+: 1.
+_NC_IND: dict[int, float] = {
+    1: 160,
+    2: 154,
+    3: 148,
+    4: 143,
+    5: 140,
+    6: 138,
+    7: 136,
+    8: 134,
+    9: 132,
+    10: 131,
+}
+for _r in range(11, 81):
+    _NC_IND[_r] = float(141 - _r)
+for _r in range(81, 111):
+    _NC_IND[_r] = float(221 - 2 * _r)
+
+# Nations Cup relay points table (IBU rules).
+_NC_REL: dict[int, float] = dict(
+    zip(
+        range(1, 31),
+        [
+            420,
+            390,
+            360,
+            330,
+            310,
+            290,
+            270,
+            250,
+            230,
+            220,
+            210,
+            200,
+            190,
+            180,
+            170,
+            160,
+            150,
+            140,
+            130,
+            120,
+            110,
+            100,
+            90,
+            80,
+            70,
+            60,
+            50,
+            40,
+            30,
+            20,
+        ],
+    )
+)
+
+
+def _get_nc_points(rank: int, *, is_relay: bool = False, mixed: bool = False) -> float:
+    """Return Nations Cup points for a given finish rank and race type."""
+    if is_relay:
+        pts = _NC_REL.get(rank, 0.0)
+        return pts / 2.0 if mixed else pts
+    return _NC_IND.get(rank, 1.0 if rank >= 110 else 0.0)
+
+
 def _parse_points_value(value: object) -> float:
     text = str(value if value is not None else "").strip()
     if not text:
@@ -3014,9 +3081,20 @@ def _compute_preevent_snapshot_standings(
                                 )
 
                     if is_relay_race and race_cat in {"SW", "SM", "MX"}:
-                        relay_points[race_cat][nat] = relay_points[race_cat].get(
-                            nat, 0.0
-                        ) + float(points)
+                        wc_raw = res.get("WC")
+                        nc_fallback_raw = res.get("NC")
+                        try:
+                            if wc_raw not in (None, ""):
+                                wc_pts = float(wc_raw)
+                            elif nc_fallback_raw not in (None, ""):
+                                wc_pts = float(nc_fallback_raw)
+                            else:
+                                wc_pts = 0.0
+                        except (TypeError, ValueError):
+                            wc_pts = 0.0
+                        relay_points[race_cat][nat] = (
+                            relay_points[race_cat].get(nat, 0.0) + wc_pts
+                        )
                         relay_names[race_cat].setdefault(
                             nat,
                             str(
@@ -3027,17 +3105,27 @@ def _compute_preevent_snapshot_standings(
                             ),
                         )
 
-                    if race_cat in {"SW", "SM"}:
-                        nations_points[race_cat][nat] = nations_points[race_cat].get(
-                            nat, 0.0
-                        ) + float(points)
-                    elif race_cat == "MX":
-                        nations_points["SW"][nat] = (
-                            nations_points["SW"].get(nat, 0.0) + float(points) / 2.0
+                    nc_raw = res.get("NC")
+                    try:
+                        nc_pts = (
+                            float(nc_raw)
+                            if nc_raw not in (None, "")
+                            else (0.0 if is_relay_race else float(points))
                         )
-                        nations_points["SM"][nat] = (
-                            nations_points["SM"].get(nat, 0.0) + float(points) / 2.0
-                        )
+                    except (TypeError, ValueError):
+                        nc_pts = 0.0 if is_relay_race else float(points)
+                    if nc_pts > 0:
+                        if race_cat in {"SW", "SM"}:
+                            nations_points[race_cat][nat] = (
+                                nations_points[race_cat].get(nat, 0.0) + nc_pts
+                            )
+                        elif race_cat == "MX":
+                            nations_points["SW"][nat] = (
+                                nations_points["SW"].get(nat, 0.0) + nc_pts / 2.0
+                            )
+                            nations_points["SM"][nat] = (
+                                nations_points["SM"].get(nat, 0.0) + nc_pts / 2.0
+                            )
 
     athlete_rows: dict[str, dict[str, list[dict]]] = {"SW": {}, "SM": {}}
     for cat in ("SW", "SM"):
@@ -5615,8 +5703,9 @@ def _render_postevent_relay_standings(
         ("Women", after_relay.get("SW", []), before_relay.get("SW", [])),
         ("Men", after_relay.get("SM", []), before_relay.get("SM", [])),
         ("Mixed", after_relay.get("MX", []), before_relay.get("MX", [])),
+        ("Combined (unofficial)", after_all, before_all),
     ]
-    if not any(rows for _label, rows, _before in main_specs) and not after_all:
+    if not any(rows for _label, rows, _before in main_specs):
         print("none")
         print()
         return
@@ -5694,11 +5783,14 @@ def _render_postevent_relay_standings(
         print("\n".join(merged))
         print()
     else:
-        for label, after_rows, before_rows in main_specs:
-            _render_stacked(label + " Relay", after_rows, before_rows)
-
-    if after_all:
-        _render_stacked("All Relay (unofficial)", after_all, before_all)
+        relay_titles = [
+            "Women Relay",
+            "Men Relay",
+            "Mixed Relay",
+            "All Relay (unofficial)",
+        ]
+        for (label, after_rows, before_rows), title in zip(main_specs, relay_titles):
+            _render_stacked(title, after_rows, before_rows)
 
 
 def _render_postevent_nations_standings(
