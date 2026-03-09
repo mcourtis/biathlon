@@ -288,7 +288,7 @@ def test_render_postevent_athlete_standings_uses_delta_cell_formatters(monkeypat
         is brief._format_postevent_rank_inline_delta_cell
     )
     assert kwargs.get("cell_formatters")[1] is brief._format_leader_markers
-    assert kwargs.get("cell_formatters")[3] is brief._format_postevent_inline_delta_cell
+    assert callable(kwargs.get("cell_formatters")[3])
     assert brief.GENERAL_LEADER_MARKER in rows[0][1]
 
 

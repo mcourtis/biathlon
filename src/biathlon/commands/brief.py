@@ -4715,6 +4715,69 @@ def _format_postevent_rank_inline_delta_cell(cell_str: str, row_idx: int) -> str
     return _format_postevent_inline_delta_cell(cell_str, row_idx, color_new_blue=True)
 
 
+def _make_postevent_delta_scale_formatter(
+    rows: list[list[str]],
+    col_idx: int,
+    color_new_blue: bool = False,
+) -> Callable[[str, int], str]:
+    """Return a formatter that scales delta intensity relative to the max delta in the column."""
+    max_magnitude = 0.0
+    for row in rows:
+        if col_idx < len(row):
+            parts = _split_inline_delta_cell_parts(row[col_idx])
+            if parts:
+                _, delta_text = parts
+                delta_text = delta_text.strip()
+                if delta_text not in ("=", "new") and len(delta_text) > 1:
+                    try:
+                        magnitude = abs(float(delta_text[1:].replace(",", "")))
+                        if magnitude > max_magnitude:
+                            max_magnitude = magnitude
+                    except ValueError:
+                        pass
+
+    def formatter(cell_str: str, row_idx: int) -> str:
+        text = str(cell_str or "")
+        trimmed = text.rstrip()
+        if not trimmed.endswith(")") or "(" not in trimmed:
+            return trimmed
+
+        start = trimmed.rfind("(")
+        prefix = trimmed[:start]
+        raw_delta = trimmed[start + 1 : -1]
+        delta_text = raw_delta.strip()
+        if delta_text == "=":
+            return trimmed
+        if delta_text == "new":
+            if not color_new_blue:
+                return trimmed
+            return f"{prefix}{Color.light_blue(f'({raw_delta})', bold=True)}"
+
+        magnitude_text = ""
+        colorizer = None
+        if delta_text.startswith("+"):
+            magnitude_text = delta_text[1:]
+            colorizer = Color.green
+        elif delta_text.startswith("-"):
+            magnitude_text = delta_text[1:]
+            colorizer = Color.red
+        else:
+            return text
+
+        try:
+            magnitude = abs(float(magnitude_text.replace(",", "")))
+        except ValueError:
+            return trimmed
+
+        if max_magnitude > 0:
+            intensity = min(1.0, 0.35 + 0.65 * (magnitude / max_magnitude))
+        else:
+            intensity = min(1.0, 0.5 + 0.15 * magnitude)
+        return f"{prefix}{colorizer(f'({raw_delta})', intensity=intensity)}"
+
+    return formatter
+
+
 def _points_delta_text(previous_points: float | None, current_points: float) -> str:
     if previous_points is None:
         return f"+{_format_score_value(current_points)}"
@@ -5227,13 +5290,13 @@ def _render_postevent_athlete_standings(
 
     specs: list[tuple[str, str, list[dict], list[dict]]] = [
         (
-            "Overall — Women",
+            "World Cup Total Score — Women",
             "SW",
             after_athlete.get("SW", {}).get("TS", []),
             before_athlete.get("SW", {}).get("TS", []),
         ),
         (
-            "Overall — Men",
+            "World Cup Total Score — Men",
             "SM",
             after_athlete.get("SM", {}).get("TS", []),
             before_athlete.get("SM", {}).get("TS", []),
@@ -5245,7 +5308,7 @@ def _render_postevent_athlete_standings(
         label = disc_labels.get(disc, disc)
         specs.append(
             (
-                f"{label} — Women",
+                f"World Cup {label} Points — Women",
                 "SW",
                 after_athlete.get("SW", {}).get(disc, []),
                 before_athlete.get("SW", {}).get(disc, []),
@@ -5253,7 +5316,7 @@ def _render_postevent_athlete_standings(
         )
         specs.append(
             (
-                f"{label} — Men",
+                f"World Cup {label} Points — Men",
                 "SM",
                 after_athlete.get("SM", {}).get(disc, []),
                 before_athlete.get("SM", {}).get(disc, []),
@@ -5290,6 +5353,7 @@ def _render_postevent_athlete_standings(
         if pretty:
             delta_rows = _align_postevent_athlete_merged_delta_cells(delta_rows)
         name_cell_formatter = _format_leader_markers if pretty else None
+        points_formatter = _make_postevent_delta_scale_formatter(delta_rows, 3)
         render_table(
             ["Rank", "Athlete", "Nat", "Points"],
             delta_rows,
@@ -5304,7 +5368,7 @@ def _render_postevent_athlete_standings(
                 _format_postevent_rank_inline_delta_cell,
                 name_cell_formatter,
                 None,
-                _format_postevent_inline_delta_cell,
+                points_formatter,
             ],
         )
         print()
