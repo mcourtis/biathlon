@@ -728,3 +728,281 @@ def test_make_name_formatter_supports_u23_marker():
 
     assert postrace.U23_LEADER_MARKER not in out
     assert "●" in out
+
+
+def test_handle_post_race_prefetches_all_results_once_per_athlete(monkeypatch):
+    race_id = "BT2526SWRLCP01SWSP"
+    payload = {
+        "SportEvt": {
+            "EventId": "EVT1",
+            "SeasonId": "2526",
+            "Description": "IBU Cup",
+        },
+        "Competition": {
+            "DisciplineId": "SP",
+            "catId": "SW",
+            "StartTime": "2026-01-10T12:00:00Z",
+        },
+        "Results": [
+            {
+                "IsTeam": False,
+                "IBUId": "A",
+                "Name": "Athlete One",
+                "Nat": "NOR",
+                "Bib": "1",
+                "Rank": "1",
+            },
+            {
+                "IsTeam": False,
+                "IBUId": "B",
+                "Name": "Athlete Two",
+                "Nat": "SWE",
+                "Bib": "2",
+                "Rank": "2",
+            },
+        ],
+    }
+    history_by_id = {
+        "A": [
+            {"RaceId": race_id, "Level": "WC", "Comp": "SP", "Rank": "1"},
+            {"RaceId": "BT2425SWRLCP01SWSP", "Level": "WC", "Comp": "SP", "Rank": "7"},
+        ],
+        "B": [
+            {"RaceId": race_id, "Level": "WC", "Comp": "SP", "Rank": "2"},
+            {"RaceId": "BT2425SWRLCP01SWSP", "Level": "WC", "Comp": "SP", "Rank": "9"},
+        ],
+    }
+    call_counts: dict[str, int] = {}
+
+    def fake_get_all_results(ibu_id: str) -> dict:
+        call_counts[ibu_id] = call_counts.get(ibu_id, 0) + 1
+        return {"Results": history_by_id.get(ibu_id, [])}
+
+    monkeypatch.setattr(postrace, "get_race_results", lambda _race_id: payload)
+    monkeypatch.setattr(postrace, "get_all_results", fake_get_all_results)
+    monkeypatch.setattr(postrace, "detect_event_type", lambda _event: "IC")
+    monkeypatch.setattr(postrace, "_collect_discipline_race_ids", lambda *a, **k: [])
+    monkeypatch.setattr(postrace, "_build_athlete_age_map", lambda *a, **k: ({}, set()))
+    monkeypatch.setattr(postrace, "_extract_venue_name", lambda _payload: "")
+    monkeypatch.setattr(postrace, "render_table", lambda *a, **k: None)
+    monkeypatch.setattr(postrace, "get_seasons", lambda: [])
+
+    rc = postrace.handle_post_race(argparse.Namespace(race=race_id, format="tsv"))
+
+    assert rc == 0
+    assert call_counts == {"A": 1, "B": 1}
+
+
+def test_handle_post_race_decorated_section_excludes_selected_race(monkeypatch):
+    payload = {
+        "SportEvt": {
+            "EventId": "EVT1",
+            "SeasonId": "2526",
+            "Organizer": "Kontiolahti",
+            "Description": "IBU Cup",
+        },
+        "Competition": {
+            "DisciplineId": "SP",
+            "catId": "SW",
+            "StartTime": "2026-01-10T12:00:00Z",
+        },
+        "Results": [
+            {
+                "IsTeam": False,
+                "IBUId": "A1",
+                "Name": "Athlete One",
+                "Nat": "NOR",
+                "Rank": "1",
+            }
+        ],
+    }
+
+    monkeypatch.setattr(postrace, "get_race_results", lambda race_id: payload)
+    monkeypatch.setattr(postrace, "detect_event_type", lambda event: "IC")
+    monkeypatch.setattr(postrace, "_extract_venue_name", lambda _payload: "Kontiolahti")
+    monkeypatch.setattr(postrace, "_build_athlete_age_map", lambda *a, **k: ({}, set()))
+    monkeypatch.setattr(postrace, "_collect_discipline_race_ids", lambda *a, **k: [])
+    monkeypatch.setattr(
+        postrace, "_render_best_performances_section", lambda *a, **k: a[1]
+    )
+    monkeypatch.setattr(
+        postrace, "_render_postevent_decorated_delta_split_tables", lambda *a, **k: None
+    )
+    monkeypatch.setattr(postrace, "get_all_results", lambda ibu_id: {"Results": []})
+    monkeypatch.setattr(postrace, "get_seasons", lambda: [])
+    monkeypatch.setattr(postrace, "render_table", lambda *a, **k: None)
+
+    def fail_build_event_type(*args, **kwargs):
+        raise AssertionError(
+            "event-type section should be skipped for non-major events"
+        )
+
+    monkeypatch.setattr(
+        postrace,
+        "_build_event_type_decorated_athlete_rows",
+        fail_build_event_type,
+    )
+    monkeypatch.setattr(
+        postrace,
+        "_build_major_events_decorated_athlete_rows",
+        fail_build_event_type,
+    )
+
+    captured_kwargs: list[dict] = []
+
+    def fake_build_venue(*args, **kwargs):
+        captured_kwargs.append(kwargs)
+        return [], []
+
+    monkeypatch.setattr(
+        postrace, "_build_venue_decorated_athlete_rows", fake_build_venue
+    )
+
+    rc = postrace.handle_post_race(argparse.Namespace(race="R_TARGET", format="tsv"))
+
+    assert rc == 0
+    assert len(captured_kwargs) == 2
+    assert "exclude_event_ids" not in captured_kwargs[0]
+    assert captured_kwargs[0]["exclude_race_ids"] == {"R_TARGET"}
+
+
+def test_handle_post_race_renders_event_type_decorated_section(monkeypatch):
+    payload = {
+        "SportEvt": {
+            "EventId": "EVT1",
+            "SeasonId": "2526",
+            "Description": "BMW IBU World Championships",
+        },
+        "Competition": {
+            "DisciplineId": "SP",
+            "catId": "SW",
+            "StartTime": "2026-02-10T12:00:00Z",
+        },
+        "Results": [
+            {
+                "IsTeam": False,
+                "IBUId": "A1",
+                "Name": "Athlete One",
+                "Nat": "NOR",
+                "Rank": "1",
+            }
+        ],
+    }
+
+    monkeypatch.setattr(postrace, "get_race_results", lambda race_id: payload)
+    monkeypatch.setattr(postrace, "detect_event_type", lambda event: "WCH")
+    monkeypatch.setattr(postrace, "_extract_venue_name", lambda _payload: "")
+    monkeypatch.setattr(postrace, "_build_athlete_age_map", lambda *a, **k: ({}, set()))
+    monkeypatch.setattr(postrace, "_collect_discipline_race_ids", lambda *a, **k: [])
+    monkeypatch.setattr(
+        postrace, "_render_best_performances_section", lambda *a, **k: a[1]
+    )
+    monkeypatch.setattr(postrace, "get_all_results", lambda ibu_id: {"Results": []})
+    monkeypatch.setattr(postrace, "get_seasons", lambda: [])
+    monkeypatch.setattr(postrace, "render_table", lambda *a, **k: None)
+    monkeypatch.setattr(postrace, "_get_all_wch_medals", lambda *a, **k: ([], []))
+
+    event_type_calls: list[dict] = []
+    major_calls: list[dict] = []
+
+    def fake_build_event_type(event_type, **kwargs):
+        event_type_calls.append({"event_type": event_type, **kwargs})
+        if len(event_type_calls) == 1:
+            return [], []
+        return [
+            [
+                "1",
+                "Athlete One",
+                "NOR",
+                "F",
+                "1",
+                "0",
+                "0",
+                "1",
+                "1",
+                "1",
+                "0",
+                "0",
+                "1",
+                "1",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0",
+            ]
+        ], []
+
+    monkeypatch.setattr(
+        postrace, "_build_event_type_decorated_athlete_rows", fake_build_event_type
+    )
+
+    def fake_build_major(**kwargs):
+        major_calls.append(kwargs)
+        if len(major_calls) == 1:
+            return [], []
+        return [
+            [
+                "1",
+                "Athlete One",
+                "NOR",
+                "F",
+                "1",
+                "0",
+                "0",
+                "1",
+                "1",
+                "1",
+                "0",
+                "0",
+                "1",
+                "1",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0",
+            ]
+        ], []
+
+    monkeypatch.setattr(
+        postrace, "_build_major_events_decorated_athlete_rows", fake_build_major
+    )
+    rendered_titles: list[str] = []
+
+    def fake_render(
+        title,
+        before_rows,
+        after_rows,
+        after_row_styles,
+        args,
+        per_gender_limit=10,
+        gender_filter=None,
+    ):
+        rendered_titles.append(title)
+        assert before_rows == []
+        assert after_rows
+        assert per_gender_limit == 10
+
+    monkeypatch.setattr(
+        postrace, "_render_postevent_decorated_delta_split_tables", fake_render
+    )
+
+    rc = postrace.handle_post_race(argparse.Namespace(race="R_TARGET", format="tsv"))
+
+    assert rc == 0
+    assert len(event_type_calls) == 2
+    assert event_type_calls[0]["event_type"] == "WCH"
+    assert "exclude_event_ids" not in event_type_calls[0]
+    assert event_type_calls[0]["exclude_race_ids"] == {"R_TARGET"}
+    assert "exclude_event_ids" not in event_type_calls[1]
+    assert "exclude_race_ids" not in event_type_calls[1]
+    assert len(major_calls) == 2
+    assert "exclude_event_ids" not in major_calls[0]
+    assert major_calls[0]["exclude_race_ids"] == {"R_TARGET"}
+    assert "exclude_event_ids" not in major_calls[1]
+    assert "exclude_race_ids" not in major_calls[1]
+    assert rendered_titles == [
+        "Most Decorated Athletes at World Championship",
+        "Most Decorated Athletes at WC+WCH+OWG",
+    ]

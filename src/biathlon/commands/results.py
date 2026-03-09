@@ -278,46 +278,95 @@ def _find_latest_race_with_results_any() -> tuple[str, dict]:
 
 
 def _find_recent_completed_races(count: int = 5) -> list[tuple[str, dict]]:
-    """Return the last *count* completed races, most recent first."""
+    """Return the last *count* completed races, most recent first.
+
+    Iterates events from most-recent-started backwards, fetching each event's
+    race results in parallel, until enough completed races are found.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
     now = datetime.datetime.now(datetime.timezone.utc)
+    today = now.date()
     season_id = get_current_season_id()
     events = get_events(season_id, level=1)
 
-    races: list[tuple[str, str, str]] = []
+    # Keep only events that have already started; sort newest-first.
+    started_events: list[tuple[str, str]] = []  # (start_date_str, event_id)
     for event in events:
         event_id = event.get("EventId")
         if not event_id:
             continue
+        start_raw = event.get("StartDate") or ""
+        start_str = start_raw.split("T", 1)[0] if isinstance(start_raw, str) else ""
+        if not start_str:
+            continue
+        try:
+            start_date = datetime.date.fromisoformat(start_str)
+        except ValueError:
+            continue
+        if start_date <= today:
+            started_events.append((start_str, event_id))
+
+    started_events.sort(reverse=True)
+
+    def fetch_race_results(
+        item: tuple[str, str, str],
+    ) -> tuple[str, str, str, dict | None]:
+        start_key, race_id, discipline = item
+        try:
+            return start_key, race_id, discipline, get_race_results(race_id)
+        except BiathlonError:
+            return start_key, race_id, discipline, None
+
+    found: list[tuple[str, dict]] = []
+
+    for _start_str, event_id in started_events:
+        if len(found) >= count:
+            break
+
+        # Collect races for this event.
+        event_races: list[tuple[str, str, str]] = []  # (start_key, race_id, discipline)
         for race in get_races(event_id):
             start_key = get_race_start_key(race)
             race_id = race.get("RaceId") or race.get("Id") or ""
             discipline = str(race.get("DisciplineId") or "").upper()
             if race_id:
-                races.append((start_key, race_id, discipline))
+                event_races.append((start_key, race_id, discipline))
 
-    races.sort(reverse=True)
+        if not event_races:
+            continue
 
-    found: list[tuple[str, dict]] = []
-    for start_key, race_id, discipline in races:
-        if len(found) >= count:
-            break
-        try:
-            payload = get_race_results(race_id)
-        except BiathlonError:
-            continue
-        comp = payload.get("Competition") or {}
-        start_raw = comp.get("StartTime") or start_key
-        start_dt = parse_start_datetime(
-            start_raw if isinstance(start_raw, str) else None
-        )
-        if start_dt and start_dt > now:
-            continue
-        if discipline in (RELAY_DISCIPLINE, SINGLE_MIXED_RELAY_DISCIPLINE):
-            if _has_completed_relay_results(payload):
-                found.append((race_id, payload))
-        else:
-            if _has_completed_results(payload):
-                found.append((race_id, payload))
+        # Sort newest-first within the event so we preserve overall ordering.
+        event_races.sort(reverse=True)
+
+        # Fetch all race results for this event in parallel.
+        results_map: dict[str, dict | None] = {}
+        with ThreadPoolExecutor(max_workers=min(len(event_races), 15)) as executor:
+            futures = {executor.submit(fetch_race_results, r): r for r in event_races}
+            for future in as_completed(futures):
+                start_key, race_id, discipline, payload = future.result()
+                results_map[race_id] = payload
+
+        # Filter completed races in chronological-descending order.
+        for start_key, race_id, discipline in event_races:
+            if len(found) >= count:
+                break
+            payload = results_map.get(race_id)
+            if payload is None:
+                continue
+            comp = payload.get("Competition") or {}
+            start_raw = comp.get("StartTime") or start_key
+            start_dt = parse_start_datetime(
+                start_raw if isinstance(start_raw, str) else None
+            )
+            if start_dt and start_dt > now:
+                continue
+            if discipline in (RELAY_DISCIPLINE, SINGLE_MIXED_RELAY_DISCIPLINE):
+                if _has_completed_relay_results(payload):
+                    found.append((race_id, payload))
+            else:
+                if _has_completed_results(payload):
+                    found.append((race_id, payload))
 
     if not found:
         raise BiathlonError("No completed races with results found")

@@ -1039,6 +1039,81 @@ def test_build_venue_decorated_athlete_rows_prefers_strict_gender_votes(monkeypa
     assert simon[3] == "F"
 
 
+def test_build_venue_decorated_athlete_rows_excludes_specific_race(monkeypatch):
+    monkeypatch.setattr(brief, "get_current_season_id", lambda: "2526")
+    monkeypatch.setattr(brief, "get_seasons", lambda: [{"SeasonId": "2526"}])
+    monkeypatch.setattr(
+        brief,
+        "get_events",
+        lambda season_id, level: (
+            [
+                {
+                    "EventId": "EVT1",
+                    "Organizer": "Kontiolahti",
+                    "Description": "BMW IBU World Cup",
+                    "StartDate": "2026-01-10",
+                }
+            ]
+            if season_id == "2526" and level == 1
+            else []
+        ),
+    )
+    monkeypatch.setattr(
+        brief,
+        "get_races",
+        lambda event_id: (
+            [
+                {"RaceId": "R_OLD", "catId": "SW", "DisciplineId": "SP"},
+                {"RaceId": "R_TARGET", "catId": "SW", "DisciplineId": "SP"},
+            ]
+            if event_id == "EVT1"
+            else []
+        ),
+    )
+
+    fetched_race_ids: list[str] = []
+    payloads = {
+        "R_OLD": {
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "IBUId": "W1",
+                    "Name": "Old Winner",
+                    "Nat": "NOR",
+                    "Rank": "1",
+                }
+            ]
+        },
+        "R_TARGET": {
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "IBUId": "W2",
+                    "Name": "Target Winner",
+                    "Nat": "SWE",
+                    "Rank": "1",
+                }
+            ]
+        },
+    }
+
+    def fake_get_race_results(race_id: str) -> dict:
+        fetched_race_ids.append(race_id)
+        return payloads[race_id]
+
+    monkeypatch.setattr(brief, "get_race_results", fake_get_race_results)
+
+    rows, _styles = brief._build_venue_decorated_athlete_rows(
+        "Kontiolahti",
+        limit=10,
+        exclude_race_ids={"R_TARGET"},
+    )
+
+    assert any(row[1] == "Old Winner" for row in rows)
+    assert all(row[1] != "Target Winner" for row in rows)
+    assert "R_TARGET" not in fetched_race_ids
+
+
 def test_build_venue_decorated_athlete_rows_respects_global_highlight_keys(monkeypatch):
     monkeypatch.setattr(brief, "get_current_season_id", lambda: "2526")
     monkeypatch.setattr(
@@ -1102,6 +1177,69 @@ def test_build_venue_decorated_athlete_rows_respects_global_highlight_keys(monke
 
     assert rows
     assert row_styles == ["highlight_plain"]
+
+
+def test_build_decorated_rows_highlight_name_alias_when_current_key_differs(
+    monkeypatch,
+):
+    events = [
+        {"event_id": "OLD_EVT", "season_id": "2425"},
+        {"event_id": "CUR_EVT", "season_id": "2526"},
+    ]
+    monkeypatch.setattr(
+        brief,
+        "get_races",
+        lambda event_id: (
+            [{"RaceId": "R_OLD", "catId": "SM", "DisciplineId": "SP"}]
+            if event_id == "OLD_EVT"
+            else (
+                [{"RaceId": "R_CUR", "catId": "SM", "DisciplineId": "SP"}]
+                if event_id == "CUR_EVT"
+                else []
+            )
+        ),
+    )
+    payloads = {
+        "R_OLD": {
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "Name": "DOE John",
+                    "Nat": "GER",
+                    "Rank": "1",
+                },
+                {
+                    "IsTeam": False,
+                    "Name": "Legacy Guy",
+                    "Nat": "NOR",
+                    "Rank": "2",
+                },
+            ]
+        },
+        "R_CUR": {
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "IBUId": "CUR_JOHN",
+                    "Name": "John DOE",
+                    "Nat": "GER",
+                    "Rank": "3",
+                }
+            ]
+        },
+    }
+    monkeypatch.setattr(brief, "get_race_results", lambda race_id: payloads[race_id])
+
+    rows, row_styles = brief._build_decorated_athlete_rows_for_events(
+        events,
+        current_season_id="2526",
+        limit=0,
+    )
+
+    styles_by_name = {row[1]: row_styles[idx] for idx, row in enumerate(rows)}
+    assert styles_by_name["DOE John"] == "highlight_plain"
+    assert styles_by_name["John DOE"] == "highlight_plain"
+    assert styles_by_name["Legacy Guy"] == ""
 
 
 def test_build_venue_decorated_athlete_rows_single_mixed_relay_counts_medal_once(
@@ -2198,16 +2336,18 @@ def test_handle_brief_preevent_upcoming_uses_live_cup_athlete_rows(monkeypatch, 
     monkeypatch.setattr(
         brief,
         "get_races",
-        lambda event_id: [
-            {
-                "RaceId": "TARGET",
-                "catId": "SW",
-                "DisciplineId": "SP",
-                "StartTime": "2099-01-10T10:00:00Z",
-            }
-        ]
-        if event_id == "EVT1"
-        else [],
+        lambda event_id: (
+            [
+                {
+                    "RaceId": "TARGET",
+                    "catId": "SW",
+                    "DisciplineId": "SP",
+                    "StartTime": "2099-01-10T10:00:00Z",
+                }
+            ]
+            if event_id == "EVT1"
+            else []
+        ),
     )
     monkeypatch.setattr(
         brief,

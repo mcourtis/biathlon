@@ -3,18 +3,22 @@
 from __future__ import annotations
 
 import argparse
+import datetime
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable
 
-from ..api import BiathlonError, get_analytic_results
+from ..api import BiathlonError, get_analytic_results, get_race_results
 from ..constants import (
     DISCIPLINE_NAMES,
     EVENT_TYPE_LABELS,
     EVENT_TYPE_OWG,
     EVENT_TYPE_WC,
     EVENT_TYPE_WCH,
+    RELAY_DISCIPLINE,
     RELAY_DISCIPLINES,
+    SINGLE_MIXED_RELAY_DISCIPLINE,
 )
 from ..formatting import Color, get_output_format
 from ..utils import get_first_time, parse_start_datetime, parse_time_seconds
@@ -135,6 +139,13 @@ def _season_end_year(season_id: str) -> int | None:
     if end_yy < start_yy:
         century += 100
     return century + end_yy
+
+
+def _birth_year_from_ibu_id(ibu_id: str) -> int | None:
+    """Extract birth year from IBU ID (format BT{NAT3}{5chars}{YYYY}{2chars})."""
+    if len(ibu_id) >= 14 and ibu_id.startswith("BT") and ibu_id[10:14].isdigit():
+        return int(ibu_id[10:14])
+    return None
 
 
 def _normalize_wc_rule_discipline(discipline: str, category: str) -> str:
@@ -456,3 +467,162 @@ def _has_completed_relay_results(payload: dict) -> bool:
             if result_text and result_text not in {"DNS", "-"}:
                 return True
     return False
+
+
+# ---------------------------------------------------------------------------
+# Chronology helpers shared by postrace and brief commands
+# ---------------------------------------------------------------------------
+
+_RACE_SEASON_RE = re.compile(r"^BT(?P<season>\d{4})")
+_SEASON_TEXT_RE = re.compile(r"^(?P<s1>\d{2})\s*/\s*(?P<s2>\d{2})$")
+
+
+def _normalize_season_id(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if len(text) == 4 and text.isdigit():
+        return text
+    match = _SEASON_TEXT_RE.match(text)
+    if match:
+        return f"{match.group('s1')}{match.group('s2')}"
+    return ""
+
+
+def _season_id_from_race_id(race_id: str) -> str:
+    match = _RACE_SEASON_RE.match(str(race_id or "").strip().upper())
+    if not match:
+        return ""
+    return str(match.group("season") or "")
+
+
+def _season_id_from_result(result: dict) -> str:
+    season_id = _normalize_season_id(result.get("SeasonId"))
+    if season_id:
+        return season_id
+    season = _normalize_season_id(result.get("Season"))
+    if season:
+        return season
+    race_id = str(result.get("RaceId") or "")
+    if race_id:
+        return _season_id_from_race_id(race_id)
+    return ""
+
+
+def _season_sort_key(season_id: str) -> int | None:
+    text = _normalize_season_id(season_id)
+    if len(text) != 4 or not text.isdigit():
+        return None
+    start_yy = int(text[:2])
+    century = 1900 if start_yy >= 90 else 2000
+    return century + start_yy
+
+
+def _start_dt_from_competition(comp: dict | None) -> datetime.datetime | None:
+    if not isinstance(comp, dict):
+        return None
+    for key in ("StartTime", "StartDate", "Date"):
+        raw = comp.get(key)
+        if raw:
+            dt = parse_start_datetime(str(raw))
+            if dt is not None:
+                return dt
+    return None
+
+
+def _is_team_level_result(result: dict) -> bool:
+    disc = str(result.get("DisciplineId") or result.get("Comp") or "").upper()
+    return bool(result.get("IsTeam")) or disc in {
+        RELAY_DISCIPLINE,
+        SINGLE_MIXED_RELAY_DISCIPLINE,
+        "MR",
+    }
+
+
+def _normalize_discipline_id(disc: str) -> str:
+    """Normalize discipline aliases: SI is an alternate code for IN."""
+    d = disc.upper()
+    return "IN" if d == "SI" else d
+
+
+def _result_discipline_id(row: dict) -> str:
+    return _normalize_discipline_id(
+        str(row.get("DisciplineId") or row.get("Comp") or row.get("Discipline") or "")
+    )
+
+
+def _warn_once(message: str, warning_keys: set[str], key: str) -> None:
+    if key in warning_keys:
+        return
+    warning_keys.add(key)
+    print(message, file=sys.stderr)
+
+
+def _resolve_result_start_datetime(
+    result: dict,
+    race_start_cache: dict[str, datetime.datetime | None],
+    get_race_results_fn: Callable[[str], dict] = get_race_results,
+) -> datetime.datetime | None:
+    for key in ("StartTime", "StartDate", "Date", "RaceDate"):
+        raw = result.get(key)
+        if raw:
+            dt = parse_start_datetime(str(raw))
+            if dt is not None:
+                return dt
+    race_id = str(result.get("RaceId") or "")
+    if not race_id:
+        return None
+    if race_id in race_start_cache:
+        return race_start_cache[race_id]
+    try:
+        payload = get_race_results_fn(race_id)
+    except BiathlonError:
+        race_start_cache[race_id] = None
+        return None
+    comp = payload.get("Competition") or {}
+    start_dt = _start_dt_from_competition(comp)
+    race_start_cache[race_id] = start_dt
+    return start_dt
+
+
+def _is_result_at_or_before_target(
+    result: dict,
+    target_race_id: str,
+    target_start_dt: datetime.datetime | None,
+    race_start_cache: dict[str, datetime.datetime | None],
+    warning_keys: set[str],
+    warning_context: str,
+    get_race_results_fn: Callable[[str], dict] = get_race_results,
+) -> bool:
+    race_id = str(result.get("RaceId") or "")
+    if race_id and race_id == target_race_id:
+        return True
+
+    # Fast path: if season is strictly before/after target season, no per-race lookup.
+    target_season_key = _season_sort_key(_season_id_from_race_id(target_race_id))
+    result_season_key = _season_sort_key(_season_id_from_result(result))
+    if target_season_key is not None and result_season_key is not None:
+        if result_season_key < target_season_key:
+            return True
+        if result_season_key > target_season_key:
+            return False
+
+    if target_start_dt is None:
+        return True
+    start_dt = _resolve_result_start_datetime(
+        result,
+        race_start_cache,
+        get_race_results_fn=get_race_results_fn,
+    )
+    if start_dt is None:
+        warn_key = f"{warning_context}:{race_id or id(result)}"
+        _warn_once(
+            (
+                "warning: skipping row with unknown chronology in "
+                f"{warning_context} (race {race_id or 'unknown'})"
+            ),
+            warning_keys,
+            warn_key,
+        )
+        return False
+    return start_dt <= target_start_dt

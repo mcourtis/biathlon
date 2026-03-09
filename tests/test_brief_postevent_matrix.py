@@ -1683,6 +1683,64 @@ def test_build_postevent_decorated_delta_rows_appends_value_delta_flags():
     assert styles == ["", "", ""]
 
 
+def test_build_postevent_decorated_delta_rows_dims_non_participants_when_available():
+    before_rows = []
+    after_rows = [
+        [
+            "1",
+            "Current Athlete",
+            "FRA",
+            "F",
+            "2",
+            "0",
+            "0",
+            "2",
+            "5",
+            "2",
+            "0",
+            "0",
+            "2",
+            "5",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+        ],
+        [
+            "2",
+            "Past Athlete",
+            "GER",
+            "F",
+            "1",
+            "1",
+            "0",
+            "2",
+            "9",
+            "1",
+            "1",
+            "0",
+            "2",
+            "9",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+        ],
+    ]
+
+    _rows, styles = brief._build_postevent_decorated_delta_rows(
+        after_rows,
+        before_rows,
+        "F",
+        limit=2,
+        after_row_styles=["highlight_plain", ""],
+    )
+
+    assert styles == ["highlight_plain", "dim"]
+
+
 def test_build_postevent_decorated_delta_rows_matches_name_order_variants():
     before_rows = [
         [

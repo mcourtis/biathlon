@@ -44,6 +44,7 @@ from ._common import (
     DISCIPLINE_LEADER_MARKER,
     GENERAL_LEADER_MARKER,
     U23_LEADER_MARKER,
+    _birth_year_from_ibu_id,
     _format_leader_markers,
     _format_section_title,
     _has_completed_relay_results,
@@ -56,10 +57,10 @@ from ._common import (
     is_relay_discipline,
     _select_race_interactive,
 )
-from .postrace import (
-    handle_post_race,
+from ._common import (
     _is_result_at_or_before_target,
     _is_team_level_result,
+    _normalize_discipline_id,
     _result_discipline_id,
     _start_dt_from_competition,
 )
@@ -2378,9 +2379,16 @@ def _build_decorated_athlete_rows_for_events(
     current_season_id: str,
     highlight_keys: set[str] | None = None,
     limit: int = 20,
+    exclude_race_ids: set[str] | None = None,
 ) -> tuple[list[list[str]], list[str]]:
     if not events:
         return [], []
+
+    excluded_races = {
+        str(race_id).strip()
+        for race_id in (exclude_race_ids or set())
+        if str(race_id).strip()
+    }
 
     event_ids = [
         str(entry.get("event_id") or "").strip()
@@ -2407,6 +2415,8 @@ def _build_decorated_athlete_rows_for_events(
             for race in event_races:
                 race_id = str(race.get("RaceId") or race.get("Id") or "").strip()
                 if not race_id:
+                    continue
+                if race_id in excluded_races:
                     continue
                 cat_id = str(race.get("catId") or race.get("CatId") or "").upper()
                 if cat_id not in {"SW", "SM", "MX"}:
@@ -2502,6 +2512,11 @@ def _build_decorated_athlete_rows_for_events(
                         ] += 1
                 if current_season_id and race_season_id == current_season_id:
                     current_season_participants.add(key)
+                    if name and nat:
+                        current_season_participants.add(f"{name}|{nat}")
+                    current_season_participants.update(
+                        _participant_name_highlight_keys(row)
+                    )
 
                 stats = athlete_stats.setdefault(
                     key,
@@ -2653,6 +2668,27 @@ def _build_decorated_athlete_rows_for_events(
         if highlight_keys is not None
         else current_season_participants
     )
+
+    def _highlight_candidates(
+        athlete_key: str, stats: dict[str, int | str]
+    ) -> set[str]:
+        candidates = {athlete_key}
+        nat = str(stats.get("nat") or "").strip().upper()
+        name_variants = set(athlete_name_variants.get(athlete_key, set()))
+        display_name = str(stats.get("name") or "").strip()
+        if display_name:
+            name_variants.add(display_name)
+        for variant in name_variants:
+            text = str(variant or "").strip()
+            if not text:
+                continue
+            if nat:
+                candidates.add(f"{text}|{nat}")
+            normalized = _normalize_decorated_name(text)
+            if normalized:
+                candidates.add(normalized)
+        return candidates
+
     for rank, (athlete_key, stats) in enumerate(decorated, start=1):
         gold = int(stats["Gold"])
         silver = int(stats["Silver"])
@@ -2692,9 +2728,10 @@ def _build_decorated_athlete_rows_for_events(
                 str(races_team),
             ]
         )
-        row_styles.append(
-            "highlight_plain" if athlete_key in effective_highlight_keys else ""
+        row_highlighted = bool(
+            _highlight_candidates(athlete_key, stats) & effective_highlight_keys
         )
+        row_styles.append("highlight_plain" if row_highlighted else "")
     return rows, row_styles
 
 
@@ -2705,6 +2742,7 @@ def _build_venue_decorated_athlete_rows(
     highlight_keys: set[str] | None = None,
     limit: int = 20,
     exclude_event_ids: set[str] | None = None,
+    exclude_race_ids: set[str] | None = None,
 ) -> tuple[list[list[str]], list[str]]:
     if venue_events is None:
         venue_events = _collect_venue_level1_events(venue_name)
@@ -2717,6 +2755,7 @@ def _build_venue_decorated_athlete_rows(
         current_season_id=current_season_id,
         highlight_keys=highlight_keys,
         limit=limit,
+        exclude_race_ids=exclude_race_ids,
     )
 
 
@@ -2726,6 +2765,7 @@ def _build_event_type_decorated_athlete_rows(
     highlight_keys: set[str] | None = None,
     limit: int = 20,
     exclude_event_ids: set[str] | None = None,
+    exclude_race_ids: set[str] | None = None,
 ) -> tuple[list[list[str]], list[str]]:
     events = _collect_level1_events_by_type(event_type)
     events = _filter_events_to_reference_date(
@@ -2737,6 +2777,37 @@ def _build_event_type_decorated_athlete_rows(
         current_season_id=current_season_id,
         highlight_keys=highlight_keys,
         limit=limit,
+        exclude_race_ids=exclude_race_ids,
+    )
+
+
+def _build_major_events_decorated_athlete_rows(
+    reference_date: datetime.date | None = None,
+    highlight_keys: set[str] | None = None,
+    limit: int = 20,
+    exclude_event_ids: set[str] | None = None,
+    exclude_race_ids: set[str] | None = None,
+) -> tuple[list[list[str]], list[str]]:
+    events: list[dict] = []
+    seen_event_ids: set[str] = set()
+    for event_type in (EVENT_TYPE_WC, EVENT_TYPE_WCH, EVENT_TYPE_OWG):
+        for entry in _collect_level1_events_by_type(event_type):
+            event_id = str(entry.get("event_id") or "").strip()
+            if not event_id or event_id in seen_event_ids:
+                continue
+            seen_event_ids.add(event_id)
+            events.append(entry)
+
+    events = _filter_events_to_reference_date(
+        events, reference_date, exclude_event_ids=exclude_event_ids
+    )
+    current_season_id = _resolve_current_season_id_for_highlight()
+    return _build_decorated_athlete_rows_for_events(
+        events,
+        current_season_id=current_season_id,
+        highlight_keys=highlight_keys,
+        limit=limit,
+        exclude_race_ids=exclude_race_ids,
     )
 
 
@@ -3395,6 +3466,7 @@ def _render_snapshot_athlete_standings_table(
     discipline_rows: dict[str, list[dict]],
     args: argparse.Namespace,
     reference_date: datetime.date | None = None,
+    u23_cutoff_year: int | None = None,
 ) -> None:
     print(_preevent_heading(3, title, args))
     print()
@@ -3427,6 +3499,7 @@ def _render_snapshot_athlete_standings_table(
 
     athlete_ids = [_row_ibu_id(row) for row in display_rows if _row_ibu_id(row)]
     age_display_by_id: dict[str, str] = {}
+    u23_snapshot_ids: set[str] = set()
     if athlete_ids:
         bios = _prefetch_bios(athlete_ids)
         for ibu_id in dict.fromkeys(athlete_ids):
@@ -3440,6 +3513,18 @@ def _render_snapshot_athlete_standings_table(
                     continue
             age_text = _extract_age_text(bio)
             age_display_by_id[ibu_id] = age_text or "-"
+
+    # Detect U23 athletes: prefer Groups field (CupResults), fall back to IBUId birth year.
+    for row in total_rows:
+        ibu_id = _row_ibu_id(row)
+        if not ibu_id:
+            continue
+        if str(row.get("Groups") or "").strip().upper() == "U23":
+            u23_snapshot_ids.add(ibu_id)
+        elif u23_cutoff_year is not None:
+            birth_year = _birth_year_from_ibu_id(ibu_id)
+            if birth_year is not None and birth_year >= u23_cutoff_year:
+                u23_snapshot_ids.add(ibu_id)
 
     def _score_or_dash(value: str) -> str:
         text = str(value or "").strip()
@@ -3565,6 +3650,29 @@ def _render_snapshot_athlete_standings_table(
         column_separators=ATHLETE_STANDINGS_COLUMN_SEPARATORS,
     )
     print()
+
+    if u23_snapshot_ids:
+        u23_rows = [r for r in total_rows if _row_ibu_id(r) in u23_snapshot_ids]
+        if u23_rows:
+            print(_preevent_heading(4, "U23", args))
+            print()
+            u23_table_rows: list[list[str]] = []
+            for idx, row in enumerate(u23_rows[:10]):
+                rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(
+                    "."
+                )
+                name = str(row.get("Name") or row.get("ShortName") or "")
+                nat = str(row.get("Nat") or "")
+                total = str(row.get("Score") or row.get("Points") or "0")
+                u23_table_rows.append([rank, name, nat, total])
+            render_table(
+                ["Rank", "Athlete", "Nat", "Points"],
+                u23_table_rows,
+                output_format=get_output_format(args),
+                alignments=["right", "left", "left", "right"],
+                column_separators={3},
+            )
+            print()
 
 
 def _render_preevent_agenda(
@@ -3849,6 +3957,10 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
             print()
         else:
             print()
+            season_end_yr = _season_end_year(season_id)
+            u23_snap_cutoff = (
+                (season_end_yr - 23) if season_end_yr is not None else None
+            )
             for title, rows_by_disc in athlete_tables:
                 _render_snapshot_athlete_standings_table(
                     title,
@@ -3856,6 +3968,7 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
                     rows_by_disc,
                     args,
                     reference_date=cutoff_dt.date(),
+                    u23_cutoff_year=u23_snap_cutoff,
                 )
 
     if _preevent_section_enabled(PREEVENT_SECTION_RELAY_STANDINGS, category_code):
@@ -4851,6 +4964,10 @@ def _build_postevent_decorated_delta_rows(
         return tuple(values.get(col_idx, 0) for col_idx in rank_columns)
 
     gender = str(gender_code).upper()
+    has_participant_highlights = bool(
+        after_row_styles
+        and any(style == "highlight_plain" for style in after_row_styles)
+    )
     before_filtered = [
         row
         for row in before_rows
@@ -4958,7 +5075,9 @@ def _build_postevent_decorated_delta_rows(
                 str(races_team),
             ]
         )
-        all_row_styles.append(style)
+        all_row_styles.append(
+            style if style else ("dim" if has_participant_highlights else "")
+        )
         all_row_changed.append(changed)
         all_row_has_new_win.append(has_new_win)
 
@@ -5000,10 +5119,28 @@ def _render_postevent_athlete_standings(
     total_leader_by_cat: dict[str, str] = {}
     discipline_leaders_by_cat: dict[str, dict[str, str]] = {"SW": {}, "SM": {}}
     u23_leader_ids_by_cat: dict[str, set[str]] = {"SW": set(), "SM": set()}
+    u23_all_ids_by_cat: dict[str, set[str]] = {"SW": set(), "SM": set()}
     season_end_year = _season_end_year(season_id)
-    u23_reference_date = (
-        datetime.date(season_end_year, 12, 31) if season_end_year is not None else None
-    )
+    u23_cutoff_year = (season_end_year - 23) if season_end_year is not None else None
+    birth_year_by_id: dict[str, int] = {}
+    if u23_cutoff_year is not None:
+        u23_candidate_ids: set[str] = set()
+        for cat_id in ("SW", "SM"):
+            for row in after_athlete.get(cat_id, {}).get("TS", []):
+                ibu_id = _row_ibu_id(row)
+                if ibu_id:
+                    u23_candidate_ids.add(ibu_id)
+        if u23_candidate_ids:
+            bios = _prefetch_bios(list(u23_candidate_ids))
+            for ibu_id in u23_candidate_ids:
+                bio = bios.get(ibu_id, {})
+                birth_date = _extract_birth_date(bio)
+                if birth_date is not None:
+                    birth_year_by_id[ibu_id] = birth_date.year
+                    continue
+                birth_year = _birth_year_from_ibu_id(ibu_id)
+                if birth_year is not None:
+                    birth_year_by_id[ibu_id] = birth_year
     for cat_id in ("SW", "SM"):
         cat_after = after_athlete.get(cat_id, {})
         total_rows = cat_after.get("TS", [])
@@ -5023,38 +5160,39 @@ def _render_postevent_athlete_standings(
                 if ibu_id:
                     u23_leader_ids_by_cat[cat_id].add(ibu_id)
 
-        # Fallback when explicit U23 marker fields are absent in standings rows.
-        if not u23_leader_ids_by_cat[cat_id] and u23_reference_date is not None:
-            total_ids = [_row_ibu_id(row) for row in total_rows if _row_ibu_id(row)]
-            if total_ids:
-                bios = _prefetch_bios(total_ids)
-                best_u23_score: float | None = None
-                for row in total_rows:
-                    ibu_id = _row_ibu_id(row)
-                    if not ibu_id:
-                        continue
-                    bio = bios.get(ibu_id, {})
-                    is_u23 = False
-                    birth_date = _extract_birth_date(bio)
-                    if birth_date is not None:
-                        is_u23 = _age_on_date(birth_date, u23_reference_date) <= 23
-                    else:
-                        age_text = _extract_age_text(bio)
-                        if age_text:
-                            age_token = age_text.split(" ", 1)[0].strip()
-                            if age_token.isdigit():
-                                is_u23 = int(age_token) <= 23
-                    if not is_u23:
-                        continue
-                    score = _row_points_value(row)
-                    if best_u23_score is None or score > best_u23_score + 1e-9:
-                        best_u23_score = score
-                        u23_leader_ids_by_cat[cat_id] = {ibu_id}
-                    elif (
-                        best_u23_score is not None
-                        and abs(score - best_u23_score) <= 1e-9
-                    ):
-                        u23_leader_ids_by_cat[cat_id].add(ibu_id)
+        # Fallback for leader detection: use U23 group or birth year.
+        if not u23_leader_ids_by_cat[cat_id] and u23_cutoff_year is not None:
+            best_u23_score: float | None = None
+            for row in total_rows:
+                ibu_id = _row_ibu_id(row)
+                if not ibu_id:
+                    continue
+                is_u23_group = str(row.get("Groups") or "").strip().upper() == "U23"
+                birth_year = birth_year_by_id.get(ibu_id)
+                if not is_u23_group and (
+                    birth_year is None or birth_year < u23_cutoff_year
+                ):
+                    continue
+                score = _row_points_value(row)
+                if best_u23_score is None or score > best_u23_score + 1e-9:
+                    best_u23_score = score
+                    u23_leader_ids_by_cat[cat_id] = {ibu_id}
+                elif best_u23_score is not None and abs(score - best_u23_score) <= 1e-9:
+                    u23_leader_ids_by_cat[cat_id].add(ibu_id)
+
+    # Build all-U23 sets: prefer Groups field, then birth year from bio/IBUId.
+    for cat_id in ("SW", "SM"):
+        ts_rows = after_athlete.get(cat_id, {}).get("TS", [])
+        for row in ts_rows:
+            ibu_id = _row_ibu_id(row)
+            if not ibu_id:
+                continue
+            if str(row.get("Groups") or "").strip().upper() == "U23":
+                u23_all_ids_by_cat[cat_id].add(ibu_id)
+            elif u23_cutoff_year is not None:
+                birth_year = birth_year_by_id.get(ibu_id)
+                if birth_year is not None and birth_year >= u23_cutoff_year:
+                    u23_all_ids_by_cat[cat_id].add(ibu_id)
 
     def _append_postevent_leader_markers(rows: list[dict], cat_id: str) -> list[dict]:
         if not pretty:
@@ -5121,6 +5259,17 @@ def _render_postevent_athlete_standings(
                 before_athlete.get("SM", {}).get(disc, []),
             )
         )
+
+    for cat_id, gender_label in (("SW", "Women"), ("SM", "Men")):
+        u23_ids_for_cat = u23_all_ids_by_cat.get(cat_id, set())
+        if not u23_ids_for_cat:
+            continue
+        ts_after = after_athlete.get(cat_id, {}).get("TS", [])
+        ts_before = before_athlete.get(cat_id, {}).get("TS", [])
+        u23_after = [r for r in ts_after if _row_ibu_id(r) in u23_ids_for_cat]
+        u23_before = [r for r in ts_before if _row_ibu_id(r) in u23_ids_for_cat]
+        if u23_after:
+            specs.append((f"U23 — {gender_label}", cat_id, u23_after, u23_before))
 
     if not any(rows for _title, _cat_id, rows, _before in specs):
         print("none")
@@ -5287,6 +5436,7 @@ def _render_postevent_decorated_delta_split_tables(
     after_row_styles: list[str],
     args: argparse.Namespace,
     per_gender_limit: int = 10,
+    gender_filter: str | None = None,
 ) -> None:
     print(_preevent_heading(2, title, args))
     print()
@@ -5312,8 +5462,14 @@ def _render_postevent_decorated_delta_split_tables(
         "Total",
         "Races",
     ]
-    for gender_label, gender_code in (("Women", "F"), ("Men", "M")):
+    gender_pairs = [
+        (label, code)
+        for label, code in (("Women", "F"), ("Men", "M"))
+        if gender_filter is None or gender_filter == code
+    ]
+    for gender_label, gender_code in gender_pairs:
         print(_preevent_heading(3, gender_label, args))
+        print()
         rows, row_styles = _build_postevent_decorated_delta_rows(
             after_rows,
             before_rows,
@@ -5325,6 +5481,7 @@ def _render_postevent_decorated_delta_split_tables(
         if not rows:
             print("none")
             print()
+            print()
             continue
         render_table(
             headers,
@@ -5334,6 +5491,7 @@ def _render_postevent_decorated_delta_split_tables(
             group_headers=[(3, 8, "All"), (8, 13, "Individual"), (13, 18, "Team")],
             row_styles=row_styles if is_pretty_output(args) else None,
         )
+        print()
         print()
 
 
@@ -5413,7 +5571,7 @@ def _render_postevent_best_performances(
 
     for race_id, payload in completed_races:
         comp = payload.get("Competition") or {}
-        disc = str(comp.get("DisciplineId") or "").upper()
+        disc = _normalize_discipline_id(str(comp.get("DisciplineId") or ""))
         cat_id = str(comp.get("catId") or comp.get("CatId") or "").upper()
         is_relay = is_relay_discipline(disc)
         target_start_dt = _start_dt_from_competition(comp)
@@ -6719,4 +6877,6 @@ def handle_brief_postrace(args: argparse.Namespace) -> int:
 
     Delegates to the existing postrace handler.
     """
+    from .postrace import handle_post_race  # avoid circular import at module level
+
     return handle_post_race(args)

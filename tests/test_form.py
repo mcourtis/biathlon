@@ -261,19 +261,21 @@ def test_handle_form_standard_defaults_min_to_fifty(monkeypatch):
     monkeypatch.setattr(
         form,
         "_compute_athletes",
-        lambda _data, args, shoot_mode, **kwargs: seen_min_pct.append(args.min_pct)
-        or [
-            {
-                "ibu_id": "A1",
-                "name": "Alpha",
-                "nat": "FRA",
-                "wc_rank": 1,
-                "current_form": 1.0,
-                "season_form": 1.0,
-                "has_current_form": True,
-                "ranks": {},
-            }
-        ],
+        lambda _data, args, shoot_mode, **kwargs: (
+            seen_min_pct.append(args.min_pct)
+            or [
+                {
+                    "ibu_id": "A1",
+                    "name": "Alpha",
+                    "nat": "FRA",
+                    "wc_rank": 1,
+                    "current_form": 1.0,
+                    "season_form": 1.0,
+                    "has_current_form": True,
+                    "ranks": {},
+                }
+            ]
+        ),
     )
     monkeypatch.setattr(form, "_render_form_table", lambda *_a, **_k: 0)
     monkeypatch.setattr(form, "_format_section_title", lambda title, _args: title)
@@ -303,19 +305,21 @@ def test_handle_form_startlist_defaults_min_to_zero(monkeypatch):
     monkeypatch.setattr(
         form,
         "_compute_athletes",
-        lambda _data, args, shoot_mode, **kwargs: seen_min_pct.append(args.min_pct)
-        or [
-            {
-                "ibu_id": "A1",
-                "name": "Alpha",
-                "nat": "FRA",
-                "wc_rank": 1,
-                "current_form": 1.0,
-                "season_form": 1.0,
-                "has_current_form": True,
-                "ranks": {},
-            }
-        ],
+        lambda _data, args, shoot_mode, **kwargs: (
+            seen_min_pct.append(args.min_pct)
+            or [
+                {
+                    "ibu_id": "A1",
+                    "name": "Alpha",
+                    "nat": "FRA",
+                    "wc_rank": 1,
+                    "current_form": 1.0,
+                    "season_form": 1.0,
+                    "has_current_form": True,
+                    "ranks": {},
+                }
+            ]
+        ),
     )
     monkeypatch.setattr(form, "_render_form_table", lambda *_a, **_k: 0)
     monkeypatch.setattr(form, "_render_combined_table", lambda *_a, **_k: 0)
@@ -346,19 +350,21 @@ def test_handle_form_startlist_keeps_explicit_min(monkeypatch):
     monkeypatch.setattr(
         form,
         "_compute_athletes",
-        lambda _data, args, shoot_mode, **kwargs: seen_min_pct.append(args.min_pct)
-        or [
-            {
-                "ibu_id": "A1",
-                "name": "Alpha",
-                "nat": "FRA",
-                "wc_rank": 1,
-                "current_form": 1.0,
-                "season_form": 1.0,
-                "has_current_form": True,
-                "ranks": {},
-            }
-        ],
+        lambda _data, args, shoot_mode, **kwargs: (
+            seen_min_pct.append(args.min_pct)
+            or [
+                {
+                    "ibu_id": "A1",
+                    "name": "Alpha",
+                    "nat": "FRA",
+                    "wc_rank": 1,
+                    "current_form": 1.0,
+                    "season_form": 1.0,
+                    "has_current_form": True,
+                    "ranks": {},
+                }
+            ]
+        ),
     )
     monkeypatch.setattr(form, "_render_form_table", lambda *_a, **_k: 0)
     monkeypatch.setattr(form, "_render_combined_table", lambda *_a, **_k: 0)
@@ -443,14 +449,16 @@ def test_handle_form_startlist_passes_nat_filter_to_all_tables(monkeypatch):
     monkeypatch.setattr(
         form,
         "_render_form_table",
-        lambda *_a, **kwargs: seen_table_nat_filters.append(kwargs.get("nat_filter"))
-        or 0,
+        lambda *_a, **kwargs: (
+            seen_table_nat_filters.append(kwargs.get("nat_filter")) or 0
+        ),
     )
     monkeypatch.setattr(
         form,
         "_render_combined_table",
-        lambda *_a, **kwargs: seen_combined_nat_filters.append(kwargs.get("nat_filter"))
-        or 0,
+        lambda *_a, **kwargs: (
+            seen_combined_nat_filters.append(kwargs.get("nat_filter")) or 0
+        ),
     )
     monkeypatch.setattr(form, "_format_section_title", lambda title, _args: title)
 

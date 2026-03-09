@@ -6133,7 +6133,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
 
         sections_to_render = [
             (
-                "Current Event",
+                current_event_label,
                 [row for row in rows if str(row[1]) == current_event_label],
             ),
             (

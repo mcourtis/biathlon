@@ -747,15 +747,17 @@ def test_wc_titles_section_shown_with_season_all(monkeypatch, capsys):
     monkeypatch.setattr(
         achievements,
         "get_cups",
-        lambda season_id: [
-            {"CupId": "TS2425", "Level": 1, "CatId": "SW", "DisciplineId": "TS"},
-            {"CupId": "SP2425", "Level": 1, "CatId": "SW", "DisciplineId": "SP"},
-            {"CupId": "PU2425", "Level": 1, "CatId": "SW", "DisciplineId": "PU"},
-            {"CupId": "IN2425", "Level": 1, "CatId": "SW", "DisciplineId": "IN"},
-            {"CupId": "MS2425", "Level": 1, "CatId": "SW", "DisciplineId": "MS"},
-        ]
-        if season_id == "2425"
-        else [],
+        lambda season_id: (
+            [
+                {"CupId": "TS2425", "Level": 1, "CatId": "SW", "DisciplineId": "TS"},
+                {"CupId": "SP2425", "Level": 1, "CatId": "SW", "DisciplineId": "SP"},
+                {"CupId": "PU2425", "Level": 1, "CatId": "SW", "DisciplineId": "PU"},
+                {"CupId": "IN2425", "Level": 1, "CatId": "SW", "DisciplineId": "IN"},
+                {"CupId": "MS2425", "Level": 1, "CatId": "SW", "DisciplineId": "MS"},
+            ]
+            if season_id == "2425"
+            else []
+        ),
     )
     monkeypatch.setattr(
         achievements,

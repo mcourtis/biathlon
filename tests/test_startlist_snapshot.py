@@ -1160,7 +1160,7 @@ def test_render_startlist_analysis_groups_race_milestones_by_athlete(
     race_start = out.index("Race milestones")
     win_start = out.index("Win milestones")
     race_block = out[race_start:win_start]
-    current_start = race_block.index("Current Event")
+    current_start = race_block.index("World Cup")
     career_start = race_block.index("## Career")
     current_block = race_block[current_start:career_start]
     career_block = race_block[career_start:]
@@ -1216,7 +1216,7 @@ def test_render_startlist_analysis_groups_win_milestones_by_athlete(
     win_start = out.index("Win milestones")
     next_start = out.index("Previous podiums", win_start)
     win_block = out[win_start:next_start]
-    current_start = win_block.index("Current Event")
+    current_start = win_block.index("World Cup")
     career_start = win_block.index("## Career")
     current_block = win_block[current_start:career_start]
     career_block = win_block[career_start:]
@@ -1268,7 +1268,7 @@ def test_render_startlist_analysis_owg_win_current_event_starts_at_two(
     win_start = out.index("Win milestones")
     next_start = out.index("Previous podiums", win_start)
     win_block = out[win_start:next_start]
-    assert "### Current Event" in win_block
+    assert "### Olympic Games" in win_block
     assert "Milestone\tEvent\tType\tAthlete\tAge\tNat" in win_block
     assert "CurrentWins" not in win_block
     assert "2nd\tOlympic Games\tRace\tAlpha\t25\tNOR" in win_block
