@@ -4699,7 +4699,7 @@ def _format_postevent_inline_delta_cell(
     colorizer = None
     if delta_text.startswith("+"):
         magnitude_text = delta_text[1:]
-        colorizer = Color.green
+        colorizer = Color.red if magnitude_text == "0" else Color.green
     elif delta_text.startswith("-"):
         magnitude_text = delta_text[1:]
         colorizer = Color.red
@@ -4760,7 +4760,7 @@ def _make_postevent_delta_scale_formatter(
         colorizer = None
         if delta_text.startswith("+"):
             magnitude_text = delta_text[1:]
-            colorizer = Color.green
+            colorizer = Color.red if magnitude_text == "0" else Color.green
         elif delta_text.startswith("-"):
             magnitude_text = delta_text[1:]
             colorizer = Color.red
@@ -4786,7 +4786,7 @@ def _points_delta_text(previous_points: float | None, current_points: float) -> 
         return f"+{_format_score_value(current_points)}"
     delta = current_points - previous_points
     if abs(delta) < 1e-9:
-        return "="
+        return "+0"
     text = _format_score_value(delta)
     if delta > 0:
         return f"+{text}"
@@ -4956,7 +4956,7 @@ def _build_postevent_athlete_delta_rows(
         previous = before_map.get(key)
 
         rank_delta_text = "new"
-        points_delta_text = _points_delta_text(None, current_points)
+        points_delta_text = "new"
         changed = True
         if previous is not None:
             previous_rank, previous_points = previous
@@ -5003,7 +5003,7 @@ def _build_postevent_u23_delta_rows(
         previous = before_map.get(key)
 
         rank_delta_text = "new"
-        points_delta_text = _points_delta_text(None, current_points)
+        points_delta_text = "new"
         changed = True
         if previous is not None:
             prev_u23_rank, _prev_wc_rank, previous_points = previous
@@ -5048,7 +5048,7 @@ def _build_postevent_country_delta_rows(
         previous = before_map.get(key)
 
         rank_delta_text = "new"
-        points_delta_text = _points_delta_text(None, current_points)
+        points_delta_text = "new"
         changed = True
         if previous is not None:
             previous_rank, previous_points = previous
@@ -5611,27 +5611,52 @@ def _render_postevent_relay_standings(
         limit=10,
     )
 
-    specs: list[tuple[str, list[dict], list[dict]]] = [
-        ("Women Relay", after_relay.get("SW", []), before_relay.get("SW", [])),
-        ("Men Relay", after_relay.get("SM", []), before_relay.get("SM", [])),
-        ("Mixed Relay", after_relay.get("MX", []), before_relay.get("MX", [])),
-        ("All Relay (unofficial)", after_all, before_all),
+    main_specs: list[tuple[str, list[dict], list[dict]]] = [
+        ("Women", after_relay.get("SW", []), before_relay.get("SW", [])),
+        ("Men", after_relay.get("SM", []), before_relay.get("SM", [])),
+        ("Mixed", after_relay.get("MX", []), before_relay.get("MX", [])),
     ]
-    if not any(rows for _title, rows, _before in specs):
+    if not any(rows for _label, rows, _before in main_specs) and not after_all:
         print("none")
         print()
         return
 
-    print()
-    for title, after_rows, before_rows in specs:
+    def _build_country_table_lines(
+        after_rows: list[dict], before_rows: list[dict]
+    ) -> list[str]:
+        delta_rows, _ = _build_postevent_country_delta_rows(
+            after_rows, before_rows, limit=10
+        )
+        if not delta_rows:
+            return []
+        delta_rows = _align_postevent_country_merged_delta_cells(delta_rows)
+        points_fmt = _make_postevent_delta_scale_formatter(delta_rows, 2)
+        buf = _TtyPreservingBuffer(sys.stdout)
+        with contextlib.redirect_stdout(buf):
+            render_table(
+                ["Rank", "Team", "Points"],
+                delta_rows,
+                output_format=get_output_format(args),
+                alignments=["right", "left", "right"],
+                cell_formatters=[
+                    _format_postevent_rank_inline_delta_cell,
+                    None,
+                    points_fmt,
+                ],
+            )
+        return buf.getvalue().rstrip("\n").split("\n")
+
+    def _render_stacked(
+        title: str, after_rows: list[dict], before_rows: list[dict]
+    ) -> None:
         print(_preevent_heading(3, title, args))
-        delta_rows, _row_styles = _build_postevent_country_delta_rows(
+        delta_rows, _ = _build_postevent_country_delta_rows(
             after_rows, before_rows, limit=10
         )
         if not delta_rows:
             print("none")
             print()
-            continue
+            return
         if pretty:
             delta_rows = _align_postevent_country_merged_delta_cells(delta_rows)
         points_fmt = _make_postevent_delta_scale_formatter(delta_rows, 2)
@@ -5647,6 +5672,33 @@ def _render_postevent_relay_standings(
             ],
         )
         print()
+
+    print()
+    if pretty and any(rows for _label, rows, _before in main_specs):
+        table_sep = "  │  "
+        tables_out = [
+            lines if (lines := _build_country_table_lines(rows, before)) else ["none"]
+            for _label, rows, before in main_specs
+        ]
+        widths = [
+            max((_display_width(ln) for ln in lines), default=0) for lines in tables_out
+        ]
+        header = table_sep.join(
+            Color.dim(label.upper().center(w))
+            for (label, _, _), w in zip(main_specs, widths)
+        )
+        print(header)
+        merged = tables_out[0]
+        for next_lines in tables_out[1:]:
+            merged = _merge_tables_side_by_side(merged, next_lines, sep=table_sep)
+        print("\n".join(merged))
+        print()
+    else:
+        for label, after_rows, before_rows in main_specs:
+            _render_stacked(label + " Relay", after_rows, before_rows)
+
+    if after_all:
+        _render_stacked("All Relay (unofficial)", after_all, before_all)
 
 
 def _render_postevent_nations_standings(
@@ -5669,26 +5721,52 @@ def _render_postevent_nations_standings(
         one_decimal=True,
     )
 
-    specs: list[tuple[str, list[dict], list[dict]]] = [
+    all_specs: list[tuple[str, list[dict], list[dict]]] = [
         ("Women", after_nations.get("SW", []), before_nations.get("SW", [])),
         ("Men", after_nations.get("SM", []), before_nations.get("SM", [])),
-        ("Combined (unofficial)", after_all, before_all),
+        ("Combined", after_all, before_all),
     ]
-    if not any(rows for _title, rows, _before in specs):
+    if not any(rows for _title, rows, _before in all_specs):
         print("none")
         print()
         return
 
-    print()
-    for title, after_rows, before_rows in specs:
+    def _build_country_table_lines(
+        after_rows: list[dict], before_rows: list[dict]
+    ) -> list[str]:
+        delta_rows, _ = _build_postevent_country_delta_rows(
+            after_rows, before_rows, limit=10
+        )
+        if not delta_rows:
+            return []
+        delta_rows = _align_postevent_country_merged_delta_cells(delta_rows)
+        points_fmt = _make_postevent_delta_scale_formatter(delta_rows, 2)
+        buf = _TtyPreservingBuffer(sys.stdout)
+        with contextlib.redirect_stdout(buf):
+            render_table(
+                ["Rank", "Team", "Points"],
+                delta_rows,
+                output_format=get_output_format(args),
+                alignments=["right", "left", "right"],
+                cell_formatters=[
+                    _format_postevent_rank_inline_delta_cell,
+                    None,
+                    points_fmt,
+                ],
+            )
+        return buf.getvalue().rstrip("\n").split("\n")
+
+    def _render_stacked(
+        title: str, after_rows: list[dict], before_rows: list[dict]
+    ) -> None:
         print(_preevent_heading(3, title, args))
-        delta_rows, _row_styles = _build_postevent_country_delta_rows(
+        delta_rows, _ = _build_postevent_country_delta_rows(
             after_rows, before_rows, limit=10
         )
         if not delta_rows:
             print("none")
             print()
-            continue
+            return
         if pretty:
             delta_rows = _align_postevent_country_merged_delta_cells(delta_rows)
         points_fmt = _make_postevent_delta_scale_formatter(delta_rows, 2)
@@ -5704,6 +5782,30 @@ def _render_postevent_nations_standings(
             ],
         )
         print()
+
+    print()
+    if pretty:
+        table_sep = "  │  "
+        tables_out = [
+            lines if (lines := _build_country_table_lines(rows, before)) else ["none"]
+            for _label, rows, before in all_specs
+        ]
+        widths = [
+            max((_display_width(ln) for ln in lines), default=0) for lines in tables_out
+        ]
+        header = table_sep.join(
+            Color.dim(label.upper().center(w))
+            for (label, _, _), w in zip(all_specs, widths)
+        )
+        print(header)
+        merged = tables_out[0]
+        for next_lines in tables_out[1:]:
+            merged = _merge_tables_side_by_side(merged, next_lines, sep=table_sep)
+        print("\n".join(merged))
+        print()
+    else:
+        for title, after_rows, before_rows in all_specs:
+            _render_stacked(title, after_rows, before_rows)
 
 
 def _render_postevent_decorated_delta_split_tables(
