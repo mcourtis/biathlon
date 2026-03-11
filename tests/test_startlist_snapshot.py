@@ -1132,6 +1132,50 @@ def test_render_startlist_analysis_skips_win_milestone_one(monkeypatch, capsys):
     assert "Win milestones: none" in out
 
 
+def test_render_startlist_analysis_hides_milestones_for_provisional_startlist(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(startlist, "_get_wc_rows", lambda *_a, **_k: [])
+    monkeypatch.setattr(startlist, "_get_cup_ids_for_race", lambda *_a, **_k: ("", ""))
+    monkeypatch.setattr(startlist, "_fetch_nations_cup_standings", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        startlist, "_get_previous_individual_podiums", lambda *_a, **_k: []
+    )
+
+    ctx = {
+        "payload": {
+            "IsStartList": True,
+            "Competition": {"StatusText": "Prov. Start List"},
+            "Results": [],
+        },
+        "race_id": "RACE1",
+        "entries": [{"ibu_id": "A1", "name": "Alpha", "age": "25", "nat": "NOR"}],
+        "race_disc": "SP",
+        "cat_id": "SW",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_WC,
+        "startlist_ids": {"A1"},
+        "age_cache": {"A1": "25"},
+        "prefetched_results": {
+            "A1": {"Results": [{"Level": "WC", "Comp": "SP", "Rank": "2", "SO": "2"}]}
+        },
+        "team_entries": [],
+        "is_mixed": False,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+    }
+    args = argparse.Namespace(format="tsv", leader_markers=False)
+
+    startlist.render_startlist_analysis(ctx, args)
+    out = capsys.readouterr().out
+
+    assert "Race milestones" not in out
+    assert "Win milestones" not in out
+    assert "Previous Sprint podiums: none" in out
+
+
 def test_render_startlist_analysis_suppresses_duplicate_event_relay_milestone_one(
     monkeypatch, capsys
 ):

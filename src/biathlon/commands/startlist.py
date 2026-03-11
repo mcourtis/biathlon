@@ -610,6 +610,17 @@ def _is_true(value: Any) -> bool:
     return False
 
 
+def _is_provisional_startlist_payload(payload: dict) -> bool:
+    """Return True when a startlist payload is explicitly marked provisional."""
+    if not _is_true(payload.get("IsStartList")):
+        return False
+    comp = payload.get("Competition") or {}
+    status = (
+        str(comp.get("StatusText") or payload.get("StatusText") or "").strip().lower()
+    )
+    return status.startswith("prov") or "provisional" in status
+
+
 def _leader_marker_suffix(
     ibu_id: str,
     general_leader_id: str,
@@ -5703,6 +5714,9 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
     discipline_code = _matrix_discipline_code(race_disc, cat_id)
     output_format = get_output_format(args)
     is_mixed = ctx.get("is_mixed", False)
+    is_provisional_startlist = bool(
+        ctx.get("is_provisional_startlist", _is_provisional_startlist_payload(payload))
+    )
     startlist_countries = _collect_startlist_countries(ctx)
     startlist_athletes = _get_startlist_family_names(payload)
     mark_leaders = bool(getattr(args, "leader_markers", False)) and is_pretty_output(
@@ -5710,6 +5724,11 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
     )
 
     def enabled(section_id: str) -> bool:
+        if is_provisional_startlist and section_id in {
+            SECTION_RACE_MILESTONES,
+            SECTION_WIN_MILESTONES,
+        }:
+            return False
         return _section_enabled(section_id, category_code, discipline_code)
 
     # Standings context (athlete cups)
