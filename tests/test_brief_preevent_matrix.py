@@ -1554,6 +1554,71 @@ def test_render_decorated_tables_respects_per_gender_limit(capsys):
     assert "Man B" in out
 
 
+def test_render_decorated_tables_add_blank_lines_between_headers_and_sections(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        brief, "render_table", lambda headers, rows, **kwargs: print("TABLE")
+    )
+
+    rows = [
+        [
+            "1",
+            "Woman A",
+            "SWE",
+            "F",
+            "3",
+            "0",
+            "0",
+            "3",
+            "8",
+            "3",
+            "0",
+            "0",
+            "3",
+            "8",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+        ],
+        [
+            "2",
+            "Man A",
+            "NOR",
+            "M",
+            "3",
+            "0",
+            "0",
+            "3",
+            "8",
+            "3",
+            "0",
+            "0",
+            "3",
+            "8",
+            "0",
+            "0",
+            "0",
+            "0",
+            "0",
+        ],
+    ]
+
+    brief._render_decorated_athletes_split_tables(
+        "Most Decorated Athletes at Kontiolahti",
+        rows,
+        ["", ""],
+        argparse.Namespace(format="tsv"),
+    )
+
+    out = capsys.readouterr().out
+    assert out.startswith(
+        "## Most Decorated Athletes at Kontiolahti\n\n### Women\n\nTABLE\n\n\n### Men\n\nTABLE\n\n\n"
+    )
+
+
 def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
     monkeypatch.setattr(brief, "get_current_season_id", lambda: "2526")
     monkeypatch.setattr(
@@ -1759,7 +1824,12 @@ def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
     out = capsys.readouterr().out
     assert "# Event Brief - Ruhpolding" in out
     assert "## Event Facts" in out
+    assert out.startswith("\n# Event Brief - Ruhpolding\n\n## Event Facts\n\n")
     assert "## Event Facts\n\nCountry\tWC Editions\tWCH Editions\tOWG Editions" in out
+    assert (
+        "## Event Facts\n\nCountry\tWC Editions\tWCH Editions\tOWG Editions\nGermany\t2\t0\t1\n\n\n## Event Agenda\n\n"
+        in out
+    )
     assert "Germany\t2\t0\t1" in out
     assert "## Last 10 Editions at Ruhpolding" in out
     assert "## Previous Winners at Ruhpolding" in out
@@ -1788,7 +1858,7 @@ def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
     assert "Mixed Relay\t2026-01-03\tSWEDEN\t2026-01-03\tSWEDEN" in out
     assert "Edition\tType\tGold\tSilver\tBronze\tGold\tSilver\tBronze" in out
     assert (
-        "### Sprint\nEdition\tType\tGold\tSilver\tBronze\tGold\tSilver\tBronze" in out
+        "### Sprint\n\nEdition\tType\tGold\tSilver\tBronze\tGold\tSilver\tBronze" in out
     )
     assert "2025-12-30\tWC\tW. One (NOR)\t-\t-\tM. One (FRA)\t-\t-" in out
     assert "2026-02-01\tWCH" not in out

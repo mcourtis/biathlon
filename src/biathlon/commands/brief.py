@@ -633,6 +633,11 @@ def _preevent_heading(level: int, text: str, args: argparse.Namespace) -> str:
     return _format_section_title(f"{marks} {str(text).strip()}", args)
 
 
+def _print_preevent_heading(level: int, text: str, args: argparse.Namespace) -> None:
+    print(_preevent_heading(level, text, args))
+    print()
+
+
 def _print_blank_lines(count: int = 1) -> None:
     for _ in range(max(0, int(count))):
         print()
@@ -2061,8 +2066,7 @@ def _render_preevent_previous_winners_table(
     highlight_keys: set[str] | None = None,
     recent_keys: set[str] | None = None,
 ) -> None:
-    print(_preevent_heading(2, f"Previous Winners at {venue_name}", args))
-    print()
+    _print_preevent_heading(2, f"Previous Winners at {venue_name}", args)
     winner_rows, winner_row_separators = _build_previous_venue_winner_rows(
         races,
         venue_events,
@@ -2072,7 +2076,7 @@ def _render_preevent_previous_winners_table(
     )
     if not winner_rows:
         print("none")
-        print()
+        _print_blank_lines(2)
         return
     winner_formatter = _winner_name_cell_formatter(
         highlight_name_keys=highlight_keys,
@@ -2088,7 +2092,7 @@ def _render_preevent_previous_winners_table(
         group_headers=[(1, 3, "Women"), (3, 5, "Men")],
         cell_formatters=[None, None, winner_formatter, None, winner_formatter],
     )
-    print()
+    _print_blank_lines(2)
 
 
 def _render_preevent_previous_podium_tables(
@@ -2101,8 +2105,7 @@ def _render_preevent_previous_podium_tables(
     edition_limit: int = 5,
     highlight_keys: set[str] | None = None,
 ) -> None:
-    print(_preevent_heading(2, f"Previous Podiums at {venue_name}", args))
-    print()
+    _print_preevent_heading(2, f"Previous Podiums at {venue_name}", args)
     disciplines, rows_by_discipline = _build_previous_venue_podium_rows(
         races,
         venue_events,
@@ -2112,7 +2115,7 @@ def _render_preevent_previous_podium_tables(
     )
     if not disciplines:
         print("none")
-        print()
+        _print_blank_lines(2)
         return
 
     output_format = get_output_format(args)
@@ -2132,14 +2135,13 @@ def _render_preevent_previous_podium_tables(
         "Bronze",
     ]
     for disc, label in disciplines:
-        print(_preevent_heading(3, label, args))
+        _print_preevent_heading(3, label, args)
         discipline_rows = rows_by_discipline.get(disc, [])
         if not discipline_rows:
             print(f"This will be the first {label.lower()} in {venue_name} history.")
-            print()
+            _print_blank_lines(2)
             continue
         if disc in RELAY_DISCIPLINES:
-            print()
             split_headers = [
                 "Edition",
                 "Type",
@@ -2185,11 +2187,10 @@ def _render_preevent_previous_podium_tables(
                 ("Women", women_rows),
                 ("Men", men_rows),
             ):
-                print(_preevent_heading(4, gender_label, args))
-                print()
+                _print_preevent_heading(4, gender_label, args)
                 if not gender_rows:
                     print("none")
-                    print()
+                    _print_blank_lines(2)
                     continue
                 render_table(
                     split_headers,
@@ -2210,7 +2211,7 @@ def _render_preevent_previous_podium_tables(
                         _medal_or_lineup_formatter("Bronze"),
                     ],
                 )
-                print()
+                _print_blank_lines(2)
             continue
         render_table(
             headers,
@@ -2246,7 +2247,7 @@ def _render_preevent_previous_podium_tables(
                 podium_name_formatter,
             ],
         )
-        print()
+        _print_blank_lines(2)
 
 
 def _parse_leg_value(value: object) -> int | None:
@@ -3026,14 +3027,13 @@ def _render_decorated_athletes_split_tables(
     args: argparse.Namespace,
     per_gender_limit: int | None = None,
 ) -> None:
-    print(_preevent_heading(2, title, args))
+    _print_preevent_heading(2, title, args)
     if not rows:
         print("none")
-        print()
+        _print_blank_lines(2)
         return
 
     rows_by_gender, styles_by_gender = _split_decorated_rows_by_gender(rows, row_styles)
-    print()
     headers = [
         "#",
         "Athlete",
@@ -3055,7 +3055,7 @@ def _render_decorated_athletes_split_tables(
         "Races",
     ]
     for gender_label, gender_code in (("Women", "F"), ("Men", "M")):
-        print(_preevent_heading(3, gender_label, args))
+        _print_preevent_heading(3, gender_label, args)
         gender_rows = rows_by_gender.get(gender_code, [])
         gender_styles = styles_by_gender.get(gender_code, [])
         if isinstance(per_gender_limit, int) and per_gender_limit > 0:
@@ -3063,7 +3063,7 @@ def _render_decorated_athletes_split_tables(
             gender_styles = gender_styles[:per_gender_limit]
         if not gender_rows:
             print("none")
-            print()
+            _print_blank_lines(2)
             continue
         # Split tables use local rank numbering per gender.
         renumbered_rows = [
@@ -3077,7 +3077,7 @@ def _render_decorated_athletes_split_tables(
             group_headers=[(3, 8, "All"), (8, 13, "Individual"), (13, 18, "Team")],
             row_styles=gender_styles,
         )
-        print()
+        _print_blank_lines(2)
 
 
 def _compute_preevent_snapshot_standings(
@@ -3334,10 +3334,10 @@ def _render_ranked_table(
     args: argparse.Namespace,
     name_header: str,
 ) -> None:
-    print(_preevent_heading(3, title, args))
+    _print_preevent_heading(3, title, args)
     if not rows:
         print("none")
-        print()
+        _print_blank_lines(2)
         return
 
     table_rows = []
@@ -3355,7 +3355,7 @@ def _render_ranked_table(
         alignments=["right", "left", "left", "right"],
         column_separators={3},
     )
-    print()
+    _print_blank_lines(2)
 
 
 def _relay_display_cells(row: dict | None, idx: int) -> list[str]:
@@ -3380,7 +3380,7 @@ def _render_relay_tables(
 
     if not any((women_rows, men_rows, mixed_rows, all_rows)):
         print("none")
-        print()
+        _print_blank_lines(2)
         return
 
     if not is_pretty_output(args):
@@ -3390,10 +3390,10 @@ def _render_relay_tables(
             ("Mixed Relay", mixed_rows),
             ("All Relay (unofficial)", all_rows),
         ):
-            print(_preevent_heading(3, title, args))
+            _print_preevent_heading(3, title, args)
             if not rows:
                 print("none")
-                print()
+                _print_blank_lines(2)
                 continue
             table_rows = []
             for idx, row in enumerate(rows):
@@ -3410,7 +3410,7 @@ def _render_relay_tables(
                 alignments=["right", "left", "right"],
                 column_separators={2},
             )
-            print()
+            _print_blank_lines(2)
         return
 
     max_rows = max(len(women_rows), len(men_rows), len(mixed_rows), len(all_rows))
@@ -3466,7 +3466,7 @@ def _render_relay_tables(
             (9, 12, "All Relay (unofficial)"),
         ],
     )
-    print()
+    _print_blank_lines(2)
 
 
 def _capitalize_country_name(text: str) -> str:
@@ -3604,7 +3604,7 @@ def _render_nations_tables(
 
     if not any((women_rows, men_rows, all_rows)):
         print("none")
-        print()
+        _print_blank_lines(2)
         return
 
     if not is_pretty_output(args):
@@ -3659,7 +3659,7 @@ def _render_nations_tables(
             (6, 9, "Combined (unofficial)"),
         ],
     )
-    print()
+    _print_blank_lines(2)
 
 
 def _build_snapshot_athlete_standings_lines(
@@ -3940,8 +3940,7 @@ def _render_snapshot_athlete_standings_table(
     reference_date: datetime.date | None = None,
     u23_cutoff_year: int | None = None,
 ) -> None:
-    print(_preevent_heading(3, title, args))
-    print()
+    _print_preevent_heading(3, title, args)
     main_lines, u23_lines = _build_snapshot_athlete_standings_lines(
         total_rows,
         discipline_rows,
@@ -3951,17 +3950,18 @@ def _render_snapshot_athlete_standings_table(
     )
     if not main_lines:
         print("none")
-        print()
+        _print_blank_lines(2)
         return
 
     print("\n".join(main_lines))
-    print()
 
     if u23_lines:
-        print(_preevent_heading(4, "U23", args))
         print()
+        _print_preevent_heading(4, "U23", args)
         print("\n".join(u23_lines))
-        print()
+        _print_blank_lines(2)
+        return
+    _print_blank_lines(2)
 
 
 def _render_snapshot_athlete_standings_tables(
@@ -3995,7 +3995,7 @@ def _render_snapshot_athlete_standings_tables(
 
     if not any(main_lines for _title, main_lines, _u23_lines in rendered):
         print("none")
-        print()
+        _print_blank_lines(2)
         return
 
     left_title, left_main, left_u23 = rendered[0]
@@ -4006,8 +4006,7 @@ def _render_snapshot_athlete_standings_tables(
 
     _print_side_by_side_table_pair(left_title, left_main, right_title, right_main)
     if left_u23 or right_u23:
-        print(_preevent_heading(3, "U23", args))
-        print()
+        _print_preevent_heading(3, "U23", args)
         _print_side_by_side_table_pair(left_title, left_u23, right_title, right_u23)
 
 
@@ -4019,12 +4018,9 @@ def _render_preevent_agenda(
     event_id: str,
     level: int = 1,
 ) -> None:
-    print(
-        _preevent_heading(
-            2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_EVENT_AGENDA], args
-        )
+    _print_preevent_heading(
+        2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_EVENT_AGENDA], args
     )
-    print()
     include_season_race_columns = event_type == EVENT_TYPE_WC
     sequence_by_race_id_disc: dict[tuple[str, str], str] = {}
     sequence_by_race_id_full: dict[tuple[str, str], str] = {}
@@ -4179,21 +4175,17 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
         standings["athlete"] = _fetch_live_athlete_cup_rows(season_id)
 
     print()
-    print(_preevent_heading(1, f"Event Brief - {venue_name}", args))
-    print()
+    _print_preevent_heading(1, f"Event Brief - {venue_name}", args)
     if _preevent_section_enabled(PREEVENT_SECTION_EVENT_FACTS, category_code):
-        print(
-            _preevent_heading(
-                2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_EVENT_FACTS], args
-            )
+        _print_preevent_heading(
+            2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_EVENT_FACTS], args
         )
-        print()
         render_table(
             ["Country", "WC Editions", "WCH Editions", "OWG Editions"],
             [[event_country, str(wc_editions), str(wch_editions), str(owg_editions)]],
             output_format=get_output_format(args),
         )
-        print()
+        _print_blank_lines(2)
 
     if _preevent_section_enabled(PREEVENT_SECTION_EVENT_AGENDA, category_code):
         level_raw = (current_event or {}).get("Level")
@@ -4205,10 +4197,10 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
         _render_preevent_agenda(
             races, args, season_id, event_type, event_id, level=event_level
         )
+        _print_blank_lines(1)
 
     if _preevent_section_enabled(PREEVENT_SECTION_LAST_10_EDITIONS, category_code):
-        print(_preevent_heading(2, f"Last 10 Editions at {venue_name}", args))
-        print()
+        _print_preevent_heading(2, f"Last 10 Editions at {venue_name}", args)
         recent_edition_entries = _select_recent_venue_edition_entries(
             venue_events,
             limit=10,
@@ -4222,7 +4214,7 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
         )
         if not recent_edition_rows:
             print("none")
-            print()
+            _print_blank_lines(2)
         else:
             highlight_event_ids = {event_id}
             recent_edition_display_rows: list[list[str]] = []
@@ -4254,7 +4246,7 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
                 column_separators={2},
                 row_styles=recent_edition_row_styles,
             )
-            print()
+            _print_blank_lines(2)
 
     if show_previous_winners:
         _render_preevent_previous_winners_table(
@@ -4282,10 +4274,8 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
         )
 
     if _preevent_section_enabled(PREEVENT_SECTION_ATHLETE_STANDINGS, category_code):
-        print(
-            _preevent_heading(
-                2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_ATHLETE_STANDINGS], args
-            )
+        _print_preevent_heading(
+            2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_ATHLETE_STANDINGS], args
         )
         athlete_rows = cast(dict[str, dict[str, list[dict]]], standings["athlete"])
         athlete_tables = [
@@ -4294,9 +4284,8 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
         ]
         if not any(rows_by_disc.get("TS") for _title, rows_by_disc in athlete_tables):
             print("none")
-            print()
+            _print_blank_lines(2)
         else:
-            print()
             season_end_yr = _season_end_year(season_id)
             u23_snap_cutoff = (
                 (season_end_yr - 23) if season_end_yr is not None else None
@@ -4309,23 +4298,17 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
             )
 
     if _preevent_section_enabled(PREEVENT_SECTION_RELAY_STANDINGS, category_code):
-        print(
-            _preevent_heading(
-                2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_RELAY_STANDINGS], args
-            )
+        _print_preevent_heading(
+            2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_RELAY_STANDINGS], args
         )
         relay_rows = cast(dict[str, list[dict]], standings["relay"])
-        print()
         _render_relay_tables(relay_rows, args)
 
     if _preevent_section_enabled(PREEVENT_SECTION_NATIONS_CUP, category_code):
-        print(
-            _preevent_heading(
-                2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_NATIONS_CUP], args
-            )
+        _print_preevent_heading(
+            2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_NATIONS_CUP], args
         )
         nations_rows = cast(dict[str, list[dict]], standings["nations"])
-        print()
         _render_nations_tables(nations_rows, args)
 
     if show_decorated_venue or show_decorated_event_type or show_decorated_major_events:
@@ -5662,7 +5645,7 @@ def _print_side_by_side_table_pair(
             _merge_tables_side_by_side(left_lines_out, right_lines_out, sep=table_sep)
         )
     )
-    print()
+    _print_blank_lines(2)
 
 
 def _render_postevent_athlete_standings(
