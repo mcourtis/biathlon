@@ -706,7 +706,9 @@ def test_fetch_relay_wc_standings_women_relay(monkeypatch):
 
 
 def test_fetch_relay_wc_standings_mixed_relay(monkeypatch):
-    monkeypatch.setattr(startlist, "_find_mixed_relay_cup", lambda *_a, **_k: "MX_CUP")
+    monkeypatch.setattr(
+        startlist, "_find_mixed_relay_cups", lambda *_a, **_k: [("MR", "MX_CUP")]
+    )
     monkeypatch.setattr(
         startlist,
         "_fetch_standings",
@@ -719,6 +721,28 @@ def test_fetch_relay_wc_standings_mixed_relay(monkeypatch):
 
     assert label == "Mixed Relay"
     assert rows == [{"Rank": "1", "Name": "NORWAY"}]
+
+
+def test_fetch_relay_wc_standings_single_mixed_relay_falls_back_to_mixed(monkeypatch):
+    monkeypatch.setattr(
+        startlist,
+        "_find_mixed_relay_cups",
+        lambda *_a, **_k: [("SR", "MX_SR"), ("MR", "MX_MR")],
+    )
+    monkeypatch.setattr(
+        startlist,
+        "_fetch_standings",
+        lambda cup_id, limit=10: (
+            []
+            if cup_id == "MX_SR"
+            else [{"Rank": "1", "Name": "FRANCE", "Nat": "FRA", "Score": "160"}]
+        ),
+    )
+
+    label, rows = startlist._fetch_relay_wc_standings("2526", "MX", "SR")
+
+    assert label == "Mixed Relay"
+    assert rows == [{"Rank": "1", "Name": "FRANCE", "Nat": "FRA", "Score": "160"}]
 
 
 def test_render_wc_section1_skips_relays(capsys):

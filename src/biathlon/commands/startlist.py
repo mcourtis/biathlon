@@ -1927,21 +1927,47 @@ def _get_cup_ids_for_race(
     return total_cup_id, discipline_cup_id
 
 
-def _find_mixed_relay_cup(season_id: str, discipline: str) -> str | None:
-    """Find cup ID for mixed relay standings (SR or MR with MX category)."""
+def _find_mixed_relay_cups(season_id: str, discipline: str) -> list[tuple[str, str]]:
+    """Return mixed-relay cup ids in lookup priority order for the race discipline."""
+    disc_id = str(discipline or "").upper()
+    preferred_disciplines: list[str] = []
+    if disc_id in {"MR", "SR", "RL"}:
+        preferred_disciplines.append(disc_id)
+    preferred_disciplines.extend(
+        candidate
+        for candidate in ("MR", "SR", "RL")
+        if candidate not in preferred_disciplines
+    )
+
     try:
         cups = get_cups(season_id)
-        for cup in cups:
-            # Look for MX category with SR or MR discipline at Level 1
-            if (
-                cup.get("CatId") == "MX"
-                and cup.get("Level") == 1
-                and cup.get("DisciplineId") in {"SR", "MR", discipline}
-            ):
-                return str(cup.get("CupId"))
     except BiathlonError:
-        pass
-    return None
+        return []
+
+    cup_ids_by_discipline: dict[str, str] = {}
+    for cup in cups:
+        if cup.get("CatId") != "MX" or cup.get("Level") != 1:
+            continue
+        cup_disc = str(cup.get("DisciplineId") or "").upper()
+        if cup_disc not in {"MR", "SR", "RL"}:
+            continue
+        cup_id = str(cup.get("CupId") or "").strip()
+        if cup_id and cup_disc not in cup_ids_by_discipline:
+            cup_ids_by_discipline[cup_disc] = cup_id
+
+    return [
+        (candidate, cup_ids_by_discipline[candidate])
+        for candidate in preferred_disciplines
+        if candidate in cup_ids_by_discipline
+    ]
+
+
+def _find_mixed_relay_cup(season_id: str, discipline: str) -> str | None:
+    """Find the highest-priority mixed-relay cup id for the race discipline."""
+    mixed_cups = _find_mixed_relay_cups(season_id, discipline)
+    if not mixed_cups:
+        return None
+    return mixed_cups[0][1]
 
 
 def _relay_wc_standings_label(category: str, discipline: str) -> str:
@@ -1972,7 +1998,10 @@ def _fetch_relay_wc_standings(
 
     cup_id: str | None = None
     if _is_mixed_relay(disc_id, cat_id):
-        cup_id = _find_mixed_relay_cup(season_id, disc_id)
+        for cup_disc, mixed_cup_id in _find_mixed_relay_cups(season_id, disc_id):
+            rows = _fetch_standings(mixed_cup_id, limit=limit)
+            if rows:
+                return _relay_wc_standings_label(cat_id, cup_disc), rows
     elif cat_id in CAT_TO_GENDER:
         _, relay_cup_id = _get_cup_ids_for_race(season_id, cat_id, disc_id)
         cup_id = relay_cup_id
