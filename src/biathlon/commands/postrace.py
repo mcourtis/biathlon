@@ -7,7 +7,7 @@ import datetime
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable
+from typing import Any, Callable, TypedDict
 
 from ..api import (
     BiathlonError,
@@ -118,6 +118,24 @@ RELAY_MILESTONE_ROWS_RANK_4_6 = ["Relay Flower", "Flower"]
 
 
 MEDAL_RANK_MAP = {1: "gold", 2: "silver", 3: "bronze"}
+
+
+class _StandingsEntryBase(TypedDict):
+    rank: int
+    ibu_id: str
+    name: str
+    nat: str
+    age: str
+    race_points: int
+    total_points: Any
+    change: str
+    participated: bool
+    raw_rnkdiff: int | None
+
+
+class _StandingsEntry(_StandingsEntryBase, total=False):
+    u23_rank: int
+    u23_change: str
 
 
 COUNTRY_CODE_TO_NAME = {
@@ -979,7 +997,7 @@ def _build_standings_rows(
     age_display_by_id: dict[str, str] | None = None,
     u23_mode: bool = False,
 ) -> tuple[list[list[str]], list[str]]:
-    entries = []
+    entries: list[_StandingsEntry] = []
     for row in rows:
         rank_val, change = _extract_rank_and_change(row)
         if rank_val is None:
