@@ -745,6 +745,30 @@ def test_fetch_relay_wc_standings_single_mixed_relay_falls_back_to_mixed(monkeyp
     assert rows == [{"Rank": "1", "Name": "FRANCE", "Nat": "FRA", "Score": "160"}]
 
 
+def test_fetch_relay_wc_standings_single_mixed_relay_keeps_mixed_label_with_sr_cup(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        startlist,
+        "_find_mixed_relay_cups",
+        lambda *_a, **_k: [("SR", "MX_SR"), ("MR", "MX_MR")],
+    )
+    monkeypatch.setattr(
+        startlist,
+        "_fetch_standings",
+        lambda cup_id, limit=10: (
+            [{"Rank": "1", "Name": "NORWAY", "Nat": "NOR", "Score": "180"}]
+            if cup_id == "MX_SR"
+            else []
+        ),
+    )
+
+    label, rows = startlist._fetch_relay_wc_standings("2526", "MX", "SR")
+
+    assert label == "Mixed Relay"
+    assert rows == [{"Rank": "1", "Name": "NORWAY", "Nat": "NOR", "Score": "180"}]
+
+
 def test_render_wc_section1_skips_relays(capsys):
     ctx = {
         "race_disc": "RL",
@@ -1034,7 +1058,7 @@ def test_render_startlist_analysis_relay_sections(monkeypatch, capsys):
 
     assert "Participating Teams" in out
     assert "1\tNorway\tNOR\tA One\tB Two\t-\t-" in out
-    assert "Relay WC Standings (Top 10)" in out
+    assert "WC Men Relay Points" in out
     assert "1\tNORWAY\tNOR\t220" in out
 
 
@@ -1088,7 +1112,7 @@ def test_render_startlist_analysis_mixed_nations_cup_uses_level_3_gender_heading
     nations_idx = lines.index("## Nations Cup Standings (Top 10)")
     women_idx = lines.index("### Women")
     men_idx = lines.index("### Men")
-    relay_idx = lines.index("## Relay WC Standings (Top 10): none")
+    relay_idx = lines.index("## WC Mixed Relay Points: none")
 
     assert "## Previous Single Mixed Relay podiums: none" in lines
     assert nations_idx < women_idx < men_idx < relay_idx
@@ -1102,6 +1126,46 @@ def test_render_startlist_analysis_mixed_nations_cup_uses_level_3_gender_heading
     assert lines[men_idx + 1] == ""
     assert lines[relay_idx - 2] == ""
     assert lines[relay_idx - 1] == ""
+
+
+def test_render_startlist_analysis_mixed_relay_uses_mixed_relay_podium_title(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        startlist, "_fetch_relay_wc_standings", lambda *_a, **_k: ("Mixed Relay", [])
+    )
+    monkeypatch.setattr(startlist, "_fetch_nations_cup_standings", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        startlist, "_compute_country_what_if_scenarios", lambda *_a, **_k: []
+    )
+    monkeypatch.setattr(startlist, "_get_previous_relay_podiums", lambda *_a, **_k: [])
+
+    ctx = {
+        "payload": {"Results": []},
+        "race_id": "BT2526SWRLCP08MXRL",
+        "entries": [],
+        "race_disc": "RL",
+        "cat_id": "MX",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_WC,
+        "startlist_ids": set(),
+        "age_cache": {},
+        "prefetched_results": {},
+        "team_entries": [],
+        "is_mixed": True,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+    }
+    args = argparse.Namespace(format="markdown", leader_markers=False)
+
+    startlist.render_startlist_analysis(ctx, args)
+    out = capsys.readouterr().out
+
+    assert "## WC Mixed Relay Points: none" in out
+    assert "## Previous Mixed Relay podiums: none" in out
+    assert "## Previous Relay podiums: none" not in out
 
 
 def test_render_startlist_analysis_skips_win_milestone_one(monkeypatch, capsys):

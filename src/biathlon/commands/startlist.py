@@ -567,7 +567,14 @@ def _discipline_display_label(discipline: str, category: str) -> str:
             return "Men Relay"
         if cat == "SW":
             return "Women Relay"
+        if cat == "MX":
+            return "Mixed Relay"
     return DISCIPLINE_NAMES.get(disc, disc)
+
+
+def _relay_wc_points_title(label: str) -> str:
+    relay_label = str(label or "").strip() or "Relay"
+    return f"WC {relay_label} Points"
 
 
 def _print_spaced_section_title(
@@ -1991,9 +1998,7 @@ def _relay_wc_standings_label(category: str, discipline: str) -> str:
     cat_id = str(category or "").upper()
     disc_id = str(discipline or "").upper()
     if _is_mixed_relay(disc_id, cat_id):
-        if disc_id == "RL":
-            return "Mixed Relay"
-        return DISCIPLINE_NAMES.get(disc_id, "Mixed Relay")
+        return "Mixed Relay"
     cat_name = CATEGORY_DISPLAY_NAMES.get(cat_id, cat_id)
     disc_name = DISCIPLINE_NAMES.get(disc_id, disc_id)
     return f"{cat_name} {disc_name}".strip() or "Relay"
@@ -5933,13 +5938,14 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
     # Section 6 Relay WC standings
     relay_rows: list[dict] = []
     if enabled(SECTION_RELAY_WC):
-        _relay_label, relay_rows = _fetch_relay_wc_standings(
+        relay_label, relay_rows = _fetch_relay_wc_standings(
             season_id, cat_id, race_disc, limit=10
         )
+        relay_section_title = _relay_wc_points_title(relay_label)
         if not relay_rows:
-            _print_section_none(SECTION_RELAY_WC, args)
+            _print_spaced_section_title(f"{relay_section_title}: none", args)
         else:
-            _print_spaced_section_title(_section_title(SECTION_RELAY_WC), args)
+            _print_spaced_section_title(relay_section_title, args)
             table_rows = []
             for idx, row in enumerate(relay_rows[:10]):
                 rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(
