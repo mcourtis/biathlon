@@ -654,7 +654,7 @@ def test_standings_athlete_mode_u23_flag_filters_rows(monkeypatch):
     rc = standings.handle_standings(_args(u23=True, format=""))
 
     assert rc == 0
-    assert captured["headers"][:5] == ["Position", "Name", "Country", "Age", "Total"]
+    assert captured["headers"][:5] == ["Rank", "Name", "Nat", "Age", "Total"]
     assert len(captured["rows"]) == 2
     assert captured["rows"][0][1].startswith("A One")
     assert captured["rows"][1][1].startswith("B Two")

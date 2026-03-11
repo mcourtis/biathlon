@@ -49,9 +49,9 @@ DISCIPLINE_LABELS = {
 }
 
 ATHLETE_STANDINGS_HEADERS = [
-    "Position",
+    "Rank",
     "Name",
-    "Country",
+    "Nat",
     "Age",
     "Total",
     "Sprint",

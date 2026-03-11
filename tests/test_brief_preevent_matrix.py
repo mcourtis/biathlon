@@ -45,6 +45,15 @@ def test_preevent_matrix_sample_cells_match_spec():
     assert brief._preevent_section_enabled(
         brief.PREEVENT_SECTION_DECORATED_EVENT_TYPE, "OWG"
     )
+    assert brief._preevent_section_enabled(
+        brief.PREEVENT_SECTION_DECORATED_MAJOR_EVENTS, "WC"
+    )
+    assert brief._preevent_section_enabled(
+        brief.PREEVENT_SECTION_DECORATED_MAJOR_EVENTS, "WCH"
+    )
+    assert brief._preevent_section_enabled(
+        brief.PREEVENT_SECTION_DECORATED_MAJOR_EVENTS, "OWG"
+    )
 
 
 def test_brief_preevent_rejects_removed_flags():
@@ -1789,9 +1798,13 @@ def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
     assert "## Nations Cup Standings" in out
     assert "## Most Decorated Athletes at Ruhpolding" in out
     assert "## Most Decorated Athletes at World Cup" in out
+    assert "## Most Decorated Athletes at major events (WC+WCH+OWG)" in out
     assert out.rfind("## Most Decorated Athletes at World Cup") > out.rfind(
         "## Nations Cup Standings"
     )
+    assert out.rfind(
+        "## Most Decorated Athletes at major events (WC+WCH+OWG)"
+    ) > out.rfind("## Most Decorated Athletes at World Cup")
     assert (
         "#\tAthlete\tNat\tGold\tSilver\tBronze\tTotal\tRaces\tGold\tSilver\tBronze\tTotal\tRaces\tGold\tSilver\tBronze\tTotal\tRaces"
         in out
@@ -1800,10 +1813,7 @@ def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
     assert "### Men" in out
     assert "Date\tDay\tTime\tCategory\tDiscipline\tSeason Race\tSeason Race Full" in out
     assert out.count("\t2/2\t2/2\n") >= 2
-    assert (
-        "Position\tName\tCountry\tAge\tTotal\tSprint\tPursuit\tIndividual\tMassStart"
-        in out
-    )
+    assert "Rank\tName\tNat\tAge\tTotal\tSprint\tPursuit\tIndividual\tMassStart" in out
     assert "Overall - Women" not in out
     assert "Overall - Men" not in out
     assert "Mixed Relay" in out
@@ -1874,7 +1884,11 @@ def test_handle_brief_preevent_excludes_current_event_from_decorated_sections(
         brief, "_collect_current_season_participant_keys", lambda *a, **k: set()
     )
 
-    captured: dict[str, set[str] | None] = {"venue": None, "event_type": None}
+    captured: dict[str, set[str] | None] = {
+        "venue": None,
+        "event_type": None,
+        "major": None,
+    }
 
     def fake_build_venue(*args, **kwargs):
         captured["venue"] = kwargs.get("exclude_event_ids")
@@ -1884,9 +1898,16 @@ def test_handle_brief_preevent_excludes_current_event_from_decorated_sections(
         captured["event_type"] = kwargs.get("exclude_event_ids")
         return [], []
 
+    def fake_build_major(*args, **kwargs):
+        captured["major"] = kwargs.get("exclude_event_ids")
+        return [], []
+
     monkeypatch.setattr(brief, "_build_venue_decorated_athlete_rows", fake_build_venue)
     monkeypatch.setattr(
         brief, "_build_event_type_decorated_athlete_rows", fake_build_event_type
+    )
+    monkeypatch.setattr(
+        brief, "_build_major_events_decorated_athlete_rows", fake_build_major
     )
     monkeypatch.setattr(
         brief,
@@ -1899,6 +1920,7 @@ def test_handle_brief_preevent_excludes_current_event_from_decorated_sections(
     assert rc == 0
     assert captured["venue"] == {"EVT1"}
     assert captured["event_type"] == {"EVT1"}
+    assert captured["major"] == {"EVT1"}
 
 
 def test_sequence_maps_use_event_level_and_include_mixed_in_team_full(monkeypatch):
@@ -2065,6 +2087,39 @@ def test_snapshot_athlete_standings_pretty_adds_leader_markers(monkeypatch, caps
     assert "\x1b[38;2;218;165;32m60" in out
 
 
+def test_snapshot_athlete_standings_pretty_adds_u23_marker(monkeypatch, capsys):
+    monkeypatch.setattr(brief.Color, "enabled", classmethod(lambda cls: True))
+    monkeypatch.setattr(
+        brief.Color, "dark_blue", lambda text, bold=False: f"<U23>{text}</U23>"
+    )
+    monkeypatch.setattr(brief, "_prefetch_bios", lambda ibu_ids: {})
+
+    total_rows = [
+        {"Rank": 1, "IBUId": "A", "Name": "Leader", "Nat": "NOR", "Score": 130},
+        {
+            "Rank": 2,
+            "IBUId": "B",
+            "Name": "Youngster",
+            "Nat": "FRA",
+            "Score": 120,
+            "Groups": "U23",
+        },
+    ]
+    discipline_rows = {"SP": [], "PU": [], "IN": [], "MS": []}
+
+    brief._render_snapshot_athlete_standings_table(
+        "Women",
+        total_rows,
+        discipline_rows,
+        argparse.Namespace(format=""),
+        reference_date=datetime.date(2026, 1, 10),
+        u23_cutoff_year=2003,
+    )
+
+    out = capsys.readouterr().out
+    assert "<U23>●</U23>" in out
+
+
 def test_snapshot_athlete_standings_fills_age(monkeypatch, capsys):
     monkeypatch.setattr(
         brief,
@@ -2187,6 +2242,105 @@ def test_snapshot_athlete_standings_keeps_non_top10_discipline_points(
     out = capsys.readouterr().out
     assert "Braisaz Bouchet" in out
     assert f"\t{expected_sp}\t{expected_pu}\t" in out
+
+
+def test_snapshot_athlete_standings_u23_uses_incremental_rank_and_wc_column(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(brief, "_prefetch_bios", lambda ibu_ids: {})
+
+    total_rows = [
+        {"Rank": 1, "IBUId": "A", "Name": "Leader", "Nat": "NOR", "Score": 130},
+        {
+            "Rank": 3,
+            "IBUId": "B",
+            "Name": "Bravo",
+            "Nat": "FRA",
+            "Score": 90,
+            "Groups": "U23",
+        },
+        {
+            "Rank": 5,
+            "IBUId": "C",
+            "Name": "Charlie",
+            "Nat": "GER",
+            "Score": 70,
+            "Groups": "U23",
+        },
+    ]
+    discipline_rows = {"SP": [], "PU": [], "IN": [], "MS": []}
+
+    brief._render_snapshot_athlete_standings_table(
+        "Women",
+        total_rows,
+        discipline_rows,
+        argparse.Namespace(format="tsv"),
+    )
+
+    out = capsys.readouterr().out
+    assert "#### U23" in out
+    assert "Rank\tWC\tAthlete\tNat\tPoints" in out
+    assert "1\t3\tBravo\tFRA\t90" in out
+    assert "2\t5\tCharlie\tGER\t70" in out
+
+
+def test_snapshot_athlete_standings_pretty_renders_women_and_men_side_by_side(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(brief, "_prefetch_bios", lambda ibu_ids: {})
+
+    def fake_render_table(headers, rows, **kwargs):
+        print(" | ".join(headers))
+        for row in rows:
+            print(" | ".join(str(cell) for cell in row))
+
+    monkeypatch.setattr(brief, "render_table", fake_render_table)
+
+    women_rows = {
+        "TS": [
+            {
+                "Rank": 1,
+                "IBUId": "WA",
+                "Name": "Women Leader",
+                "Nat": "NOR",
+                "Score": 100,
+                "Groups": "U23",
+            }
+        ],
+        "SP": [],
+        "PU": [],
+        "IN": [],
+        "MS": [],
+    }
+    men_rows = {
+        "TS": [
+            {
+                "Rank": 2,
+                "IBUId": "MB",
+                "Name": "Men Leader",
+                "Nat": "FRA",
+                "Score": 90,
+                "Groups": "U23",
+            }
+        ],
+        "SP": [],
+        "PU": [],
+        "IN": [],
+        "MS": [],
+    }
+
+    brief._render_snapshot_athlete_standings_tables(
+        [("Women", women_rows), ("Men", men_rows)],
+        argparse.Namespace(format="pretty"),
+        u23_cutoff_year=2003,
+    )
+
+    out = capsys.readouterr().out
+    assert "WOMEN" in out
+    assert "MEN" in out
+    assert "│" in out
+    assert "### U23" in out
+    assert "Rank | WC | Athlete | Nat | Points" in out
 
 
 def test_snapshot_standings_excludes_non_counting_major_events(monkeypatch):
