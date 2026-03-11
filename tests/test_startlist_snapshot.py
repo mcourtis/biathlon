@@ -1086,6 +1086,7 @@ def test_render_startlist_analysis_mixed_nations_cup_uses_level_3_gender_heading
     lines = out.splitlines()
 
     assert "## Nations Cup Standings (Top 10)" in lines
+    assert "## Previous Single Mixed Relay podiums: none" in lines
     assert "### Women" in lines
     assert "### Men" in lines
     assert "## Women" not in lines
@@ -1381,7 +1382,7 @@ def test_render_startlist_analysis_groups_win_milestones_by_athlete(
     out = capsys.readouterr().out
 
     win_start = out.index("Win milestones")
-    next_start = out.index("Previous podiums", win_start)
+    next_start = out.index("Previous Sprint podiums", win_start)
     win_block = out[win_start:next_start]
     current_start = win_block.index("World Cup")
     career_start = win_block.index("## Career")
@@ -1433,7 +1434,7 @@ def test_render_startlist_analysis_owg_win_current_event_starts_at_two(
     out = capsys.readouterr().out
 
     win_start = out.index("Win milestones")
-    next_start = out.index("Previous podiums", win_start)
+    next_start = out.index("Previous Men Relay podiums", win_start)
     win_block = out[win_start:next_start]
     assert "### Olympic Games" in win_block
     assert "Milestone\tEvent\tType\tAthlete\tAge\tNat" in win_block

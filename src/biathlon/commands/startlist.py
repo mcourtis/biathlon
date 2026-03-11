@@ -6429,6 +6429,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
         )
     )
     discipline_title = _discipline_display_label(race_disc, cat_id)
+    previous_podiums_title = f"Previous {discipline_title} podiums"
     athlete_owg_disc_title = (
         f"Athlete Olympic Games Medal Table - {discipline_title} (all editions)"
     )
@@ -6450,6 +6451,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                 use_year=False,
                 highlight_names=startlist_athletes,
                 last_name_only=True,
+                title_override=previous_podiums_title,
             )
         else:
             _render_individual_podium_table(
@@ -6459,6 +6461,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                 use_year=False,
                 highlight_names=startlist_athletes,
                 last_name_only=True,
+                title_override=previous_podiums_title,
             )
 
     owg_rows: list[dict] = []
