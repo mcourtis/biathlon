@@ -51,6 +51,52 @@ def test_handle_brief_startlist_completed_race_uses_snapshot(monkeypatch):
     assert args.leader_markers is True
 
 
+def test_handle_brief_startlist_prints_blank_line_after_main_header(
+    monkeypatch, capsys
+):
+    payload = {
+        "IsStartList": True,
+        "Competition": {
+            "DisciplineId": "SR",
+            "catId": "MX",
+            "StartTime": "2026-03-15T11:35:00Z",
+        },
+        "SportEvt": {"SeasonId": "2526"},
+        "Results": [{"IsTeam": True, "Bib": "1", "Nat": "NOR"}],
+    }
+    monkeypatch.setattr(brief, "get_race_results", lambda race_id: payload)
+    monkeypatch.setattr(
+        brief,
+        "format_race_header",
+        lambda payload, race_id: "# Single Mixed Relay - Otepaa",
+    )
+    monkeypatch.setattr(
+        brief,
+        "_prepare_startlist_context",
+        lambda *_a, **_k: {"entries": []},
+    )
+    monkeypatch.setattr(brief, "_build_startlist_entries", lambda payload: [])
+    monkeypatch.setattr(
+        brief,
+        "_build_team_entries",
+        lambda payload: [{"bib": "1", "name": "Norway", "nat": "NOR"}],
+    )
+    monkeypatch.setattr(brief, "render_startlist_analysis", lambda ctx, args: None)
+
+    args = argparse.Namespace(race="RACE1", major=False, format="markdown")
+    rc = brief.handle_brief_startlist(args)
+
+    lines = capsys.readouterr().out.splitlines()
+
+    assert rc == 0
+    assert lines[:4] == [
+        "",
+        "# Single Mixed Relay - Otepaa",
+        "",
+        "Startlist entries: 0",
+    ]
+
+
 def test_handle_brief_startlist_completed_race_requires_start_datetime(
     monkeypatch, capsys
 ):

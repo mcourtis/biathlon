@@ -1085,12 +1085,23 @@ def test_render_startlist_analysis_mixed_nations_cup_uses_level_3_gender_heading
     out = capsys.readouterr().out
     lines = out.splitlines()
 
-    assert "## Nations Cup Standings (Top 10)" in lines
+    nations_idx = lines.index("## Nations Cup Standings (Top 10)")
+    women_idx = lines.index("### Women")
+    men_idx = lines.index("### Men")
+    relay_idx = lines.index("## Relay WC Standings (Top 10): none")
+
     assert "## Previous Single Mixed Relay podiums: none" in lines
-    assert "### Women" in lines
-    assert "### Men" in lines
+    assert nations_idx < women_idx < men_idx < relay_idx
     assert "## Women" not in lines
     assert "## Men" not in lines
+    assert lines[nations_idx + 1] == ""
+    assert women_idx == nations_idx + 2
+    assert lines[women_idx + 1] == ""
+    assert lines[men_idx - 2] == ""
+    assert lines[men_idx - 1] == ""
+    assert lines[men_idx + 1] == ""
+    assert lines[relay_idx - 2] == ""
+    assert lines[relay_idx - 1] == ""
 
 
 def test_render_startlist_analysis_skips_win_milestone_one(monkeypatch, capsys):

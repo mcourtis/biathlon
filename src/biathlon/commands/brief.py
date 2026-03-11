@@ -4696,6 +4696,7 @@ def handle_brief_startlist(args: argparse.Namespace) -> int:
 
     print()
     print(_format_section_title(format_race_header(payload, race_id), args))
+    print()
     print(f"Startlist entries: {len(ctx['entries'])}")
     print()
 

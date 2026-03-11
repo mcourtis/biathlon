@@ -588,6 +588,11 @@ def _print_spaced_section_title(
         print()
 
 
+def _print_blank_lines(count: int = 1) -> None:
+    for _ in range(max(0, int(count))):
+        print()
+
+
 def _print_section_none(section_id: str, args: argparse.Namespace) -> None:
     _print_spaced_section_title(f"{_section_title(section_id)}: none", args)
 
@@ -5892,7 +5897,13 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                     continue
                 if len(target_cats) > 1:
                     label = CATEGORY_DISPLAY_NAMES.get(target_cat, target_cat)
-                    print(_format_section_title(f"### {label}", args))
+                    _print_spaced_section_title(
+                        label,
+                        args,
+                        level=3,
+                        blank_before=0,
+                        blank_after=1,
+                    )
                 table_rows = []
                 for row_idx, standing_row in enumerate(nation_rows):
                     rank = str(
@@ -5914,9 +5925,10 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                     output_format=output_format,
                     column_separators={2},
                 )
-                if len(target_cats) > 1 and idx < len(target_cats) - 1:
-                    print()
-            print()
+                if len(target_cats) > 1:
+                    _print_blank_lines(2 if idx < len(target_cats) - 1 else 1)
+            if len(target_cats) <= 1:
+                print()
 
     # Section 6 Relay WC standings
     relay_rows: list[dict] = []
