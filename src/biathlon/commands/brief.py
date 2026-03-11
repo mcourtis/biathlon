@@ -2131,7 +2131,7 @@ def _render_preevent_previous_podium_tables(
         print(_preevent_heading(3, label, args))
         discipline_rows = rows_by_discipline.get(disc, [])
         if not discipline_rows:
-            print("none")
+            print(f"This will be the first {label.lower()} in {venue_name} history.")
             print()
             continue
         if disc in RELAY_DISCIPLINES:

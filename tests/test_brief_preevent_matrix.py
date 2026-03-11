@@ -862,6 +862,37 @@ def test_render_previous_podium_tables_splits_relay_gender_tables(monkeypatch, c
     assert table_calls[2]["kwargs"]["group_headers"] == [(2, 5, "Women"), (5, 8, "Men")]
 
 
+def test_render_previous_podium_tables_marks_first_venue_discipline(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        brief,
+        "_build_previous_venue_podium_rows",
+        lambda *a, **k: ([("PU", "Pursuit")], {"PU": []}),
+    )
+
+    def fail_render_table(*args, **kwargs):
+        raise AssertionError(
+            "render_table should not be called for empty discipline history"
+        )
+
+    monkeypatch.setattr(brief, "render_table", fail_render_table)
+
+    brief._render_preevent_previous_podium_tables(
+        "Otepaa",
+        races=[],
+        venue_events=[],
+        reference_date=None,
+        args=argparse.Namespace(format="tsv"),
+        edition_limit=5,
+    )
+
+    out = capsys.readouterr().out
+    assert "### Pursuit" in out
+    assert "This will be the first pursuit in Otepaa history." in out
+    assert "\nnone\n" not in out
+
+
 def test_build_venue_decorated_athlete_rows_uses_medal_columns(monkeypatch):
     monkeypatch.setattr(brief, "get_current_season_id", lambda: "2526")
     monkeypatch.setattr(brief, "get_seasons", lambda: [{"SeasonId": "2526"}])
