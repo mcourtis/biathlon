@@ -1,10 +1,14 @@
 """Tests for shared helpers in commands._common."""
 
+import builtins
+
 from biathlon.commands._common import (
     _max_workers,
     _ordinal,
     _parse_rank,
+    _race_display_name,
     _row_ibu_id,
+    _select_race_interactive,
     counts_toward_wc_standings,
     is_mixed_relay,
     is_relay_discipline,
@@ -153,6 +157,70 @@ class TestIsMixedRelay:
 
     def test_sprint(self):
         assert is_mixed_relay("SP", "SW") is False
+
+
+class TestRaceDisplayName:
+    def test_womens_sprint(self):
+        assert _race_display_name("SP", "SW") == "Women's Sprint"
+
+    def test_mixed_relay(self):
+        assert _race_display_name("MR", "MX") == "Mixed Relay"
+
+    def test_single_mixed_relay(self):
+        assert _race_display_name("SR", "MX") == "Single Mixed Relay"
+
+
+class TestSelectRaceInteractive:
+    def test_mixed_race_labels_do_not_duplicate_mixed(self, monkeypatch, capsys):
+        class _DummyStdin:
+            @staticmethod
+            def isatty():
+                return True
+
+        candidates = [
+            (
+                "BT2526SWRLCP08MXSR",
+                {
+                    "Competition": {
+                        "catId": "MX",
+                        "DisciplineId": "SR",
+                        "StartTime": "2026-03-15T11:35:00Z",
+                        "StatusText": "Prov. Start List",
+                    },
+                    "SportEvt": {
+                        "Description": "BMW IBU World Cup Biathlon",
+                        "Organizer": "Otepaa",
+                    },
+                },
+            ),
+            (
+                "BT2526SWRLCP08MXRL",
+                {
+                    "Competition": {
+                        "catId": "MX",
+                        "DisciplineId": "MR",
+                        "StartTime": "2026-03-15T13:40:00Z",
+                        "StatusText": "Prov. Start List",
+                    },
+                    "SportEvt": {
+                        "Description": "BMW IBU World Cup Biathlon",
+                        "Organizer": "Otepaa",
+                    },
+                },
+            ),
+        ]
+
+        monkeypatch.setattr("biathlon.commands._common.sys.stdin", _DummyStdin())
+        monkeypatch.setattr(builtins, "input", lambda _prompt: "1")
+
+        race_id, _payload = _select_race_interactive(candidates)
+
+        err = capsys.readouterr().err
+        assert race_id == "BT2526SWRLCP08MXSR"
+        assert "[World Cup] Single Mixed Relay - Otepaa" in err
+        assert "[World Cup] Mixed Relay - Otepaa" in err
+        assert "Mixed Single Mixed Relay" not in err
+        assert "Mixed Mixed Relay" not in err
 
 
 class TestCountsTowardWcStandings:
