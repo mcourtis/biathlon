@@ -37,6 +37,7 @@ from ..utils import parse_start_datetime, parse_time_seconds
 from ._common import (
     DISCIPLINE_LEADER_MARKER,
     GENERAL_LEADER_MARKER,
+    _has_completed_relay_results,
     _format_leader_markers,
     _format_section_title,
     _max_workers,
@@ -247,6 +248,70 @@ WC_POINTS_MS = {
     29: 4,
     30: 2,
 }
+
+# Nations Cup individual points table.
+# ranks 1-10: fixed, 11-80: -1/rank, 81-110: -2/rank, 111+: 1.
+NC_POINTS = {
+    1: 160.0,
+    2: 154.0,
+    3: 148.0,
+    4: 143.0,
+    5: 140.0,
+    6: 138.0,
+    7: 136.0,
+    8: 134.0,
+    9: 132.0,
+    10: 131.0,
+}
+for _rank in range(11, 81):
+    NC_POINTS[_rank] = float(141 - _rank)
+for _rank in range(81, 111):
+    NC_POINTS[_rank] = float(221 - 2 * _rank)
+
+NC_RELAY_POINTS = {
+    1: 420.0,
+    2: 390.0,
+    3: 360.0,
+    4: 330.0,
+    5: 310.0,
+    6: 290.0,
+    7: 270.0,
+    8: 250.0,
+    9: 230.0,
+    10: 220.0,
+    11: 210.0,
+    12: 200.0,
+    13: 190.0,
+    14: 180.0,
+    15: 170.0,
+    16: 160.0,
+    17: 150.0,
+    18: 140.0,
+    19: 130.0,
+    20: 120.0,
+    21: 110.0,
+    22: 100.0,
+    23: 90.0,
+    24: 80.0,
+    25: 70.0,
+    26: 60.0,
+    27: 50.0,
+    28: 40.0,
+    29: 30.0,
+    30: 20.0,
+}
+
+NC_INDIVIDUAL_DISCIPLINES = frozenset({"IN", "SI", "SP"})
+
+
+def _get_nc_points(
+    position: int, *, is_relay: bool = False, mixed: bool = False
+) -> float:
+    if is_relay:
+        points = NC_RELAY_POINTS.get(position, 0.0)
+        return points / 2.0 if mixed else points
+    return NC_POINTS.get(position, 1.0 if position >= 110 else 0.0)
+
 
 # Mapping from discipline code to cup suffix for discipline-specific cups
 DISCIPLINE_CUP_SUFFIX = {
@@ -2000,18 +2065,19 @@ def _compute_nations_pre_race_standings(
                 payload = get_race_results(race_id)
             except BiathlonError:
                 continue
-            if not _has_completed_results(payload):
-                continue
             race_cat = str(race.get("catId") or race.get("CatId") or "").upper()
             race_disc = str(race.get("DisciplineId") or "").upper()
-            if not counts_toward_wc_standings(
-                event_type,
-                season_id,
-                discipline=race_disc,
-                category=race_cat,
-            ):
-                continue
             is_team_race = race_disc in RELAY_DISCIPLINES
+            if is_team_race:
+                if not _has_completed_relay_results(payload):
+                    continue
+            elif not _has_completed_results(payload):
+                continue
+            if event_type not in {EVENT_TYPE_WC, EVENT_TYPE_WCH}:
+                continue
+            if not (is_team_race or race_disc in NC_INDIVIDUAL_DISCIPLINES):
+                continue
+            is_mixed_race = race_cat == "MX"
             for res in payload.get("Results", []) or []:
                 if is_team_race and not res.get("IsTeam"):
                     continue
@@ -2020,7 +2086,11 @@ def _compute_nations_pre_race_standings(
                 rank_val = _parse_rank(res.get("Rank") or res.get("SO"))
                 if rank_val is None:
                     continue
-                points = _get_wc_points(rank_val, mass_start=race_disc == "MS")
+                points = _get_nc_points(
+                    rank_val,
+                    is_relay=is_team_race,
+                    mixed=is_mixed_race,
+                )
                 if points <= 0:
                     continue
                 nat = str(res.get("Nat") or "").upper()
@@ -2028,8 +2098,8 @@ def _compute_nations_pre_race_standings(
                     continue
                 if race_cat == cat:
                     points_by_nat[nat] = points_by_nat.get(nat, 0.0) + points
-                elif race_cat == "MX":
-                    points_by_nat[nat] = points_by_nat.get(nat, 0.0) + points / 2.0
+                elif is_mixed_race:
+                    points_by_nat[nat] = points_by_nat.get(nat, 0.0) + points
 
     sorted_rows = sorted(points_by_nat.items(), key=lambda item: (-item[1], item[0]))
     out: list[dict] = []
@@ -4836,9 +4906,15 @@ def _parse_points_number(value: Any) -> float:
     if not text:
         return 0.0
     try:
-        return float(text)
+        return float(text.replace(",", ""))
     except ValueError:
         return 0.0
+
+
+def _format_points_number(value: float) -> str:
+    if float(value).is_integer():
+        return str(int(value))
+    return f"{value:.1f}"
 
 
 def _collect_startlist_countries(ctx: dict) -> set[str]:
@@ -4854,9 +4930,110 @@ def _collect_startlist_countries(ctx: dict) -> set[str]:
     return countries
 
 
+def _build_country_units(
+    countries: set[str],
+    *,
+    entries: list[dict] | None = None,
+    single_result: bool,
+) -> dict[str, int]:
+    if single_result:
+        return {str(nat).upper(): 1 for nat in countries if nat}
+
+    units: dict[str, int] = {}
+    for entry in entries or []:
+        nat = str(entry.get("nat") or "").upper()
+        if nat:
+            units[nat] = units.get(nat, 0) + 1
+    return units
+
+
+def _sum_position_points(
+    unit_count: int,
+    total_units: int,
+    points_for_position: Callable[[int], float],
+    *,
+    best_case: bool,
+) -> float:
+    if unit_count <= 0 or total_units <= 0:
+        return 0.0
+    if best_case:
+        positions = range(1, unit_count + 1)
+    else:
+        start_pos = max(1, total_units - unit_count + 1)
+        positions = range(start_pos, total_units + 1)
+    return sum(float(points_for_position(pos)) for pos in positions)
+
+
+def _single_result_overtake_finish_position(
+    gap: float,
+    chaser_win_points: float,
+    total_units: int,
+    points_for_position: Callable[[int], float],
+) -> int | None:
+    required_max = chaser_win_points - gap
+    if required_max <= 0:
+        return None
+    for pos in range(1, total_units + 1):
+        if float(points_for_position(pos)) < required_max:
+            return pos
+    return None
+
+
+def _nations_cup_watch_model(
+    ctx: dict,
+    racing_countries: set[str],
+) -> tuple[dict[str, int], int, Callable[[int], float]] | None:
+    race_disc = str(ctx.get("race_disc") or "").upper()
+    if race_disc in RELAY_DISCIPLINES:
+        units_by_country = _build_country_units(
+            racing_countries,
+            single_result=True,
+        )
+        total_units = len(units_by_country)
+        is_mixed = (
+            race_disc in {"MR", "SR"} or str(ctx.get("cat_id") or "").upper() == "MX"
+        )
+        return (
+            units_by_country,
+            total_units,
+            lambda pos: _get_nc_points(pos, is_relay=True, mixed=is_mixed),
+        )
+
+    if race_disc not in NC_INDIVIDUAL_DISCIPLINES:
+        return None
+
+    units_by_country = _build_country_units(
+        racing_countries,
+        entries=list(ctx.get("entries") or []),
+        single_result=False,
+    )
+    total_units = sum(units_by_country.values())
+    return units_by_country, total_units, lambda pos: _get_nc_points(pos)
+
+
 def _compute_country_what_if_scenarios(
-    standings: list[dict], racing_countries: set[str], label: str
+    standings: list[dict],
+    racing_countries: set[str],
+    label: str,
+    *,
+    points_for_position: Callable[[int], float] | None = None,
+    units_by_country: dict[str, int] | None = None,
+    total_units: int | None = None,
 ) -> list[str]:
+    points_fn = points_for_position or (lambda pos: float(_get_wc_points(pos)))
+    normalized_countries = {
+        str(country).upper() for country in racing_countries if str(country).strip()
+    }
+    normalized_units = {
+        str(country).upper(): max(0, int(units))
+        for country, units in (units_by_country or {}).items()
+        if str(country).strip()
+    }
+    if not normalized_units:
+        normalized_units = {country: 1 for country in normalized_countries}
+    if total_units is None:
+        total_units = sum(normalized_units.values())
+
     ranked: list[dict[str, Any]] = []
     for idx, row in enumerate(standings):
         rank_raw = row.get("Rank") or row.get("Standing") or idx + 1
@@ -4880,8 +5057,10 @@ def _compute_country_what_if_scenarios(
         return []
     leader = ranked[0]
     chaser = ranked[1]
-    leader_racing = leader["nat"] in racing_countries
-    chaser_racing = chaser["nat"] in racing_countries
+    leader_units = normalized_units.get(leader["nat"], 0)
+    chaser_units = normalized_units.get(chaser["nat"], 0)
+    leader_racing = leader["nat"] in normalized_countries or leader_units > 0
+    chaser_racing = chaser["nat"] in normalized_countries or chaser_units > 0
     out: list[str] = []
     prefix = f"[{label}] "
     if not leader_racing or not chaser_racing:
@@ -4895,24 +5074,47 @@ def _compute_country_what_if_scenarios(
         return out
 
     gap = leader["points"] - chaser["points"]
-    if gap < 90:
-        max_leader_points = 90 - gap - 1
-        finish_pos: int | None = None
-        for pos in range(1, 41):
-            if _get_wc_points(pos) <= max_leader_points:
-                finish_pos = pos
-                break
-        if finish_pos is None:
-            out.append(
-                f"{prefix}{chaser['name']} can overtake with a win if {leader['name']} finishes outside top 40"
-            )
-        else:
+    leader_min_points = _sum_position_points(
+        leader_units,
+        total_units,
+        points_fn,
+        best_case=False,
+    )
+    chaser_best_points = _sum_position_points(
+        chaser_units,
+        total_units,
+        points_fn,
+        best_case=True,
+    )
+    best_case_gap = gap + leader_min_points - chaser_best_points
+
+    if leader_units == 1 and chaser_units == 1 and total_units > 0:
+        finish_pos = _single_result_overtake_finish_position(
+            gap,
+            chaser_best_points,
+            total_units,
+            points_fn,
+        )
+        if finish_pos is not None:
             out.append(
                 f"{prefix}{chaser['name']} can overtake with a win if {leader['name']} finishes {_ordinal(finish_pos)} or worse"
             )
+            return out
+
+    if best_case_gap > 0:
+        out.append(
+            f"{prefix}{chaser['name']} trails {leader['name']} by {_format_points_number(gap)} pts "
+            f"(best case still {_format_points_number(best_case_gap)} pts behind)"
+        )
+    elif abs(best_case_gap) < 1e-9:
+        out.append(
+            f"{prefix}{chaser['name']} trails {leader['name']} by {_format_points_number(gap)} pts "
+            f"(best case can only draw level)"
+        )
     else:
         out.append(
-            f"{prefix}{chaser['name']} trails {leader['name']} by {int(gap)} pts (best case still behind)"
+            f"{prefix}{chaser['name']} trails {leader['name']} by {_format_points_number(gap)} pts "
+            f"(best case: can take lead)"
         )
     return out
 
@@ -5698,6 +5900,10 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
     # Section 7 Standings Watch
     if enabled(SECTION_STANDINGS_WATCH):
         scenarios: list[str] = []
+        relay_units_by_country = _build_country_units(
+            startlist_countries,
+            single_result=True,
+        )
         if race_disc in DISCIPLINES and cat_id in {"SW", "SM"}:
             scenarios.extend(
                 _compute_what_if_scenarios(
@@ -5716,16 +5922,27 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                     relay_rows,
                     startlist_countries,
                     "Relay WC",
+                    units_by_country=relay_units_by_country,
+                    total_units=len(relay_units_by_country),
                 )
             )
+        nc_watch_model = _nations_cup_watch_model(ctx, startlist_countries)
         for target_cat, nation_rows in nations_rows_by_cat.items():
             if nation_rows:
                 label = (
                     f"Nations Cup {CATEGORY_DISPLAY_NAMES.get(target_cat, target_cat)}"
                 )
+                if nc_watch_model is None:
+                    continue
+                units_by_country, total_units, points_for_position = nc_watch_model
                 scenarios.extend(
                     _compute_country_what_if_scenarios(
-                        nation_rows, startlist_countries, label
+                        nation_rows,
+                        startlist_countries,
+                        label,
+                        points_for_position=points_for_position,
+                        units_by_country=units_by_country,
+                        total_units=total_units,
                     )
                 )
         if not scenarios:

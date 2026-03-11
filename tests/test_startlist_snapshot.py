@@ -240,7 +240,96 @@ def test_compute_nations_pre_race_standings_excludes_non_counting_major_events(
     )
 
     assert rows[0]["Nat"] == "NOR"
-    assert rows[0]["Score"] == "90"
+    assert rows[0]["Score"] == "320"
+
+
+def test_compute_country_what_if_scenarios_uses_half_relay_nations_cup_points():
+    racing_countries = {"NOR", "FRA"} | {f"T{i:02d}" for i in range(1, 29)}
+
+    scenarios = startlist._compute_country_what_if_scenarios(
+        [
+            {"Rank": "1", "Name": "Norway", "Nat": "NOR", "Score": "1000"},
+            {"Rank": "2", "Name": "France", "Nat": "FRA", "Score": "813"},
+        ],
+        racing_countries,
+        "Nations Cup Men",
+        points_for_position=lambda pos: startlist._get_nc_points(
+            pos,
+            is_relay=True,
+            mixed=True,
+        ),
+        units_by_country={nat: 1 for nat in racing_countries},
+        total_units=len(racing_countries),
+    )
+
+    assert scenarios == [
+        "[Nations Cup Men] France can overtake with a win if Norway finishes 28th or worse"
+    ]
+
+
+def test_compute_nations_pre_race_standings_counts_relay_results(monkeypatch):
+    monkeypatch.setattr(
+        startlist,
+        "get_events",
+        lambda season_id, level=1: [
+            {"EventId": "E_WC", "Description": "BMW IBU World Cup"},
+        ],
+    )
+    monkeypatch.setattr(
+        startlist,
+        "get_races",
+        lambda event_id: [
+            {
+                "RaceId": "E_WC_RL",
+                "DisciplineId": "RL",
+                "catId": "SW",
+                "StartTime": "2026-01-01T10:00:00Z",
+            }
+        ],
+    )
+    monkeypatch.setattr(
+        startlist,
+        "get_race_results",
+        lambda race_id: {
+            "Results": [
+                {
+                    "IsTeam": True,
+                    "Rank": "1",
+                    "SO": "1",
+                    "Nat": "NOR",
+                }
+            ]
+        },
+    )
+
+    rows = startlist._compute_nations_pre_race_standings(
+        "2526",
+        "TARGET",
+        _dt("2026-01-10T10:00:00Z"),
+        "SW",
+        limit=10,
+    )
+
+    assert rows[0]["Nat"] == "NOR"
+    assert rows[0]["Score"] == "420"
+
+
+def test_compute_country_what_if_scenarios_uses_country_entry_counts_for_individual_nc():
+    scenarios = startlist._compute_country_what_if_scenarios(
+        [
+            {"Rank": "1", "Name": "France", "Nat": "FRA", "Score": "1000"},
+            {"Rank": "2", "Name": "Sweden", "Nat": "SWE", "Score": "930"},
+        ],
+        {"FRA", "SWE", "NOR"},
+        "Nations Cup Women",
+        points_for_position=lambda pos: startlist._get_nc_points(pos),
+        units_by_country={"FRA": 2, "SWE": 2, "NOR": 2},
+        total_units=6,
+    )
+
+    assert scenarios == [
+        "[Nations Cup Women] Sweden trails France by 70 pts (best case still 34 pts behind)"
+    ]
 
 
 def test_fetch_olympic_individual_podium_uses_strict_cutoff(monkeypatch):
