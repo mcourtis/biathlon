@@ -5844,7 +5844,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                     continue
                 if len(target_cats) > 1:
                     label = CATEGORY_DISPLAY_NAMES.get(target_cat, target_cat)
-                    print(_format_section_title(label, args))
+                    print(_format_section_title(f"### {label}", args))
                 table_rows = []
                 for row_idx, standing_row in enumerate(nation_rows):
                     rank = str(
