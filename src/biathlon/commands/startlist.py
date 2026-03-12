@@ -6423,6 +6423,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                 contenders,
                 output_format=output_format,
                 cell_formatters=[None, leader_name_cell, None],
+                column_separators={1},
             )
             print()
 

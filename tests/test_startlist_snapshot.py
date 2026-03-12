@@ -2036,6 +2036,69 @@ def test_render_startlist_analysis_adds_column_separators_to_milestone_tables(
     assert all(kwargs.get("row_separators") is None for kwargs in captured_kwargs)
 
 
+def test_render_startlist_analysis_adds_column_separator_to_pursuit_contenders(
+    monkeypatch,
+):
+    monkeypatch.setattr(startlist, "_get_wc_rows", lambda *_a, **_k: [])
+    monkeypatch.setattr(startlist, "_get_cup_ids_for_race", lambda *_a, **_k: ("", ""))
+    monkeypatch.setattr(startlist, "_fetch_nations_cup_standings", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        startlist, "_get_previous_individual_podiums", lambda *_a, **_k: []
+    )
+    monkeypatch.setattr(startlist, "_compute_what_if_scenarios", lambda *_a, **_k: [])
+
+    captured: dict[str, object] = {}
+
+    def fake_render_table(headers, rows, **kwargs):
+        if headers == ["Delay", "Athlete", "Nat"]:
+            captured["rows"] = rows
+            captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(startlist, "render_table", fake_render_table)
+
+    ctx = {
+        "payload": {
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "StartInfo": "0:11",
+                    "IBUId": "A1",
+                    "Name": "Alpha",
+                    "Nat": "NOR",
+                },
+                {
+                    "IsTeam": False,
+                    "StartInfo": "1:00",
+                    "IBUId": "B1",
+                    "Name": "Bravo",
+                    "Nat": "SWE",
+                },
+            ]
+        },
+        "race_id": "RACE1",
+        "entries": [],
+        "race_disc": "PU",
+        "cat_id": "SW",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_WC,
+        "startlist_ids": set(),
+        "age_cache": {},
+        "prefetched_results": {},
+        "team_entries": [],
+        "is_mixed": False,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+    }
+    args = argparse.Namespace(format="tsv", leader_markers=False)
+
+    startlist.render_startlist_analysis(ctx, args)
+
+    assert captured["rows"] == [["0:11", "Alpha", "NOR"]]
+    assert captured["kwargs"]["column_separators"] == {1}
+
+
 def test_render_startlist_analysis_owg_win_current_event_starts_at_two(
     monkeypatch, capsys
 ):
