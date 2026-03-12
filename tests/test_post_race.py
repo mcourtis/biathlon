@@ -726,6 +726,14 @@ def test_is_u23_standings_row_checks_groups_and_u23_ids():
     assert not postrace._is_u23_standings_row({"IBUId": "B"}, {"A"})
 
 
+def test_results_column_separators_only_group_trailing_points_column():
+    assert postrace._results_column_separators(
+        ["Rank", "Athlete", "Age", "Nat", "Points"]
+    ) == {4}
+    assert postrace._results_column_separators(["Rank", "Team", "Nat", "Points"]) == {3}
+    assert postrace._results_column_separators(["Rank", "Athlete", "Nat"]) is None
+
+
 def test_render_wc_standings_table_pair_places_u23_table_on_right_in_pretty_mode(
     monkeypatch, capsys
 ):

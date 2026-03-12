@@ -1135,6 +1135,12 @@ def _is_u23_standings_row(row: dict, u23_ids: set[str]) -> bool:
     return groups == "U23" or _row_ibu_id(row) in u23_ids
 
 
+def _results_column_separators(headers: list[str]) -> set[int] | None:
+    if headers and headers[-1] == "Points":
+        return {len(headers) - 1}
+    return None
+
+
 def _render_wc_standings_table_pair(
     title: str,
     args: argparse.Namespace,
@@ -2987,6 +2993,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
             results_rows,
             output_format=output_format,
             cell_formatters=cell_fmts,
+            column_separators=_results_column_separators(headers),
         )
         print()
         print()
