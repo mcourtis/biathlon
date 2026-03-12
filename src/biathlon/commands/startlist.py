@@ -5487,6 +5487,33 @@ def _render_individual_podium_table(
     lead_key = "year" if use_year else "date"
     highlight_names = highlight_names or set()
 
+    def _short_podium_name(family: str, full_name: str) -> str:
+        family = str(family or "").strip()
+        full_name = str(full_name or "").strip()
+        if not full_name:
+            return family
+        if not family:
+            return full_name
+        family_cf = family.casefold()
+        full_cf = full_name.casefold()
+        given = ""
+        if full_cf.startswith(family_cf):
+            suffix = full_name[len(family) :].strip()
+            if suffix:
+                given = suffix.split()[0]
+        elif full_cf.endswith(family_cf):
+            prefix = full_name[: len(full_name) - len(family)].strip()
+            if prefix:
+                given = prefix.split()[0]
+        else:
+            parts = full_name.split()
+            if len(parts) > 1:
+                if parts[0].casefold() == family_cf:
+                    given = parts[1]
+                elif parts[-1].casefold() == family_cf:
+                    given = parts[0]
+        return f"{family} {given}".strip() if given else family
+
     def _format_medalist(row: dict, medal_key: str, athletes_key: str) -> str:
         athletes = row.get(athletes_key, []) or []
         if not athletes:
@@ -5497,7 +5524,7 @@ def _render_individual_podium_table(
             athlete.get("full_name") or athlete.get("name") or row.get(medal_key) or ""
         )
         if last_name_only:
-            name = family or full_name.split(" ")[-1]
+            name = _short_podium_name(family, full_name)
         else:
             name = full_name
         nat = str(athlete.get("nat") or "")
@@ -5523,13 +5550,14 @@ def _render_individual_podium_table(
             lead_col,
             "Type",
             "Venue",
-            Color.gold("Gold"),
-            Color.silver("Silver"),
-            Color.bronze("Bronze"),
+            Color.gold("GOLD"),
+            Color.silver("SILVER"),
+            Color.bronze("BRONZE"),
         ],
         table_rows,
         output_format=get_output_format(args),
         column_separators={3},
+        header_alignments={idx: "center" for idx in range(6)},
     )
     print()
 

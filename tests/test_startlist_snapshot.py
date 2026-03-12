@@ -1216,6 +1216,84 @@ def test_render_startlist_analysis_nations_cup_shows_behind_points(monkeypatch, 
     assert "3\tSweden\t5539 (-693)" in out
 
 
+def test_render_individual_podium_table_uses_short_names_and_centered_headers(
+    monkeypatch,
+):
+    captured: dict[str, object] = {}
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured["headers"] = headers
+        captured["rows"] = rows
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(startlist, "render_table", fake_render_table)
+    monkeypatch.setattr(
+        startlist, "_print_spaced_section_title", lambda *_args, **_kwargs: None
+    )
+
+    startlist._render_individual_podium_table(
+        startlist.SECTION_PREVIOUS_PODIUMS,
+        [
+            {
+                "date": "2026-02-14",
+                "race_type": "Olympic Games",
+                "venue": "Antholz-Anterselva",
+                "gold_athletes": [
+                    {
+                        "full_name": "Lou Jeanmonnot",
+                        "name": "JEANMONNOT",
+                        "nat": "FRA",
+                    }
+                ],
+                "silver_athletes": [
+                    {
+                        "full_name": "MICHELON Paula",
+                        "name": "MICHELON",
+                        "nat": "FRA",
+                    }
+                ],
+                "bronze_athletes": [
+                    {
+                        "full_name": "KIRKEEIDE Maren",
+                        "name": "KIRKEEIDE",
+                        "nat": "NOR",
+                    }
+                ],
+            }
+        ],
+        argparse.Namespace(format="pretty", leader_markers=False),
+        last_name_only=True,
+    )
+
+    assert captured["headers"] == [
+        "Date",
+        "Type",
+        "Venue",
+        "GOLD",
+        "SILVER",
+        "BRONZE",
+    ]
+    assert captured["rows"] == [
+        [
+            "2026-02-14",
+            "Olympic Games",
+            "Antholz-Anterselva",
+            "JEANMONNOT Lou (FRA)",
+            "MICHELON Paula (FRA)",
+            "KIRKEEIDE Maren (NOR)",
+        ]
+    ]
+    assert captured["kwargs"]["column_separators"] == {3}
+    assert captured["kwargs"]["header_alignments"] == {
+        0: "center",
+        1: "center",
+        2: "center",
+        3: "center",
+        4: "center",
+        5: "center",
+    }
+
+
 def test_olympic_athlete_tables_keep_global_ranks_for_startlist_athletes(
     monkeypatch, capsys
 ):
