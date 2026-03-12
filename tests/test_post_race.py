@@ -720,6 +720,52 @@ def test_build_standings_rows_includes_age_column():
     assert row_styles == ["", "dim"]
 
 
+def test_is_u23_standings_row_checks_groups_and_u23_ids():
+    assert postrace._is_u23_standings_row({"Groups": "U23"}, set())
+    assert postrace._is_u23_standings_row({"IBUId": "A"}, {"A"})
+    assert not postrace._is_u23_standings_row({"IBUId": "B"}, {"A"})
+
+
+def test_render_wc_standings_table_pair_places_u23_table_on_right_in_pretty_mode(
+    monkeypatch, capsys
+):
+    captured_kwargs: dict[str, dict] = {}
+
+    def fake_render_table(headers, _rows, **kwargs):
+        if headers[0] == "Rank" and headers[1] == "Athlete":
+            captured_kwargs["main"] = kwargs
+            print("LEFT-HEADER")
+            print("LEFT-ROW")
+        else:
+            captured_kwargs["u23"] = kwargs
+            print("RIGHT-HEADER")
+            print("RIGHT-ROW")
+
+    monkeypatch.setattr(postrace, "render_table", fake_render_table)
+
+    postrace._render_wc_standings_table_pair(
+        "## WC standings (Total)",
+        argparse.Namespace(format="pretty"),
+        "pretty",
+        True,
+        [["1", "Alpha", "22", "NOR", "+90", "300", "+1"]],
+        [""],
+        lambda cell, _row_idx: cell,
+        [["1", "12", "Bravo", "21", "SWE", "+45", "150", "+2"]],
+        [""],
+        lambda cell, _row_idx: cell,
+    )
+
+    out = capsys.readouterr().out
+
+    assert "## WC standings (Total)" in out
+    assert "LEFT-HEADER  │  RIGHT-HEADER" in out
+    assert "LEFT-ROW     │  RIGHT-ROW" in out
+    assert "## WC standings (U23)" not in out
+    assert captured_kwargs["main"].get("column_separators") == {4}
+    assert captured_kwargs["u23"].get("column_separators") == {5}
+
+
 def test_make_name_formatter_supports_u23_marker():
     formatter = postrace._make_name_formatter()
     value = f"Alice {postrace.U23_LEADER_MARKER}"

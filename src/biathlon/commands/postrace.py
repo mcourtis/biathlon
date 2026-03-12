@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime
+import io
 import re
 import sys
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -35,6 +37,7 @@ from ..constants import (
 )
 from ..formatting import (
     Color,
+    _display_width,
     is_pretty_output,
     get_output_format,
     render_table,
@@ -740,6 +743,40 @@ def _make_row_style_formatter(row_styles: list[str]) -> Callable[[str, int], str
     return _formatter
 
 
+class _TtyPreservingBuffer(io.StringIO):
+    """StringIO that delegates isatty() to the real stdout."""
+
+    def __init__(self, real_stdout: Any) -> None:
+        super().__init__()
+        self._real_stdout = real_stdout
+
+    def isatty(self) -> bool:
+        return bool(self._real_stdout.isatty())
+
+
+def _capture_rendered_lines(render_fn: Callable[[], None]) -> list[str]:
+    buf = _TtyPreservingBuffer(sys.stdout)
+    with contextlib.redirect_stdout(buf):
+        render_fn()
+    text = buf.getvalue().rstrip("\n")
+    return text.split("\n") if text else []
+
+
+def _merge_tables_side_by_side(
+    left_lines: list[str],
+    right_lines: list[str],
+    sep: str = "  │  ",
+) -> list[str]:
+    left_width = max((_display_width(line) for line in left_lines), default=0)
+    row_count = max(len(left_lines), len(right_lines))
+    merged: list[str] = []
+    for idx in range(row_count):
+        left = left_lines[idx] if idx < len(left_lines) else ""
+        right = right_lines[idx] if idx < len(right_lines) else ""
+        merged.append(left + " " * (left_width - _display_width(left)) + sep + right)
+    return merged
+
+
 def _relay_milestone_types_for_rank(rank: int) -> list[str]:
     if rank == 1:
         return RELAY_MILESTONE_ROWS_RANK_1
@@ -1091,6 +1128,98 @@ def _build_standings_rows(
             )
         row_styles.append("" if entry["participated"] else "dim")
     return rows_out, row_styles
+
+
+def _is_u23_standings_row(row: dict, u23_ids: set[str]) -> bool:
+    groups = str(row.get("Groups") or "").strip().upper()
+    return groups == "U23" or _row_ibu_id(row) in u23_ids
+
+
+def _render_wc_standings_table_pair(
+    title: str,
+    args: argparse.Namespace,
+    output_format: str,
+    pretty: bool,
+    main_rows: list[list[str]],
+    main_row_styles: list[str],
+    main_name_formatter: Callable[[str, int], str],
+    u23_rows: list[list[str]],
+    u23_row_styles: list[str],
+    u23_name_formatter: Callable[[str, int], str],
+) -> None:
+    print(_format_section_title(title, args))
+    print()
+
+    def _render_main() -> None:
+        render_table(
+            [
+                "Rank",
+                "Athlete",
+                "Age",
+                "Nat",
+                "Race Pts",
+                "Total Pts",
+                "Change",
+            ],
+            main_rows,
+            output_format=output_format,
+            cell_formatters=[
+                None,
+                main_name_formatter,
+                None,
+                None,
+                _format_race_points_cell,
+                None,
+                _format_change_cell,
+            ],
+            column_separators={4},
+            row_styles=main_row_styles,
+        )
+
+    def _render_u23() -> None:
+        render_table(
+            [
+                "Rank",
+                "WC Rank",
+                "Athlete",
+                "Age",
+                "Nat",
+                "Race Pts",
+                "Total Pts",
+                "Change",
+            ],
+            u23_rows,
+            output_format=output_format,
+            cell_formatters=[
+                None,
+                None,
+                u23_name_formatter,
+                None,
+                None,
+                _format_race_points_cell,
+                None,
+                _format_change_cell,
+            ],
+            column_separators={5},
+            row_styles=u23_row_styles,
+        )
+
+    if pretty and u23_rows:
+        left_lines = _capture_rendered_lines(_render_main)
+        right_lines = _capture_rendered_lines(_render_u23)
+        print("\n".join(_merge_tables_side_by_side(left_lines, right_lines)))
+        print()
+        print()
+        return
+
+    _render_main()
+    print()
+    if u23_rows:
+        print(_format_section_title("### U23", args))
+        print()
+        _render_u23()
+        print()
+    print()
 
 
 def _race_meta_sort_key(
@@ -2740,12 +2869,32 @@ def handle_post_race(args: argparse.Namespace) -> int:
     best_u23_leader = (
         _find_best_u23_leader(total_rows or disc_rows, u23_ids) if is_wc_race else {}
     )
+    best_u23_total_leader = (
+        _find_best_u23_leader(total_rows, u23_ids) if is_wc_race else {}
+    )
+    best_u23_disc_leader = (
+        _find_best_u23_leader(disc_rows, u23_ids) if is_wc_race else {}
+    )
 
     mark_leaders = pretty
     decorate_any = _make_leader_name_decorator(
         general_leader,
         discipline_leader,
         best_u23_leader,
+        mark_leaders,
+        "any",
+    )
+    decorate_total = _make_leader_name_decorator(
+        general_leader,
+        discipline_leader,
+        best_u23_total_leader,
+        mark_leaders,
+        "any",
+    )
+    decorate_disc = _make_leader_name_decorator(
+        general_leader,
+        discipline_leader,
+        best_u23_disc_leader,
         mark_leaders,
         "any",
     )
@@ -2860,38 +3009,41 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     total_rows,
                     STANDINGS_TOP_N,
                     race_points_by_id,
-                    decorate_any,
+                    decorate_total,
                     participating_ids=participating_ids,
                     age_display_by_id=age_display_by_id,
                 )
+                total_u23_cup_rows = [
+                    row for row in total_rows if _is_u23_standings_row(row, u23_ids)
+                ]
+                total_u23_standings_rows: list[list[str]] = []
+                total_u23_row_styles: list[str] = []
+                if total_u23_cup_rows:
+                    total_u23_standings_rows, total_u23_row_styles = (
+                        _build_standings_rows(
+                            total_u23_cup_rows,
+                            STANDINGS_TOP_N,
+                            race_points_by_id,
+                            decorate_total,
+                            participating_ids=participating_ids,
+                            age_display_by_id=age_display_by_id,
+                            u23_mode=True,
+                        )
+                    )
                 total_name_formatter = _make_name_formatter(total_row_styles)
-                print(_format_section_title("## WC standings (Total)", args))
-                print()
-                render_table(
-                    [
-                        "Rank",
-                        "Athlete",
-                        "Age",
-                        "Nat",
-                        "Race Pts",
-                        "Total Pts",
-                        "Change",
-                    ],
+                total_u23_name_formatter = _make_name_formatter(total_u23_row_styles)
+                _render_wc_standings_table_pair(
+                    "## WC standings (Total)",
+                    args,
+                    output_format,
+                    pretty,
                     total_standings_rows,
-                    output_format=output_format,
-                    cell_formatters=[
-                        None,
-                        total_name_formatter,
-                        None,
-                        None,
-                        _format_race_points_cell,
-                        None,
-                        _format_change_cell,
-                    ],
-                    row_styles=total_row_styles,
+                    total_row_styles,
+                    total_name_formatter,
+                    total_u23_standings_rows,
+                    total_u23_row_styles,
+                    total_u23_name_formatter,
                 )
-                print()
-                print()
             else:
                 print(
                     _format_section_title(
@@ -2908,38 +3060,41 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     disc_rows,
                     STANDINGS_TOP_N,
                     race_points_by_id,
-                    decorate_any,
+                    decorate_disc,
                     participating_ids=participating_ids,
                     age_display_by_id=age_display_by_id,
                 )
+                disc_u23_cup_rows = [
+                    row for row in disc_rows if _is_u23_standings_row(row, u23_ids)
+                ]
+                disc_u23_standings_rows: list[list[str]] = []
+                disc_u23_row_styles: list[str] = []
+                if disc_u23_cup_rows:
+                    disc_u23_standings_rows, disc_u23_row_styles = (
+                        _build_standings_rows(
+                            disc_u23_cup_rows,
+                            STANDINGS_TOP_N,
+                            race_points_by_id,
+                            decorate_disc,
+                            participating_ids=participating_ids,
+                            age_display_by_id=age_display_by_id,
+                            u23_mode=True,
+                        )
+                    )
                 disc_name_formatter = _make_name_formatter(disc_row_styles)
-                print(_format_section_title(f"## WC standings ({disc_label})", args))
-                print()
-                render_table(
-                    [
-                        "Rank",
-                        "Athlete",
-                        "Age",
-                        "Nat",
-                        "Race Pts",
-                        "Total Pts",
-                        "Change",
-                    ],
+                disc_u23_name_formatter = _make_name_formatter(disc_u23_row_styles)
+                _render_wc_standings_table_pair(
+                    f"## WC standings ({disc_label})",
+                    args,
+                    output_format,
+                    pretty,
                     disc_standings_rows,
-                    output_format=output_format,
-                    cell_formatters=[
-                        None,
-                        disc_name_formatter,
-                        None,
-                        None,
-                        _format_race_points_cell,
-                        None,
-                        _format_change_cell,
-                    ],
-                    row_styles=disc_row_styles,
+                    disc_row_styles,
+                    disc_name_formatter,
+                    disc_u23_standings_rows,
+                    disc_u23_row_styles,
+                    disc_u23_name_formatter,
                 )
-                print()
-                print()
             else:
                 print(
                     _format_section_title(
@@ -2949,55 +3104,6 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 )
                 print()
                 print()
-
-            if total_rows and (u23_ids or any(r.get("Groups") for r in total_rows)):
-                u23_cup_rows = [
-                    r
-                    for r in total_rows
-                    if str(r.get("Groups") or "").strip().upper() == "U23"
-                    or _row_ibu_id(r) in u23_ids
-                ]
-                if u23_cup_rows:
-                    sec += 1
-                    u23_standings_rows, u23_row_styles = _build_standings_rows(
-                        u23_cup_rows,
-                        STANDINGS_TOP_N,
-                        race_points_by_id,
-                        decorate_any,
-                        participating_ids=participating_ids,
-                        age_display_by_id=age_display_by_id,
-                        u23_mode=True,
-                    )
-                    u23_name_formatter = _make_name_formatter(u23_row_styles)
-                    print(_format_section_title("## WC standings (U23)", args))
-                    print()
-                    render_table(
-                        [
-                            "Rank",
-                            "WC Rank",
-                            "Athlete",
-                            "Age",
-                            "Nat",
-                            "Race Pts",
-                            "Total Pts",
-                            "Change",
-                        ],
-                        u23_standings_rows,
-                        output_format=output_format,
-                        cell_formatters=[
-                            None,
-                            None,
-                            u23_name_formatter,
-                            None,
-                            None,
-                            _format_race_points_cell,
-                            None,
-                            _format_change_cell,
-                        ],
-                        row_styles=u23_row_styles,
-                    )
-                    print()
-                    print()
         else:
             sec += 1
             print(_format_section_title("## WC standings: no data", args))
