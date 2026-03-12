@@ -1101,9 +1101,17 @@ def _build_standings_rows(
                 else:
                     diff = prev_u23_rank - entry["u23_rank"]  # positive = improved
                     entry["u23_change"] = "=" if diff == 0 else f"{diff:+d}"
+    leader_points = (
+        _parse_points_number(entries[0]["total_points"]) if entries else None
+    )
     rows_out: list[list[str]] = []
     row_styles: list[str] = []
-    for entry in entries:
+    for row_idx, entry in enumerate(entries):
+        total_points_text = _standings_points_text(
+            {"Score": entry["total_points"]},
+            leader_points,
+            row_idx,
+        )
         if u23_mode:
             rows_out.append(
                 [
@@ -1113,7 +1121,7 @@ def _build_standings_rows(
                     str(entry["age"]),
                     str(entry["nat"]),
                     _format_race_points(entry["race_points"]),
-                    _format_points(entry["total_points"]),
+                    total_points_text,
                     str(entry["u23_change"]),
                 ]
             )
@@ -1125,7 +1133,7 @@ def _build_standings_rows(
                     str(entry["age"]),
                     str(entry["nat"]),
                     _format_race_points(entry["race_points"]),
-                    _format_points(entry["total_points"]),
+                    total_points_text,
                     str(entry["change"]),
                 ]
             )
@@ -1185,6 +1193,18 @@ def _render_wc_standings_table_pair(
 ) -> None:
     print(_format_section_title(title, args))
     print()
+    main_total_points_formatter = _standings_points_cell_formatter(
+        set(),
+        leader_rows={0},
+        point_cells=[row[5] for row in main_rows],
+        pretty=pretty,
+    )
+    u23_total_points_formatter = _standings_points_cell_formatter(
+        set(),
+        leader_rows={0},
+        point_cells=[row[6] for row in u23_rows],
+        pretty=pretty,
+    )
 
     def _render_main() -> None:
         render_table(
@@ -1205,7 +1225,7 @@ def _render_wc_standings_table_pair(
                 None,
                 None,
                 _format_race_points_cell,
-                None,
+                main_total_points_formatter,
                 _format_change_cell,
             ],
             column_separators={4},
@@ -1233,7 +1253,7 @@ def _render_wc_standings_table_pair(
                 None,
                 None,
                 _format_race_points_cell,
-                None,
+                u23_total_points_formatter,
                 _format_change_cell,
             ],
             column_separators={5},

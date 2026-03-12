@@ -716,8 +716,49 @@ def test_build_standings_rows_includes_age_column():
     )
 
     assert table_rows[0] == ["1", "Alpha", "22 (U23)", "NOR", "+90", "300", "+1"]
-    assert table_rows[1] == ["2", "Bravo", "24", "SWE", "+75", "250", "="]
+    assert table_rows[1] == ["2", "Bravo", "24", "SWE", "+75", "250 (-50)", "="]
     assert row_styles == ["", "dim"]
+
+
+def test_build_standings_rows_formats_total_points_gap_in_u23_mode():
+    rows = [
+        {
+            "Rank": "12",
+            "IBUId": "A",
+            "Name": "Alpha",
+            "Nat": "NOR",
+            "Score": 150,
+            "RnkDiff": 0,
+        },
+        {
+            "Rank": "42",
+            "IBUId": "B",
+            "Name": "Bravo",
+            "Nat": "SWE",
+            "Score": 100,
+            "RnkDiff": 0,
+        },
+    ]
+
+    table_rows, _row_styles = postrace._build_standings_rows(
+        rows,
+        top_n=10,
+        race_points_by_id={"A": 55, "B": 8},
+        age_display_by_id={"A": "22 (U23)", "B": "21 (U23)"},
+        u23_mode=True,
+    )
+
+    assert table_rows[0] == ["1", "12", "Alpha", "22 (U23)", "NOR", "+55", "150", "="]
+    assert table_rows[1] == [
+        "2",
+        "42",
+        "Bravo",
+        "21 (U23)",
+        "SWE",
+        "+8",
+        "100 (-50)",
+        "=",
+    ]
 
 
 def test_is_u23_standings_row_checks_groups_and_u23_ids():
@@ -755,6 +796,11 @@ def test_render_wc_standings_table_pair_places_u23_table_on_right_in_pretty_mode
     monkeypatch, capsys
 ):
     captured_kwargs: dict[str, dict] = {}
+    monkeypatch.setattr(
+        postrace.Color,
+        "enabled",
+        classmethod(lambda cls: True),
+    )
 
     def fake_render_table(headers, _rows, **kwargs):
         if headers[0] == "Rank" and headers[1] == "Athlete":
@@ -773,11 +819,17 @@ def test_render_wc_standings_table_pair_places_u23_table_on_right_in_pretty_mode
         argparse.Namespace(format="pretty"),
         "pretty",
         True,
-        [["1", "Alpha", "22", "NOR", "+90", "300", "+1"]],
-        [""],
+        [
+            ["1", "Alpha", "22", "NOR", "+90", "300", "+1"],
+            ["2", "Beta", "23", "SWE", "+75", "250 (-50)", "="],
+        ],
+        ["", "dim"],
         lambda cell, _row_idx: cell,
-        [["1", "12", "Bravo", "21", "SWE", "+45", "150", "+2"]],
-        [""],
+        [
+            ["1", "12", "Bravo", "21", "SWE", "+45", "150", "+2"],
+            ["2", "24", "Charlie", "20", "USA", "+20", "100 (-50)", "="],
+        ],
+        ["", "dim"],
         lambda cell, _row_idx: cell,
     )
 
@@ -789,6 +841,10 @@ def test_render_wc_standings_table_pair_places_u23_table_on_right_in_pretty_mode
     assert "## WC standings (U23)" not in out
     assert captured_kwargs["main"].get("column_separators") == {4}
     assert captured_kwargs["u23"].get("column_separators") == {5}
+    main_points = captured_kwargs["main"]["cell_formatters"][5]("250 (-50)", 1)
+    u23_points = captured_kwargs["u23"]["cell_formatters"][6]("100 (-50)", 1)
+    assert "\x1b[38;2;176;110;110m" in main_points
+    assert "\x1b[38;2;176;110;110m" in u23_points
 
 
 def test_make_name_formatter_supports_u23_marker():
