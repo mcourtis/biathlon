@@ -94,6 +94,9 @@ from .startlist import (
     _get_wc_points,
     _render_athlete_all_medal_table,
     _render_country_all_medal_table,
+    _parse_points_number,
+    _standings_points_cell_formatter,
+    _standings_points_text,
 )
 
 
@@ -1139,6 +1142,33 @@ def _results_column_separators(headers: list[str]) -> set[int] | None:
     if headers and headers[-1] == "Points":
         return {len(headers) - 1}
     return None
+
+
+def _build_nations_cup_table_rows(
+    nation_rows: list[dict],
+    nc_race_by_nat: dict[str, float],
+) -> list[list[str]]:
+    table_rows: list[list[str]] = []
+    leader_points = (
+        _parse_points_number(
+            (nation_rows[0] if nation_rows else {}).get("Score")
+            or (nation_rows[0] if nation_rows else {}).get("Points")
+        )
+        if nation_rows
+        else None
+    )
+    for row_idx, standing_row in enumerate(nation_rows):
+        rank = str(
+            standing_row.get("Rank") or standing_row.get("Standing") or row_idx + 1
+        ).rstrip(".")
+        nat = str(standing_row.get("Nat") or "")
+        country = str(standing_row.get("Name") or nat)
+        total_pts = _standings_points_text(standing_row, leader_points, row_idx)
+        _, change = _extract_rank_and_change(standing_row)
+        race_nc = nc_race_by_nat.get(nat)
+        race_pts = f"+{int(race_nc)}" if race_nc else ""
+        table_rows.append([rank, country, total_pts, race_pts, change])
+    return table_rows
 
 
 def _render_wc_standings_table_pair(
@@ -3173,31 +3203,21 @@ def handle_post_race(args: argparse.Namespace) -> int:
                     )
                 )
                 print()
-                table_rows = []
-                for row_idx, standing_row in enumerate(nation_rows):
-                    rank = str(
-                        standing_row.get("Rank")
-                        or standing_row.get("Standing")
-                        or row_idx + 1
-                    ).rstrip(".")
-                    nat = str(standing_row.get("Nat") or "")
-                    country = str(standing_row.get("Name") or nat)
-                    points = str(
-                        standing_row.get("Score") or standing_row.get("Points") or "0"
-                    )
-                    _, change = _extract_rank_and_change(standing_row)
-                    race_nc = nc_race_by_nat.get(nat)
-                    race_pts = f"+{int(race_nc)}" if race_nc else ""
-                    table_rows.append([rank, country, points, race_pts, change])
+                table_rows = _build_nations_cup_table_rows(nation_rows, nc_race_by_nat)
                 render_table(
-                    ["Rank", "Country", "Points", "Race", "Changes"],
+                    ["Rank", "Country", "Total Pts", "Race Pts", "Changes"],
                     table_rows,
                     output_format=output_format,
                     column_separators={2},
                     cell_formatters=[
                         None,
                         None,
-                        None,
+                        _standings_points_cell_formatter(
+                            set(),
+                            leader_rows={0},
+                            point_cells=[row[2] for row in table_rows],
+                            pretty=pretty,
+                        ),
                         _fmt_nc_race_pts,
                         _fmt_nc_change,
                     ],

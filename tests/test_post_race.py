@@ -734,6 +734,23 @@ def test_results_column_separators_only_group_trailing_points_column():
     assert postrace._results_column_separators(["Rank", "Athlete", "Nat"]) is None
 
 
+def test_build_nations_cup_table_rows_swaps_race_pts_and_formats_total_gap():
+    rows = postrace._build_nations_cup_table_rows(
+        [
+            {"Rank": "1", "Name": "Norway", "Nat": "NOR", "Score": "6673"},
+            {"Rank": "2", "Name": "France", "Nat": "FRA", "Score": "6473"},
+            {"Rank": "3", "Name": "Sweden", "Nat": "SWE", "Score": "5907"},
+        ],
+        {"NOR": 441.0, "FRA": 428.0, "SWE": 368.0},
+    )
+
+    assert rows == [
+        ["1", "Norway", "6673", "+441", "-"],
+        ["2", "France", "6473 (-200)", "+428", "-"],
+        ["3", "Sweden", "5907 (-766)", "+368", "-"],
+    ]
+
+
 def test_render_wc_standings_table_pair_places_u23_table_on_right_in_pretty_mode(
     monkeypatch, capsys
 ):
