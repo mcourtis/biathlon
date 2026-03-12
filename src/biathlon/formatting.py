@@ -37,6 +37,7 @@ class Color:
     OTHER = (215, 215, 215)
     GREEN = (0, 200, 0)
     RED = (220, 60, 60)
+    MUTED_RED = (176, 110, 110)
     DARK_BLUE = (0, 70, 150)
     LIGHT_BLUE = (102, 178, 255)
 
@@ -91,6 +92,16 @@ class Color:
         prefix = f"{cls.BOLD}" if bold else ""
         return (
             f"{prefix}{cls.COLOR_PREFIX}{r};{g};{b}{cls.COLOR_SUFFIX}{text}{cls.RESET}"
+        )
+
+    @classmethod
+    def rgb_dim(cls, text: str, color: tuple[int, int, int]) -> str:
+        """Apply dim + 24-bit color."""
+        if not cls.enabled():
+            return text
+        r, g, b = color
+        return (
+            f"{cls.DIM}{cls.COLOR_PREFIX}{r};{g};{b}{cls.COLOR_SUFFIX}{text}{cls.RESET}"
         )
 
     @classmethod

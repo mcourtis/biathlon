@@ -821,6 +821,401 @@ def test_render_wc_section1_first_race_snapshot_prints_none(monkeypatch, capsys)
     assert "1. Missing from top 25 World Cup standings: none" in capsys.readouterr().out
 
 
+def test_select_u23_standings_rows_uses_groups_and_birth_year_fallback():
+    rows = [
+        {
+            "Rank": "4",
+            "Name": "Grouped U23",
+            "Nat": "FRA",
+            "IBUId": "BTFRA00001199900",
+            "Groups": "U23",
+        },
+        {
+            "Rank": "12",
+            "Name": "Birth Year U23",
+            "Nat": "USA",
+            "IBUId": "BTUSA00002200400",
+        },
+        {
+            "Rank": "18",
+            "Name": "Senior Athlete",
+            "Nat": "NOR",
+            "IBUId": "BTNOR00003199900",
+        },
+    ]
+
+    selected = startlist._select_u23_standings_rows(rows, "2526")
+
+    assert [row["Name"] for row in selected] == ["Grouped U23", "Birth Year U23"]
+
+
+def test_render_standings_section_merges_u23_rows_with_separator(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured["headers"] = headers
+        captured["rows"] = rows
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(startlist, "render_table", fake_render_table)
+    monkeypatch.setattr(
+        startlist, "_print_spaced_section_title", lambda *_args, **_kwargs: None
+    )
+
+    startlist._render_standings_section(
+        "WC Total Standings",
+        [
+            {
+                "Rank": "1",
+                "Name": "Leader",
+                "Nat": "NOR",
+                "Score": "500",
+                "IBUId": "BTNOR00001199000",
+            },
+            {
+                "Rank": "2",
+                "Name": "Chaser",
+                "Nat": "FRA",
+                "Score": "430",
+                "IBUId": "BTFRA00002199100",
+            },
+        ],
+        argparse.Namespace(format="tsv", leader_markers=False),
+        {"BTNOR00001199000"},
+        u23_standings=[
+            {
+                "Rank": "12",
+                "Name": "Youngster",
+                "Nat": "USA",
+                "Score": "95",
+                "IBUId": "BTUSA00003200400",
+            }
+        ],
+    )
+
+    assert captured["headers"] == ["Rank", "WC", "Athlete", "Nat", "Points"]
+    assert captured["rows"] == [
+        ["1", "1", "Leader", "NOR", "500"],
+        ["2", "2", "Chaser", "FRA", "430 (-70)"],
+        ["1", "12", "Youngster", "USA", "95"],
+    ]
+    assert captured["kwargs"]["row_separators"] == {2}
+    assert captured["kwargs"]["column_separators"] == {2, 4}
+
+
+def test_render_standings_section_places_u23_table_on_the_right_in_pretty_mode(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        startlist, "_print_spaced_section_title", lambda *_args, **_kwargs: None
+    )
+
+    def fake_render_table(headers, _rows, **_kwargs):
+        if headers == ["Rank", "Athlete", "Nat", "Points"]:
+            print("LEFT-HEADER")
+            print("LEFT-ROW")
+        else:
+            print("RIGHT-HEADER")
+            print("RIGHT-ROW")
+
+    monkeypatch.setattr(startlist, "render_table", fake_render_table)
+
+    startlist._render_standings_section(
+        "WC Total Standings",
+        [
+            {
+                "Rank": "1",
+                "Name": "Leader",
+                "Nat": "NOR",
+                "Score": "500",
+                "IBUId": "BTNOR00001199000",
+            }
+        ],
+        argparse.Namespace(format="pretty", leader_markers=False),
+        set(),
+        u23_standings=[
+            {
+                "Rank": "12",
+                "Name": "Youngster",
+                "Nat": "USA",
+                "Score": "95",
+                "IBUId": "BTUSA00003200400",
+            }
+        ],
+    )
+
+    out = capsys.readouterr().out
+
+    assert "LEFT-HEADER  │  RIGHT-HEADER" in out
+    assert "LEFT-ROW     │  RIGHT-ROW" in out
+
+
+def test_standings_points_cell_formatter_dims_gap_only_in_pretty_output(monkeypatch):
+    monkeypatch.setattr(
+        startlist.Color,
+        "enabled",
+        classmethod(lambda cls: True),
+    )
+
+    formatter = startlist._standings_points_cell_formatter(
+        set(),
+        point_cells=["430 (-70)", "309"],
+        pretty=True,
+    )
+    formatted = formatter("430 (-70)", 1)
+
+    assert formatted.startswith("430")
+    assert "\x1b[2m" in formatted
+    assert "\x1b[38;2;176;110;110m (-70)\x1b[0m" in formatted
+
+
+def test_standings_points_cell_formatter_keeps_leader_points_plain(monkeypatch):
+    monkeypatch.setattr(
+        startlist.Color,
+        "enabled",
+        classmethod(lambda cls: True),
+    )
+
+    formatter = startlist._standings_points_cell_formatter(
+        {0, 1},
+        leader_rows={0},
+        point_cells=["309", "274 (-35)"],
+        pretty=True,
+    )
+
+    leader = formatter("309", 0)
+    chaser = formatter("274 (-35)", 1)
+
+    assert leader.startswith("309")
+    assert "\x1b[" not in leader
+    assert chaser.startswith("274")
+    assert "\x1b[38;2;176;110;110m (-35)\x1b[0m" in chaser
+    assert startlist._display_width(leader) == startlist._display_width(chaser)
+
+
+def test_render_startlist_analysis_merges_u23_wc_rows_from_full_standings(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        startlist, "_get_cup_ids_for_race", lambda *_a, **_k: ("TOTAL", "DISC")
+    )
+    monkeypatch.setattr(startlist, "_get_wc_rows", lambda *_a, **_k: [])
+    monkeypatch.setattr(startlist, "_fetch_nations_cup_standings", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        startlist, "_get_previous_individual_podiums", lambda *_a, **_k: []
+    )
+    monkeypatch.setattr(startlist, "_compute_what_if_scenarios", lambda *_a, **_k: [])
+
+    total_rows = [
+        {
+            "Rank": str(idx),
+            "Name": f"Total {idx}",
+            "Nat": "NOR",
+            "Score": str(600 - idx),
+            "IBUId": f"BTNOR{idx:05d}199000",
+        }
+        for idx in range(1, 12)
+    ]
+    total_rows.append(
+        {
+            "Rank": "12",
+            "Name": "Total U23",
+            "Nat": "USA",
+            "Score": "321",
+            "IBUId": "BTUSA99999200400",
+        }
+    )
+
+    disc_rows = [
+        {
+            "Rank": str(idx),
+            "Name": f"Disc {idx}",
+            "Nat": "FRA",
+            "Score": str(400 - idx),
+            "IBUId": f"BTFRA{idx:05d}199100",
+        }
+        for idx in range(1, 11)
+    ]
+    disc_rows.append(
+        {
+            "Rank": "11",
+            "Name": "Disc U23",
+            "Nat": "SWE",
+            "Score": "210",
+            "IBUId": "BTSWE99999200400",
+        }
+    )
+
+    monkeypatch.setattr(
+        startlist,
+        "_fetch_standings",
+        lambda cup_id, limit=10: total_rows if cup_id == "TOTAL" else disc_rows,
+    )
+
+    ctx = {
+        "payload": {
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "IBUId": "STARTER1",
+                    "Name": "Starter One",
+                    "FamilyName": "Starter",
+                    "Nat": "NOR",
+                }
+            ]
+        },
+        "race_id": "RACE1",
+        "entries": [],
+        "race_disc": "SP",
+        "cat_id": "SW",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_WC,
+        "startlist_ids": {"STARTER1"},
+        "age_cache": {},
+        "prefetched_results": {},
+        "team_entries": [],
+        "is_mixed": False,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+    }
+    args = argparse.Namespace(format="tsv", leader_markers=False)
+
+    startlist.render_startlist_analysis(ctx, args)
+    out = capsys.readouterr().out
+
+    assert "2\t2\tTotal 2\tNOR\t598 (-1)" in out
+    assert "1\t12\tTotal U23\tUSA\t321" in out
+    assert "1\t11\tDisc U23\tSWE\t210" in out
+
+
+def test_render_startlist_analysis_marks_u23_leader_in_merged_wc_rows(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(
+        startlist, "_get_cup_ids_for_race", lambda *_a, **_k: ("TOTAL", "DISC")
+    )
+    monkeypatch.setattr(startlist, "_get_wc_rows", lambda *_a, **_k: [])
+    monkeypatch.setattr(startlist, "_fetch_nations_cup_standings", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        startlist, "_get_previous_individual_podiums", lambda *_a, **_k: []
+    )
+    monkeypatch.setattr(startlist, "_compute_what_if_scenarios", lambda *_a, **_k: [])
+
+    monkeypatch.setattr(startlist, "is_pretty_output", lambda _args: True)
+
+    total_rows = [
+        {
+            "Rank": "1",
+            "Name": "Total Leader",
+            "Nat": "NOR",
+            "Score": "600",
+            "IBUId": "BTNOR00001199000",
+        },
+        {
+            "Rank": "12",
+            "Name": "Total U23",
+            "Nat": "USA",
+            "Score": "321",
+            "IBUId": "BTUSA99999200400",
+        },
+    ]
+    disc_rows = [
+        {
+            "Rank": "1",
+            "Name": "Disc Leader",
+            "Nat": "FRA",
+            "Score": "400",
+            "IBUId": "BTFRA00001199100",
+        },
+        {
+            "Rank": "11",
+            "Name": "Disc U23",
+            "Nat": "SWE",
+            "Score": "210",
+            "IBUId": "BTSWE99999200400",
+        },
+    ]
+
+    monkeypatch.setattr(
+        startlist,
+        "_fetch_standings",
+        lambda cup_id, limit=10: total_rows if cup_id == "TOTAL" else disc_rows,
+    )
+
+    ctx = {
+        "payload": {"Results": []},
+        "race_id": "RACE1",
+        "entries": [],
+        "race_disc": "SP",
+        "cat_id": "SW",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_WC,
+        "startlist_ids": set(),
+        "age_cache": {},
+        "prefetched_results": {},
+        "team_entries": [],
+        "is_mixed": False,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+    }
+    args = argparse.Namespace(format="pretty", leader_markers=True)
+
+    startlist.render_startlist_analysis(ctx, args)
+    out = capsys.readouterr().out
+
+    assert "Total U23 ●" in out
+    assert "Disc U23 ●" in out
+
+
+def test_render_startlist_analysis_nations_cup_shows_behind_points(monkeypatch, capsys):
+    monkeypatch.setattr(startlist, "_get_cup_ids_for_race", lambda *_a, **_k: ("", ""))
+    monkeypatch.setattr(
+        startlist,
+        "_fetch_nations_cup_standings",
+        lambda *_a, **_k: [
+            {"Rank": "1", "Name": "Norway", "Nat": "NOR", "Score": "6232"},
+            {"Rank": "2", "Name": "France", "Nat": "FRA", "Score": "6045"},
+            {"Rank": "3", "Name": "Sweden", "Nat": "SWE", "Score": "5539"},
+        ],
+    )
+    monkeypatch.setattr(
+        startlist, "_get_previous_individual_podiums", lambda *_a, **_k: []
+    )
+    monkeypatch.setattr(startlist, "_compute_what_if_scenarios", lambda *_a, **_k: [])
+
+    ctx = {
+        "payload": {"Results": []},
+        "race_id": "RACE1",
+        "entries": [],
+        "race_disc": "SP",
+        "cat_id": "SW",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_WC,
+        "startlist_ids": set(),
+        "age_cache": {},
+        "prefetched_results": {},
+        "team_entries": [],
+        "is_mixed": False,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+    }
+    args = argparse.Namespace(format="tsv", leader_markers=False)
+
+    startlist.render_startlist_analysis(ctx, args)
+    out = capsys.readouterr().out
+
+    assert "Rank\tCountry\tPoints" in out
+    assert "1\tNorway\t6232" in out
+    assert "2\tFrance\t6045 (-187)" in out
+    assert "3\tSweden\t5539 (-693)" in out
+
+
 def test_olympic_athlete_tables_keep_global_ranks_for_startlist_athletes(
     monkeypatch, capsys
 ):
