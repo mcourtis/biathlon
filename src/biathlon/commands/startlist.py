@@ -6773,10 +6773,6 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                 continue
             deduped_rows = _dedupe_same_value_rows(subsection_rows)
             sorted_rows = _sort_for_subsection(deduped_rows)
-            row_separators: set[int] = set()
-            for idx in range(1, len(sorted_rows)):
-                if str(sorted_rows[idx][3]) != str(sorted_rows[idx - 1][3]):
-                    row_separators.add(idx)
             display_rows = [[_ordinal(int(row[0])), *row[1:]] for row in sorted_rows]
             if section_id in {SECTION_RACE_MILESTONES, SECTION_WIN_MILESTONES}:
                 display_rows = [row[:-1] for row in display_rows]
@@ -6796,7 +6792,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                 display_rows,
                 output_format=output_format,
                 cell_formatters=render_formatters,
-                row_separators=row_separators,
+                column_separators={3},
             )
             print()
 

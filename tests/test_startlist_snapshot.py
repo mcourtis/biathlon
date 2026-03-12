@@ -1906,6 +1906,58 @@ def test_render_startlist_analysis_groups_win_milestones_by_athlete(
     assert career_block.rfind("\tAlpha\t") < career_block.find("\tBeta\t")
 
 
+def test_render_startlist_analysis_adds_column_separators_to_milestone_tables(
+    monkeypatch,
+):
+    monkeypatch.setattr(startlist, "_get_wc_rows", lambda *_a, **_k: [])
+    monkeypatch.setattr(startlist, "_get_cup_ids_for_race", lambda *_a, **_k: ("", ""))
+    monkeypatch.setattr(startlist, "_fetch_nations_cup_standings", lambda *_a, **_k: [])
+    monkeypatch.setattr(
+        startlist, "_get_previous_individual_podiums", lambda *_a, **_k: []
+    )
+
+    captured_kwargs: list[dict] = []
+
+    def fake_render_table(headers, _rows, **kwargs):
+        if headers == ["Milestone", "Event", "Type", "Athlete", "Age", "Nat"]:
+            captured_kwargs.append(kwargs)
+
+    monkeypatch.setattr(startlist, "render_table", fake_render_table)
+
+    ctx = {
+        "payload": {"Results": []},
+        "race_id": "RACE1",
+        "entries": [{"ibu_id": "A1", "name": "Alpha", "age": "25", "nat": "NOR"}],
+        "race_disc": "SP",
+        "cat_id": "SW",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_WC,
+        "startlist_ids": {"A1"},
+        "age_cache": {"A1": "25"},
+        "prefetched_results": {
+            "A1": {
+                "Results": [
+                    {"Level": "WC", "Comp": "SP", "Rank": "1", "SO": "1"}
+                    for _ in range(49)
+                ]
+            }
+        },
+        "team_entries": [],
+        "is_mixed": False,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+    }
+    args = argparse.Namespace(format="tsv", leader_markers=False)
+
+    startlist.render_startlist_analysis(ctx, args)
+
+    assert len(captured_kwargs) == 4
+    assert all(kwargs.get("column_separators") == {3} for kwargs in captured_kwargs)
+    assert all(kwargs.get("row_separators") is None for kwargs in captured_kwargs)
+
+
 def test_render_startlist_analysis_owg_win_current_event_starts_at_two(
     monkeypatch, capsys
 ):
