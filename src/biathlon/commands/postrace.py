@@ -1152,6 +1152,20 @@ def _results_column_separators(headers: list[str]) -> set[int] | None:
     return None
 
 
+def _best_performances_column_separators() -> set[int]:
+    return {3}
+
+
+def _milestone_subsection_column_separators() -> set[int]:
+    return {3}
+
+
+def _milestone_athlete_row_separators(rows: list[list]) -> set[int]:
+    return {
+        idx for idx in range(1, len(rows)) if str(rows[idx][3]) != str(rows[idx - 1][3])
+    }
+
+
 def _build_nations_cup_table_rows(
     nation_rows: list[dict],
     nc_race_by_nat: dict[str, float],
@@ -2755,6 +2769,7 @@ def _render_best_performances_section(
         output_format=output_format,
         row_styles=row_styles,
         cell_formatters=[None, athlete_formatter, None, None, None],
+        column_separators=_best_performances_column_separators(),
     )
     print()
     print()
@@ -3729,11 +3744,6 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 continue
             deduped = _dedupe_milestone_rows(subsection_rows)
             sorted_rows = _sort_milestone_rows(deduped)
-            row_separators = {
-                idx
-                for idx in range(1, len(sorted_rows))
-                if str(sorted_rows[idx][3]) != str(sorted_rows[idx - 1][3])
-            }
             display_rows = [[_ordinal(int(row[0])), *row[1:]] for row in sorted_rows]
 
             # Blue gradient: skip 1st, scale by event scope
@@ -3782,7 +3792,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 display_rows,
                 output_format=output_format,
                 cell_formatters=race_cell_formatters,
-                row_separators=row_separators,
+                column_separators=_milestone_subsection_column_separators(),
             )
             print()
             print()
@@ -3805,12 +3815,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
         ]:
             if not subsection_rows:
                 continue
-            # Keep podium order — no sort; separate athletes with a blank row
-            row_separators = {
-                idx
-                for idx in range(1, len(subsection_rows))
-                if str(subsection_rows[idx][3]) != str(subsection_rows[idx - 1][3])
-            }
+            row_separators = _milestone_athlete_row_separators(subsection_rows)
             display_rows = [
                 [_ordinal(int(row[0])), *row[1:]] for row in subsection_rows
             ]
@@ -3868,6 +3873,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 cell_formatters=win_cell_formatters,
                 row_separators=row_separators,
                 row_styles=win_row_styles,
+                column_separators=_milestone_subsection_column_separators(),
             )
             print()
             print()

@@ -792,6 +792,26 @@ def test_build_nations_cup_table_rows_swaps_race_pts_and_formats_total_gap():
     ]
 
 
+def test_best_performances_column_separators_split_after_identity_block():
+    assert postrace._best_performances_column_separators() == {3}
+
+
+def test_milestone_subsection_column_separators_split_after_type():
+    assert postrace._milestone_subsection_column_separators() == {3}
+
+
+def test_milestone_athlete_row_separators_split_between_athletes():
+    assert postrace._milestone_athlete_row_separators(
+        [
+            [15, "World Cup", "Indiv Win", "LAEGREID Sturla Holm", "29", "NOR"],
+            [31, "World Cup", "Win", "LAEGREID Sturla Holm", "29", "NOR"],
+            [30, "World Cup", "Indiv Podium", "JACQUELIN Emilien", "30", "FRA"],
+            [59, "World Cup", "Podium", "JACQUELIN Emilien", "30", "FRA"],
+            [6, "World Cup", "Indiv Podium", "NAWRATH Philipp", "33", "GER"],
+        ]
+    ) == {2, 4}
+
+
 def test_render_wc_standings_table_pair_places_u23_table_on_right_in_pretty_mode(
     monkeypatch, capsys
 ):
