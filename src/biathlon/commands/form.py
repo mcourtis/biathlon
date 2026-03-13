@@ -314,6 +314,75 @@ def _get_race_info(payload: dict) -> tuple[str, str]:
     return disc_abbrev, _venue_abbrev(venue)
 
 
+def _split_race_header(header: str) -> tuple[str, str]:
+    """Split a stored race header into discipline and venue parts."""
+    text = str(header or "").strip()
+    if "-" not in text:
+        return text, ""
+    disc, venue = text.split("-", 1)
+    return disc.strip(), venue.strip()
+
+
+def _build_pretty_race_headers(
+    data: FormData,
+    race_col_offset: int,
+) -> tuple[list[str], list[tuple[int, int, str]] | None, dict[int, str] | None]:
+    """Build shortened race headers plus venue group headers for pretty tables."""
+    if not data.completed_race_ids:
+        return [], None, None
+
+    headers: list[str] = []
+    group_headers: list[tuple[int, int, str]] = []
+    header_alignments: dict[int, str] = {}
+    current_venue = ""
+    span_start = race_col_offset
+
+    for idx, rid in enumerate(data.completed_race_ids):
+        payload = data.race_payloads.get(rid)
+        if payload:
+            disc, venue = _get_race_info(payload)
+        elif idx < len(data.race_headers):
+            disc, venue = _split_race_header(data.race_headers[idx])
+        else:
+            disc, venue = "", ""
+        headers.append(disc.ljust(max(3, len(disc))))
+        col_idx = race_col_offset + idx
+        header_alignments[col_idx] = "center"
+        if idx == 0:
+            current_venue = venue
+            span_start = col_idx
+            continue
+        if venue != current_venue:
+            if current_venue:
+                group_headers.append((span_start, col_idx, current_venue))
+            current_venue = venue
+            span_start = col_idx
+
+    if current_venue:
+        group_headers.append(
+            (span_start, race_col_offset + len(data.completed_race_ids), current_venue)
+        )
+
+    return headers, (group_headers or None), header_alignments
+
+
+def _build_biathlete_table_alignments(num_cols: int) -> list[str]:
+    """Right-align numeric columns while keeping athlete identity columns left-aligned."""
+    alignments = ["right"] * num_cols
+    if num_cols > 1:
+        alignments[1] = "left"
+    if num_cols > 2:
+        alignments[2] = "left"
+    return alignments
+
+
+def _format_race_accuracy(value: float, discipline: str) -> str:
+    """Format race accuracy with compact percentages for individual disciplines."""
+    if str(discipline or "").upper() in INDIVIDUAL_DISCIPLINES:
+        return f"{value:.0f}%"
+    return f"{value:.1f}%"
+
+
 def _get_athlete_info(res: dict) -> tuple[str, str, str]:
     """Extract IBUId, name, and nationality from a result entry."""
     ibu_id = str(res.get("IBUId") or "")
@@ -976,8 +1045,6 @@ def _render_form_table(
     completed_race_ids = data.completed_race_ids
     race_to_event = data.race_to_event
     all_candidate_ids = data.all_candidate_ids
-    race_headers = data.race_headers
-
     # Build rows
     rows = []
     for entry in athletes:
@@ -1021,7 +1088,9 @@ def _render_form_table(
             if val is None:
                 row_data.append("-")
             elif shoot_mode:
-                row_data.append(f"{val:.1f}%")
+                row_data.append(
+                    _format_race_accuracy(val, data.race_discipline.get(rid))
+                )
             else:
                 row_data.append(str(val))
 
@@ -1067,15 +1136,29 @@ def _render_form_table(
     if limit > 0:
         rows = rows[:limit]
 
+    pretty = is_pretty_output(args)
+
     # Build headers
     # Columns: Rank | Biathlete | Nat | WC | [Current |] Season | race...
     # In season mode, the "Current" column is dropped (redundant with "Season")
     race_col_offset = 5 if season_mode else 6
     current_col_idx = 4  # "Current" column index (only in non-season mode)
+    race_headers = data.race_headers
+    group_headers = None
+    header_alignments = None
+    alignments = None
+    if pretty:
+        race_headers, group_headers, header_alignments = _build_pretty_race_headers(
+            data, race_col_offset
+        )
+        form_group_headers = [(4, race_col_offset, "Form")]
+        group_headers = form_group_headers + (group_headers or [])
     if season_mode:
         headers = ["Rank", "Biathlete", "Nat", "WC", "Season"] + race_headers
     else:
         headers = ["Rank", "Biathlete", "Nat", "WC", "Current", "Season"] + race_headers
+    if pretty:
+        alignments = _build_biathlete_table_alignments(len(headers))
 
     # Determine which column headers to highlight (races used for current form)
     highlight_headers = None
@@ -1101,7 +1184,6 @@ def _render_form_table(
         )
 
     # Render table
-    pretty = is_pretty_output(args)
     output_format = get_output_format(args)
     row_styles = [rank_style(r["row"][0]) for r in rows] if pretty else None
 
@@ -1193,7 +1275,10 @@ def _render_form_table(
         row_styles=row_styles,
         highlight_headers=highlight_headers if pretty else None,
         cell_formatters=cell_formatters,
+        alignments=alignments,
         column_separators=column_separators,
+        group_headers=group_headers,
+        header_alignments=header_alignments,
     )
 
     return 0
@@ -1325,12 +1410,14 @@ def _render_combined_table(
     output_format = get_output_format(args)
     row_styles = [rank_style(e["rank"]) for e in combined] if pretty else None
     column_separators = {3, 4} if pretty else None
+    alignments = _build_biathlete_table_alignments(len(headers)) if pretty else None
 
     render_table(
         headers,
         rows,
         output_format=output_format,
         row_styles=row_styles,
+        alignments=alignments,
         column_separators=column_separators,
     )
 

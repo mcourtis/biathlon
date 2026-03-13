@@ -170,6 +170,196 @@ def test_render_form_table_nat_filter_keeps_global_rank(monkeypatch):
     assert captured["rows"] == [[2, "Bravo", "NOR", "2", "2.0", "2.0"]]
 
 
+def test_render_form_table_pretty_groups_race_headers_by_venue(monkeypatch):
+    data = form.FormData(
+        season_id="2526",
+        completed_race_ids=["R1", "R2", "R3"],
+        season_race_ids=["R1", "R2", "R3"],
+        race_payloads={
+            "R1": {
+                "Competition": {"DisciplineId": "IN", "catId": "SW"},
+                "SportEvt": {"ShortDescription": "Kontiolahti"},
+            },
+            "R2": {
+                "Competition": {"DisciplineId": "MS", "catId": "SW"},
+                "SportEvt": {"ShortDescription": "Kontiolahti"},
+            },
+            "R3": {
+                "Competition": {"DisciplineId": "SP", "catId": "SW"},
+                "SportEvt": {"ShortDescription": "Oberhof"},
+            },
+        },
+        race_to_event={"R1": "E1", "R2": "E1", "R3": "E2"},
+        race_is_relay={"R1": False, "R2": False, "R3": False},
+        race_discipline={"R1": "IN", "R2": "MS", "R3": "SP"},
+        race_category={"R1": "SW", "R2": "SW", "R3": "SW"},
+        race_headers=["IN-Kon", "MS-Kon", "SP-Obe"],
+        gender_cat="SW",
+        gender_ibu_ids={"A1"},
+        individual_race_ids=["R1", "R2", "R3"],
+        relay_race_ids=[],
+        race_course_times={},
+        relay_leg_course_times={},
+        all_candidate_ids=["R1", "R2", "R3"],
+    )
+    athletes = [
+        {
+            "ibu_id": "A1",
+            "name": "Alpha",
+            "nat": "FRA",
+            "wc_rank": 1,
+            "current_form": 2.0,
+            "season_form": 2.0,
+            "has_current_form": True,
+            "ranks": {"R1": 1, "R2": 2, "R3": 3},
+        }
+    ]
+
+    captured: dict = {}
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured["headers"] = headers
+        captured["rows"] = rows
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(form, "render_table", fake_render_table)
+
+    rc = form._render_form_table(
+        athletes,
+        data,
+        _args(format="pretty"),
+        shoot_mode=False,
+    )
+
+    assert rc == 0
+    assert captured["headers"][:6] == [
+        "Rank",
+        "Biathlete",
+        "Nat",
+        "WC",
+        "Current",
+        "Season",
+    ]
+    assert [header.strip() for header in captured["headers"][6:]] == ["IN", "MS", "SP"]
+    assert captured["kwargs"]["group_headers"] == [
+        (4, 6, "Form"),
+        (6, 8, "Kon"),
+        (8, 9, "Obe"),
+    ]
+    assert captured["kwargs"]["alignments"] == [
+        "right",
+        "left",
+        "left",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+    ]
+    assert captured["kwargs"]["header_alignments"] == {
+        6: "center",
+        7: "center",
+        8: "center",
+    }
+
+
+def test_render_form_table_pretty_right_aligns_shooting_percentages(monkeypatch):
+    data = _form_data([])
+    athletes = [
+        {
+            "ibu_id": "A1",
+            "name": "Alpha",
+            "nat": "FRA",
+            "wc_rank": 1,
+            "current_form": 100.0,
+            "season_form": 98.5,
+            "has_current_form": True,
+            "ranks": {"R1": 100.0},
+        }
+    ]
+
+    captured: dict = {}
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured["headers"] = headers
+        captured["rows"] = rows
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(form, "render_table", fake_render_table)
+
+    rc = form._render_form_table(
+        athletes,
+        data,
+        _args(format="pretty"),
+        shoot_mode=True,
+    )
+
+    assert rc == 0
+    assert captured["rows"] == [[1, "Alpha", "FRA", "1", "100.0%", "98.5%", "100%"]]
+    assert captured["kwargs"]["alignments"] == [
+        "right",
+        "left",
+        "left",
+        "right",
+        "right",
+        "right",
+        "right",
+    ]
+
+
+def test_render_form_table_keeps_decimal_for_relay_accuracy_columns(monkeypatch):
+    data = form.FormData(
+        season_id="2526",
+        completed_race_ids=["R1"],
+        season_race_ids=["R1"],
+        race_payloads={},
+        race_to_event={"R1": "E1"},
+        race_is_relay={"R1": True},
+        race_discipline={"R1": "RL"},
+        race_category={"R1": "SW"},
+        race_headers=["RL-Nov"],
+        gender_cat="SW",
+        gender_ibu_ids={"A1"},
+        individual_race_ids=[],
+        relay_race_ids=["R1"],
+        race_course_times={},
+        relay_leg_course_times={},
+        all_candidate_ids=["R1"],
+    )
+    athletes = [
+        {
+            "ibu_id": "A1",
+            "name": "Alpha",
+            "nat": "FRA",
+            "wc_rank": 1,
+            "current_form": 96.2,
+            "season_form": 96.2,
+            "has_current_form": True,
+            "ranks": {"R1": 96.25},
+        }
+    ]
+
+    captured: dict = {}
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured["headers"] = headers
+        captured["rows"] = rows
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(form, "render_table", fake_render_table)
+
+    rc = form._render_form_table(
+        athletes,
+        data,
+        _args(format="pretty"),
+        shoot_mode=True,
+    )
+
+    assert rc == 0
+    assert captured["rows"] == [[1, "Alpha", "FRA", "1", "96.2%", "96.2%", "96.2%"]]
+
+
 def test_render_combined_table_nat_filter_keeps_global_rank(monkeypatch):
     course_athletes = [
         {
@@ -242,6 +432,77 @@ def test_render_combined_table_nat_filter_keeps_global_rank(monkeypatch):
 
     assert rc == 0
     assert captured["rows"] == [["2", "Bravo", "NOR", "2", "4", "2", "2"]]
+
+
+def test_render_combined_table_pretty_right_aligns_rank_columns(monkeypatch):
+    course_athletes = [
+        {
+            "ibu_id": "A1",
+            "name": "Alpha",
+            "nat": "FRA",
+            "wc_rank": 1,
+            "current_form": 1.0,
+            "season_form": 1.0,
+        }
+    ]
+    shoot_athletes = [
+        {
+            "ibu_id": "A1",
+            "name": "Alpha",
+            "nat": "FRA",
+            "wc_rank": 1,
+            "current_form": 100.0,
+            "season_form": 100.0,
+        }
+    ]
+    result_athletes = [
+        {
+            "ibu_id": "A1",
+            "name": "Alpha",
+            "nat": "FRA",
+            "wc_rank": 1,
+            "current_form": 2.0,
+            "season_form": 2.0,
+        }
+    ]
+
+    captured: dict = {}
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured["headers"] = headers
+        captured["rows"] = rows
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(form, "render_table", fake_render_table)
+
+    rc = form._render_combined_table(
+        course_athletes,
+        shoot_athletes,
+        _args(format="pretty"),
+        result_athletes=result_athletes,
+    )
+
+    assert rc == 0
+    assert captured["headers"] == [
+        "Rank",
+        "Biathlete",
+        "Nat",
+        "WC",
+        "Score",
+        "Result",
+        "Course",
+        "Shooting",
+    ]
+    assert captured["kwargs"]["alignments"] == [
+        "right",
+        "left",
+        "left",
+        "right",
+        "right",
+        "right",
+        "right",
+        "right",
+    ]
 
 
 def test_handle_form_rejects_empty_nat_filter(capsys):
