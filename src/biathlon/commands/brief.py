@@ -982,6 +982,24 @@ def _standings_points_cell_formatter(
     return formatter
 
 
+def _bold_leader_cell_formatter(
+    base_formatter: Callable[[str, int], str] | None = None,
+) -> Callable[[str, int], str]:
+    def formatter(cell_str: str, row_idx: int) -> str:
+        formatted = (
+            base_formatter(cell_str, row_idx)
+            if base_formatter is not None
+            else cell_str
+        )
+        if row_idx != 0 or not Color.enabled():
+            return formatted
+        if str(cell_str).strip() in {"", "-"}:
+            return formatted
+        return f"{Color.BOLD}{formatted}{Color.RESET}"
+
+    return formatter
+
+
 def _rows_from_country_points(
     points_by_nat: dict[str, float],
     names_by_nat: dict[str, str] | None,
@@ -3154,6 +3172,8 @@ def _render_decorated_athletes_split_tables(
                 (8, 13, "Individual"),
                 (13, 18, "Team"),
             ],
+            group_header_style="dim",
+            group_header_uppercase=True,
             row_styles=gender_styles,
         )
         _print_blank_lines(2)
@@ -3451,7 +3471,7 @@ def _relay_display_cells(
     if not row:
         return ["-", "-", "-"]
     rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(".")
-    name = _normalize_team_name(row)
+    name = _uppercase_team_name(row)
     points_text = _row_points_text(row)
     points = _standings_points_text(
         points_text,
@@ -3471,6 +3491,10 @@ def _render_relay_tables(
     all_rows = relay_rows.get("ALL", [])
     if not all_rows:
         all_rows = _combine_country_rows([women_rows, men_rows, mixed_rows], limit=10)
+        for row in all_rows:
+            row["Name"] = _uppercase_country_name(
+                row.get("Name") or row.get("Nat") or ""
+            )
 
     if not any((women_rows, men_rows, mixed_rows, all_rows)):
         print("none")
@@ -3497,7 +3521,7 @@ def _render_relay_tables(
                 rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(
                     "."
                 )
-                name = _normalize_team_name(row)
+                name = _uppercase_team_name(row)
                 points_text = _row_points_text(row)
                 points = _standings_points_text(
                     points_text,
@@ -3515,94 +3539,49 @@ def _render_relay_tables(
             _print_blank_lines(2)
         return
 
-    max_rows = max(len(women_rows), len(men_rows), len(mixed_rows), len(all_rows))
-    women_leader_points = (
-        _parse_points_value(_row_points_text(women_rows[0])) if women_rows else None
-    )
-    men_leader_points = (
-        _parse_points_value(_row_points_text(men_rows[0])) if men_rows else None
-    )
-    mixed_leader_points = (
-        _parse_points_value(_row_points_text(mixed_rows[0])) if mixed_rows else None
-    )
-    all_leader_points = (
-        _parse_points_value(_row_points_text(all_rows[0])) if all_rows else None
-    )
-    combined_rows: list[list[str]] = []
-    for idx in range(max_rows):
-        combined_rows.append(
-            _relay_display_cells(
-                women_rows[idx] if idx < len(women_rows) else None,
-                idx,
-                women_leader_points,
+    def _build_relay_table_lines(rows: list[dict]) -> list[str]:
+        if not rows:
+            return []
+        leader_points = _parse_points_value(_row_points_text(rows[0]))
+        table_rows: list[list[str]] = []
+        for idx, row in enumerate(rows):
+            rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(".")
+            name = _uppercase_team_name(row)
+            points_text = _row_points_text(row)
+            points = _standings_points_text(
+                points_text,
+                _parse_points_value(points_text),
+                leader_points,
             )
-            + _relay_display_cells(
-                men_rows[idx] if idx < len(men_rows) else None,
-                idx,
-                men_leader_points,
-            )
-            + _relay_display_cells(
-                mixed_rows[idx] if idx < len(mixed_rows) else None,
-                idx,
-                mixed_leader_points,
-            )
-            + _relay_display_cells(
-                all_rows[idx] if idx < len(all_rows) else None,
-                idx,
-                all_leader_points,
+            table_rows.append([rank, name, points])
+        return _capture_rendered_lines(
+            lambda: render_table(
+                ["Rank", "Team", "Points"],
+                table_rows,
+                output_format=get_output_format(args),
+                alignments=["right", "left", "right"],
+                column_separators={2},
+                cell_formatters=[
+                    _bold_leader_cell_formatter(),
+                    _bold_leader_cell_formatter(),
+                    _bold_leader_cell_formatter(
+                        _standings_points_cell_formatter(
+                            [row[2] for row in table_rows],
+                            pretty=True,
+                        )
+                    ),
+                ],
             )
         )
 
-    point_columns = {2, 5, 8, 11}
-    render_table(
+    _print_multi_table_block(
         [
-            "Rank",
-            "Team",
-            "Points",
-            "Rank",
-            "Team",
-            "Points",
-            "Rank",
-            "Team",
-            "Points",
-            "Rank",
-            "Team          ",
-            "Points",
-        ],
-        combined_rows,
-        output_format=get_output_format(args),
-        alignments=[
-            "right",
-            "left",
-            "right",
-            "right",
-            "left",
-            "right",
-            "right",
-            "left",
-            "right",
-            "right",
-            "left",
-            "right",
-        ],
-        column_separators={3, 6, 9},
-        cell_formatters=[
-            _standings_points_cell_formatter(
-                [str(row[col_idx]) for row in combined_rows],
-                pretty=True,
-            )
-            if col_idx in point_columns
-            else None
-            for col_idx in range(12)
-        ],
-        group_headers=[
-            (0, 3, "Women Relay"),
-            (3, 6, "Men Relay"),
-            (6, 9, "Mixed Relay"),
-            (9, 12, "All Relay (unofficial)"),
-        ],
+            ("Women Relay", _build_relay_table_lines(women_rows)),
+            ("Men Relay", _build_relay_table_lines(men_rows)),
+            ("Mixed Relay", _build_relay_table_lines(mixed_rows)),
+            ("All Relay (unofficial)", _build_relay_table_lines(all_rows)),
+        ]
     )
-    _print_blank_lines(2)
 
 
 def _capitalize_country_name(text: str) -> str:
@@ -3646,6 +3625,10 @@ def _normalize_team_name(row: dict | None) -> str:
             return mapped
     raw = str(row.get("Name") or row.get("ShortName") or "")
     return _capitalize_country_name(raw)
+
+
+def _uppercase_team_name(row: dict | None) -> str:
+    return _uppercase_country_name(_normalize_team_name(row))
 
 
 def _format_nations_points(value: object) -> str:
@@ -3703,7 +3686,7 @@ def _nation_display_cells(
     if not row:
         return ["-", "-", "-"]
     rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(".")
-    country = _normalize_team_name(row)
+    country = _uppercase_team_name(row)
     points_text = _row_points_text(row)
     points = _standings_points_text(
         points_text,
@@ -3726,7 +3709,7 @@ def _render_nations_tables(
         normalized = []
         for row in rows:
             copy = dict(row)
-            copy["Name"] = _normalize_team_name(copy)
+            copy["Name"] = _uppercase_team_name(copy)
             copy["Score"] = _format_nations_points(
                 copy.get("Score") or copy.get("Points") or "0"
             )
@@ -3741,6 +3724,9 @@ def _render_nations_tables(
             [women_rows, men_rows], limit=10, one_decimal=True
         )
         for row in all_rows:
+            row["Name"] = _uppercase_country_name(
+                row.get("Name") or row.get("Nat") or ""
+            )
             row["Score"] = _format_nations_points(
                 row.get("Score") or row.get("Points") or "0"
             )
@@ -3762,79 +3748,49 @@ def _render_nations_tables(
             _render_ranked_table(title, rows, args, "Team")
         return
 
-    max_rows = max(len(women_rows), len(men_rows), len(all_rows))
-    women_leader_points = (
-        _parse_points_value(_row_points_text(women_rows[0])) if women_rows else None
-    )
-    men_leader_points = (
-        _parse_points_value(_row_points_text(men_rows[0])) if men_rows else None
-    )
-    all_leader_points = (
-        _parse_points_value(_row_points_text(all_rows[0])) if all_rows else None
-    )
-    combined_rows: list[list[str]] = []
-    for idx in range(max_rows):
-        combined_rows.append(
-            _nation_display_cells(
-                women_rows[idx] if idx < len(women_rows) else None,
-                idx,
-                women_leader_points,
+    def _build_nations_table_lines(rows: list[dict]) -> list[str]:
+        if not rows:
+            return []
+        leader_points = _parse_points_value(_row_points_text(rows[0]))
+        table_rows: list[list[str]] = []
+        for idx, row in enumerate(rows):
+            rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(".")
+            name = _uppercase_team_name(row)
+            points_text = _row_points_text(row)
+            points = _standings_points_text(
+                points_text,
+                _parse_points_value(points_text),
+                leader_points,
+                gap_formatter=lambda value: _format_nations_points(value),
             )
-            + _nation_display_cells(
-                men_rows[idx] if idx < len(men_rows) else None,
-                idx,
-                men_leader_points,
-            )
-            + _nation_display_cells(
-                all_rows[idx] if idx < len(all_rows) else None,
-                idx,
-                all_leader_points,
+            table_rows.append([rank, name, points])
+        return _capture_rendered_lines(
+            lambda: render_table(
+                ["Rank", "Team", "Points"],
+                table_rows,
+                output_format=get_output_format(args),
+                alignments=["right", "left", "right"],
+                column_separators={2},
+                cell_formatters=[
+                    _bold_leader_cell_formatter(),
+                    _bold_leader_cell_formatter(),
+                    _bold_leader_cell_formatter(
+                        _standings_points_cell_formatter(
+                            [row[2] for row in table_rows],
+                            pretty=True,
+                        )
+                    ),
+                ],
             )
         )
 
-    point_columns = {2, 5, 8}
-    render_table(
+    _print_multi_table_block(
         [
-            "Rank",
-            "Team",
-            "Points",
-            "Rank",
-            "Team",
-            "Points",
-            "Rank",
-            "Team          ",
-            "Points",
-        ],
-        combined_rows,
-        output_format=get_output_format(args),
-        alignments=[
-            "right",
-            "left",
-            "right",
-            "right",
-            "left",
-            "right",
-            "right",
-            "left",
-            "right",
-        ],
-        column_separators={3, 6},
-        cell_formatters=[
-            _standings_points_cell_formatter(
-                [str(row[col_idx]) for row in combined_rows],
-                pretty=True,
-            )
-            if col_idx in point_columns
-            else None
-            for col_idx in range(9)
-        ],
-        group_headers=[
-            (0, 3, "Women"),
-            (3, 6, "Men"),
-            (6, 9, "Combined (unofficial)"),
-        ],
+            ("Women", _build_nations_table_lines(women_rows)),
+            ("Men", _build_nations_table_lines(men_rows)),
+            ("Combined (unofficial)", _build_nations_table_lines(all_rows)),
+        ]
     )
-    _print_blank_lines(2)
 
 
 def _build_snapshot_athlete_standings_lines(

@@ -362,6 +362,8 @@ def render_table(
     column_separators: set[int] | None = None,
     group_headers: list[tuple[int, int, str]] | None = None,
     group_headers_position: Literal["above", "below", "inline"] = "above",
+    group_header_style: Literal["bold", "dim"] = "bold",
+    group_header_uppercase: bool = False,
     output_format: OutputFormat | None = None,
 ) -> None:
     """Render tabular data as aligned text, TSV, or Markdown.
@@ -386,6 +388,8 @@ def render_table(
             the span of columns [start_col, end_col).
         group_headers_position: Position for the optional group header line
             ("above", "below", or "inline").
+        group_header_style: Style for optional group header labels ("bold" or "dim").
+        group_header_uppercase: Whether to upper-case optional group header labels.
     """
     mode: OutputFormat
     if output_format is not None:
@@ -551,6 +555,8 @@ def render_table(
             if span_width <= 0:
                 continue
             label_text = str(label)
+            if group_header_uppercase:
+                label_text = label_text.upper()
             if not label_text:
                 continue
             # Truncate overly long labels so rendering never indexes outside span.
@@ -576,6 +582,8 @@ def render_table(
                 return Color.silver(label)
             if key == "bronze":
                 return Color.bronze(label)
+            if group_header_style == "dim":
+                return Color.dim(label)
             return f"{Color.BOLD}{label}{Color.RESET}"
 
         for label in placed_labels:
@@ -627,9 +635,12 @@ def render_table(
             span_start = col_positions[start_col][0]
             span_end = col_positions[end_col - 1][1]
             span_width = span_end - span_start
-            pad = max(0, span_width - len(label))
+            label_text = str(label)
+            if group_header_uppercase:
+                label_text = label_text.upper()
+            pad = max(0, span_width - len(label_text))
             left_pad = pad // 2
-            for ci, ch in enumerate(label):
+            for ci, ch in enumerate(label_text):
                 line_chars[span_start + left_pad + ci] = ch
 
         raw_line = "".join(line_chars).rstrip()
@@ -642,12 +653,17 @@ def render_table(
                 return Color.silver(label)
             if key == "bronze":
                 return Color.bronze(label)
+            if group_header_style == "dim":
+                return Color.dim(label)
             return f"{Color.BOLD}{label}{Color.RESET}"
 
         for segment, styled in non_group_segments:
             raw_line = raw_line.replace(segment, styled, 1)
         for _start_col, _end_col, label in group_headers:
-            raw_line = raw_line.replace(label, _style_group_label(label), 1)
+            label_text = str(label)
+            if group_header_uppercase:
+                label_text = label_text.upper()
+            raw_line = raw_line.replace(label_text, _style_group_label(label_text), 1)
         print(raw_line)
 
     if show_headers:

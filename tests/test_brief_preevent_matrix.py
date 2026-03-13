@@ -1728,6 +1728,48 @@ def test_render_decorated_tables_add_info_group_header(monkeypatch):
     ]
 
 
+def test_render_decorated_tables_pretty_uses_dim_upper_group_headers(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(brief.Color, "dim", lambda text: f"<DIM>{text}</DIM>")
+
+    brief._render_decorated_athletes_split_tables(
+        "Most Decorated Athletes at Kontiolahti",
+        [
+            [
+                "1",
+                "Woman A",
+                "SWE",
+                "F",
+                "3",
+                "0",
+                "0",
+                "3",
+                "8",
+                "3",
+                "0",
+                "0",
+                "3",
+                "8",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0",
+            ]
+        ],
+        [""],
+        argparse.Namespace(format="pretty"),
+        gender_filter="F",
+    )
+
+    out = capsys.readouterr().out
+    assert "<DIM>INFO</DIM>" in out
+    assert "<DIM>ALL</DIM>" in out
+    assert "<DIM>INDIVIDUAL</DIM>" in out
+    assert "<DIM>TEAM</DIM>" in out
+
+
 def test_handle_brief_preevent_renders_matrix_sections(monkeypatch, capsys):
     monkeypatch.setattr(brief, "get_current_season_id", lambda: "2526")
     monkeypatch.setattr(
@@ -2882,13 +2924,35 @@ def test_render_relay_tables_pretty_side_by_side(monkeypatch, capsys):
     )
 
     out = capsys.readouterr().out
-    assert "Women Relay" in out
-    assert "Men Relay" in out
-    assert "Mixed Relay" in out
-    assert "All Relay (unofficial)" in out
+    assert "WOMEN RELAY" in out
+    assert "MEN RELAY" in out
+    assert "MIXED RELAY" in out
+    assert "ALL RELAY (UNOFFICIAL)" in out
     assert out.count("Rank") >= 3
-    assert "Norway" in out and "France" in out and "Sweden" in out
+    assert "NORWAY" in out and "FRANCE" in out and "SWEDEN" in out
     assert "Nat" not in out
+
+
+def test_render_relay_tables_pretty_bolds_leaders(monkeypatch, capsys):
+    monkeypatch.setattr(brief.Color, "enabled", classmethod(lambda cls: True))
+
+    brief._render_relay_tables(
+        {
+            "SW": [{"Rank": 1, "Name": "Alpha Relay", "Nat": "FRA", "Score": 101}],
+            "SM": [{"Rank": 1, "Name": "Bravo Relay", "Nat": "NOR", "Score": 202}],
+            "MX": [{"Rank": 1, "Name": "Charlie Relay", "Nat": "ITA", "Score": 303}],
+            "ALL": [{"Rank": 1, "Name": "Delta Relay", "Nat": "GER", "Score": 404}],
+        },
+        argparse.Namespace(format="pretty"),
+    )
+
+    out = capsys.readouterr().out
+    assert f"{brief.Color.BOLD}FRANCE{brief.Color.RESET}" in out
+    assert f"{brief.Color.BOLD}NORWAY{brief.Color.RESET}" in out
+    assert f"{brief.Color.BOLD}ITALY{brief.Color.RESET}" in out
+    assert f"{brief.Color.BOLD}GERMANY{brief.Color.RESET}" in out
+    assert f"{brief.Color.BOLD}101{brief.Color.RESET}" in out
+    assert f"{brief.Color.BOLD}202{brief.Color.RESET}" in out
 
 
 def test_render_relay_tables_tsv_includes_all_relay_sum(capsys):
@@ -2906,8 +2970,8 @@ def test_render_relay_tables_tsv_includes_all_relay_sum(capsys):
 
     out = capsys.readouterr().out
     assert "All Relay (unofficial)" in out
-    assert "1\tNorway\t265" in out
-    assert "2\tFrance\t80 (-20)" in out
+    assert "1\tNORWAY\t265" in out
+    assert "2\tFRANCE\t80 (-20)" in out
 
 
 def test_render_nations_tables_pretty_side_by_side(monkeypatch, capsys):
@@ -2928,16 +2992,37 @@ def test_render_nations_tables_pretty_side_by_side(monkeypatch, capsys):
     )
 
     out = capsys.readouterr().out
-    assert "Women" in out
-    assert "Men" in out
-    assert "Combined (unofficial)" in out
-    assert "France" in out and "Norway" in out
-    assert "FRANCE" not in out and "NORWAY" not in out
+    assert "WOMEN" in out
+    assert "MEN" in out
+    assert "COMBINED (UNOFFICIAL)" in out
+    assert "FRANCE" in out and "NORWAY" in out
+    assert "France" not in out and "Norway" not in out
     assert out.count("Team") >= 2
     assert "1000.0" in out
     assert "995.0" in out
     assert "1995.0" not in out
     assert "1995" in out
+
+
+def test_render_nations_tables_pretty_bolds_leaders(monkeypatch, capsys):
+    monkeypatch.setattr(brief.Color, "enabled", classmethod(lambda cls: True))
+
+    brief._render_nations_tables(
+        {
+            "SW": [{"Rank": 1, "Name": "FRANCE", "Nat": "FRA", "Score": 1111}],
+            "SM": [{"Rank": 1, "Name": "NORWAY", "Nat": "NOR", "Score": 2222}],
+            "ALL": [{"Rank": 1, "Name": "SWEDEN", "Nat": "SWE", "Score": 3333}],
+        },
+        argparse.Namespace(format="pretty"),
+    )
+
+    out = capsys.readouterr().out
+    assert f"{brief.Color.BOLD}FRANCE{brief.Color.RESET}" in out
+    assert f"{brief.Color.BOLD}NORWAY{brief.Color.RESET}" in out
+    assert f"{brief.Color.BOLD}SWEDEN{brief.Color.RESET}" in out
+    assert f"{brief.Color.BOLD}1111.0{brief.Color.RESET}" in out
+    assert f"{brief.Color.BOLD}2222.0{brief.Color.RESET}" in out
+    assert f"{brief.Color.BOLD}3333{brief.Color.RESET}" in out
 
 
 def test_render_nations_tables_tsv_includes_all_nations_sum(capsys):
@@ -2957,8 +3042,8 @@ def test_render_nations_tables_tsv_includes_all_nations_sum(capsys):
 
     out = capsys.readouterr().out
     assert "Combined (unofficial)" in out
-    assert "1\tFrance\tFRA\t1995.0" in out
-    assert "2\tNorway\tNOR\t900.5 (-1094.5)" in out
+    assert "1\tFRANCE\tFRA\t1995.0" in out
+    assert "2\tNORWAY\tNOR\t900.5 (-1094.5)" in out
 
 
 def test_preevent_points_gap_formatter_uses_muted_red(monkeypatch):
@@ -2988,8 +3073,8 @@ def test_relay_and_nations_use_same_country_mapping(monkeypatch, capsys):
     )
     nations_out = capsys.readouterr().out
 
-    assert "Czech Republic" in relay_out
-    assert "Czech Republic" in nations_out
+    assert "CZECH REPUBLIC" in relay_out
+    assert "CZECH REPUBLIC" in nations_out
     assert "CZECHIA" not in relay_out
     assert "CZECHIA" not in nations_out
 
