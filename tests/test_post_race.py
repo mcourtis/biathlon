@@ -717,7 +717,7 @@ def test_build_standings_rows_includes_age_column():
 
     assert table_rows[0] == ["1", "Alpha", "22 (U23)", "NOR", "+90", "300", "+1"]
     assert table_rows[1] == ["2", "Bravo", "24", "SWE", "+75", "250 (-50)", "="]
-    assert row_styles == ["", "dim"]
+    assert row_styles == ["", "muted"]
 
 
 def test_build_standings_rows_formats_total_points_gap_in_u23_mode():
@@ -843,13 +843,13 @@ def test_render_wc_standings_table_pair_places_u23_table_on_right_in_pretty_mode
             ["1", "Alpha", "22", "NOR", "+90", "300", "+1"],
             ["2", "Beta", "23", "SWE", "+75", "250 (-50)", "="],
         ],
-        ["", "dim"],
+        ["", "muted"],
         lambda cell, _row_idx: cell,
         [
             ["1", "12", "Bravo", "21", "SWE", "+45", "150", "+2"],
             ["2", "24", "Charlie", "20", "USA", "+20", "100 (-50)", "="],
         ],
-        ["", "dim"],
+        ["", "muted"],
         lambda cell, _row_idx: cell,
     )
 
@@ -863,8 +863,8 @@ def test_render_wc_standings_table_pair_places_u23_table_on_right_in_pretty_mode
     assert captured_kwargs["u23"].get("column_separators") == {5}
     main_points = captured_kwargs["main"]["cell_formatters"][5]("250 (-50)", 1)
     u23_points = captured_kwargs["u23"]["cell_formatters"][6]("100 (-50)", 1)
-    assert "\x1b[38;2;176;110;110m" in main_points
-    assert "\x1b[38;2;176;110;110m" in u23_points
+    assert "\x1b[38;2;196;118;118m" in main_points
+    assert "\x1b[38;2;196;118;118m" in u23_points
 
 
 def test_make_name_formatter_supports_u23_marker():

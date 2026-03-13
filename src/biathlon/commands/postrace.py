@@ -718,6 +718,8 @@ def _format_race_points(value: Any) -> str:
 
 
 def _apply_style(cell_str: str, style: str) -> str:
+    if style == "muted":
+        return Color.muted(cell_str)
     if style == "dim":
         return Color.dim(cell_str)
     if style == "highlight":
@@ -1137,7 +1139,7 @@ def _build_standings_rows(
                     str(entry["change"]),
                 ]
             )
-        row_styles.append("" if entry["participated"] else "dim")
+        row_styles.append("" if entry["participated"] else "muted")
     return rows_out, row_styles
 
 
@@ -1901,7 +1903,7 @@ def _render_olympic_medal_sections(
                 ]
             )
             cm = rcm.get(country)
-            disc_country_styles.append(_best_medal_style(cm) if cm else "dim")
+            disc_country_styles.append(_best_medal_style(cm) if cm else "muted")
             disc_country_keys.append(country)
         disc_country_fmt = _make_medal_cell_formatter(
             disc_country_styles, rcm, disc_country_keys
@@ -2031,7 +2033,7 @@ def _render_olympic_medal_sections(
                 ]
             )
             cm = rcm_all.get(country)
-            all_country_styles.append(_best_medal_style(cm) if cm else "dim")
+            all_country_styles.append(_best_medal_style(cm) if cm else "muted")
             all_country_keys.append(country)
         all_country_fmt = _make_medal_cell_formatter(
             all_country_styles, rcm_all, all_country_keys
@@ -2211,7 +2213,7 @@ def _render_olympic_medal_sections(
             elif key in participating_ids:
                 all_row_styles.append("highlight_plain")
             else:
-                all_row_styles.append("dim")
+                all_row_styles.append("muted")
             all_ath_keys.append(key)
         all_ath_name_fmt = _make_medal_cell_formatter(all_row_styles, ram, all_ath_keys)
         render_table(
@@ -2761,7 +2763,7 @@ def _render_best_performances_section(
         elif rank_val == 3:
             row_styles.append("bronze")
         else:
-            row_styles.append("dim")
+            row_styles.append("muted")
     athlete_formatter = _make_name_formatter(row_styles)
     render_table(
         ["Rank", "Athlete", "Nat", "Milestone", "Previous Best Results"],
@@ -3030,9 +3032,7 @@ def handle_post_race(args: argparse.Namespace) -> int:
                 )
             results_rows.append(row)
         if event_type == EVENT_TYPE_OWG:
-            row_styles = [
-                MEDAL_RANK_MAP.get(entry["rank"], "dim") for entry in flower_entries
-            ]
+            row_styles = [MEDAL_RANK_MAP.get(entry["rank"], "muted")]
             name_formatter = _make_medal_cell_formatter(
                 row_styles, section_one_medal_map, section_one_keys
             )

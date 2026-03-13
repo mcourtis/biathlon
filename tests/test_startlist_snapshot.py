@@ -4,7 +4,7 @@ import argparse
 import datetime
 
 from biathlon.api import BiathlonError
-from biathlon.commands import startlist
+from biathlon.commands import brief, startlist
 
 
 def _dt(value: str) -> datetime.datetime:
@@ -965,8 +965,8 @@ def test_standings_points_cell_formatter_dims_gap_only_in_pretty_output(monkeypa
     formatted = formatter("430 (-70)", 1)
 
     assert formatted.startswith("430")
-    assert "\x1b[2m" in formatted
-    assert "\x1b[38;2;176;110;110m (-70)\x1b[0m" in formatted
+    assert "\x1b[2m" not in formatted
+    assert "\x1b[38;2;196;118;118m (-70)\x1b[0m" in formatted
 
 
 def test_standings_points_cell_formatter_keeps_leader_points_plain(monkeypatch):
@@ -989,7 +989,7 @@ def test_standings_points_cell_formatter_keeps_leader_points_plain(monkeypatch):
     assert leader.startswith("309")
     assert "\x1b[" not in leader
     assert chaser.startswith("274")
-    assert "\x1b[38;2;176;110;110m (-35)\x1b[0m" in chaser
+    assert "\x1b[38;2;196;118;118m (-35)\x1b[0m" in chaser
     assert startlist._display_width(leader) == startlist._display_width(chaser)
 
 
@@ -1171,6 +1171,106 @@ def test_render_startlist_analysis_marks_u23_leader_in_merged_wc_rows(
     assert "Disc U23 ●" in out
 
 
+def test_render_startlist_analysis_renders_decorated_sections(monkeypatch):
+    enabled_sections = {
+        startlist.SECTION_DECORATED_VENUE,
+        startlist.SECTION_DECORATED_EVENT_TYPE,
+        startlist.SECTION_DECORATED_CAREER,
+    }
+    monkeypatch.setattr(
+        startlist,
+        "_section_enabled",
+        lambda section_id, *_args, **_kwargs: section_id in enabled_sections,
+    )
+    monkeypatch.setattr(startlist, "_get_cup_ids_for_race", lambda *_a, **_k: ("", ""))
+
+    captured_builds: list[tuple[str, object, dict]] = []
+    rendered_calls: list[tuple[str, str | None]] = []
+
+    def fake_build_venue(venue_name, **kwargs):
+        captured_builds.append(("venue", venue_name, kwargs))
+        return [["1", "Alpha", "NOR", "F", "1", "0", "0", "1", "1"]], [""]
+
+    def fake_build_event_type(event_type, **kwargs):
+        captured_builds.append(("event_type", event_type, kwargs))
+        return [["1", "Alpha", "NOR", "F", "1", "0", "0", "1", "1"]], [""]
+
+    def fake_build_career(**kwargs):
+        captured_builds.append(("career", None, kwargs))
+        return [["1", "Alpha", "NOR", "F", "1", "0", "0", "1", "1"]], [""]
+
+    def fake_render(
+        title, rows, row_styles, args, per_gender_limit=None, gender_filter=None
+    ):
+        rendered_calls.append((title, gender_filter))
+        assert rows
+        assert row_styles == [""]
+        assert per_gender_limit == 15
+
+    monkeypatch.setattr(brief, "_build_venue_decorated_athlete_rows", fake_build_venue)
+    monkeypatch.setattr(
+        brief, "_build_event_type_decorated_athlete_rows", fake_build_event_type
+    )
+    monkeypatch.setattr(
+        brief, "_build_major_events_decorated_athlete_rows", fake_build_career
+    )
+    monkeypatch.setattr(brief, "_render_decorated_athletes_split_tables", fake_render)
+
+    ctx = {
+        "payload": {
+            "Competition": {"StartTime": "2026-01-10T10:00:00Z"},
+            "Results": [
+                {
+                    "IsTeam": False,
+                    "IBUId": "A1",
+                    "Name": "Alpha One",
+                    "Nat": "NOR",
+                }
+            ],
+        },
+        "comp": {"StartTime": "2026-01-10T10:00:00Z"},
+        "race_id": "RACE1",
+        "entries": [{"ibu_id": "A1", "name": "Alpha One", "nat": "NOR"}],
+        "race_disc": "SP",
+        "cat_id": "SW",
+        "season_id": "2526",
+        "event_type": startlist.EVENT_TYPE_WC,
+        "startlist_ids": {"A1"},
+        "age_cache": {},
+        "prefetched_results": {},
+        "team_entries": [],
+        "is_mixed": False,
+        "is_snapshot": False,
+        "snapshot_target_race_id": "",
+        "snapshot_cutoff_dt": None,
+        "snapshot_race_start_cache": {},
+        "venue_name": "Ruhpolding",
+    }
+
+    startlist.render_startlist_analysis(
+        ctx, argparse.Namespace(format="tsv", leader_markers=False)
+    )
+
+    assert rendered_calls == [
+        ("Most Decorated Athletes at Ruhpolding", "F"),
+        ("Most Decorated Athletes at World Cup", "F"),
+        ("Most Decorated Athletes in career", "F"),
+    ]
+
+    venue_call = next(call for call in captured_builds if call[0] == "venue")
+    assert venue_call[1] == "Ruhpolding"
+    assert venue_call[2]["reference_date"] == datetime.date(2026, 1, 10)
+    assert venue_call[2]["exclude_race_ids"] == {"RACE1"}
+    assert "A1" in venue_call[2]["highlight_keys"]
+
+    event_call = next(call for call in captured_builds if call[0] == "event_type")
+    assert event_call[1] == startlist.EVENT_TYPE_WC
+    assert event_call[2]["exclude_race_ids"] == {"RACE1"}
+
+    career_call = next(call for call in captured_builds if call[0] == "career")
+    assert career_call[2]["exclude_race_ids"] == {"RACE1"}
+
+
 def test_render_startlist_analysis_nations_cup_shows_behind_points(monkeypatch, capsys):
     monkeypatch.setattr(startlist, "_get_cup_ids_for_race", lambda *_a, **_k: ("", ""))
     monkeypatch.setattr(
@@ -1292,6 +1392,49 @@ def test_render_individual_podium_table_uses_short_names_and_centered_headers(
         4: "center",
         5: "center",
     }
+
+
+def test_render_individual_podium_table_uses_plain_highlight_for_startlist_athletes(
+    monkeypatch,
+):
+    captured: dict[str, object] = {}
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured["rows"] = rows
+
+    monkeypatch.setattr(startlist, "render_table", fake_render_table)
+    monkeypatch.setattr(
+        startlist, "_print_spaced_section_title", lambda *_args, **_kwargs: None
+    )
+    monkeypatch.setattr(
+        startlist.Color, "highlight_plain", lambda text: f"<HP>{text}</HP>"
+    )
+    monkeypatch.setattr(startlist.Color, "highlight", lambda text: f"<H>{text}</H>")
+
+    startlist._render_individual_podium_table(
+        startlist.SECTION_PREVIOUS_PODIUMS,
+        [
+            {
+                "date": "2026-02-14",
+                "race_type": "World Cup",
+                "venue": "Antholz-Anterselva",
+                "gold_athletes": [
+                    {
+                        "full_name": "Lou Jeanmonnot",
+                        "name": "JEANMONNOT",
+                        "nat": "FRA",
+                    }
+                ],
+                "silver_athletes": [],
+                "bronze_athletes": [],
+            }
+        ],
+        argparse.Namespace(format="pretty", leader_markers=False),
+        highlight_names={"JEANMONNOT"},
+        last_name_only=True,
+    )
+
+    assert captured["rows"][0][3] == "<HP>JEANMONNOT Lou (FRA)</HP>"
 
 
 def test_olympic_athlete_tables_keep_global_ranks_for_startlist_athletes(

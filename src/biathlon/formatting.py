@@ -35,9 +35,10 @@ class Color:
     BRONZE = (205, 127, 50)
     FLOWERS = (255, 182, 108)
     OTHER = (215, 215, 215)
+    MUTED = (150, 150, 150)
     GREEN = (0, 200, 0)
     RED = (220, 60, 60)
-    MUTED_RED = (176, 110, 110)
+    MUTED_RED = (196, 118, 118)
     DARK_BLUE = (0, 70, 150)
     LIGHT_BLUE = (102, 178, 255)
 
@@ -56,6 +57,13 @@ class Color:
         if not cls.enabled():
             return text
         return f"{cls.DIM}{text}{cls.RESET}"
+
+    @classmethod
+    def muted(cls, text: str) -> str:
+        """Apply a muted color that stays readable across terminals."""
+        if not cls.enabled():
+            return text
+        return cls.rgb(text, cls.MUTED)
 
     @classmethod
     def highlight(cls, text: str) -> str:
@@ -103,6 +111,13 @@ class Color:
         return (
             f"{cls.DIM}{cls.COLOR_PREFIX}{r};{g};{b}{cls.COLOR_SUFFIX}{text}{cls.RESET}"
         )
+
+    @classmethod
+    def muted_red(cls, text: str) -> str:
+        """Apply a softer red accent without relying on ANSI dim support."""
+        if not cls.enabled():
+            return text
+        return cls.rgb(text, cls.MUTED_RED)
 
     @classmethod
     def silver(cls, text: str) -> str:
@@ -356,7 +371,8 @@ def render_table(
         rows: Data rows.
         pretty: Deprecated compatibility switch. True -> aligned, False -> TSV.
         output_format: Explicit output mode ("pretty", "tsv", "markdown").
-        row_styles: Optional list of style names per row ("dim", "highlight", or "").
+        row_styles: Optional list of style names per row
+            ("dim", "muted", "highlight", or "").
         row_separators: Optional set of row indices before which a horizontal separator
             is drawn (pretty mode only).
         cell_formatters: Optional list of functions (one per column) to format cell values.
@@ -389,6 +405,8 @@ def render_table(
     def apply_row_style(text: str, style: str) -> str:
         if style == "dim":
             return Color.dim(text)
+        if style == "muted":
+            return Color.muted(text)
         if style == "highlight":
             return Color.highlight(text)
         if style == "highlight_plain":

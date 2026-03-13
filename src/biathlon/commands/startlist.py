@@ -350,6 +350,9 @@ SECTION_PURSUIT_CONTENDERS = "pursuit_contenders_lt_1min"
 SECTION_RACE_MILESTONES = "race_milestones"
 SECTION_WIN_MILESTONES = "win_milestones"
 SECTION_PREVIOUS_PODIUMS = "previous_podiums_last_two_seasons"
+SECTION_DECORATED_VENUE = "decorated_venue"
+SECTION_DECORATED_EVENT_TYPE = "decorated_event_type"
+SECTION_DECORATED_CAREER = "decorated_career"
 SECTION_PREVIOUS_OWG_PODIUMS = "previous_owg_podiums_all_editions"
 SECTION_PREVIOUS_WCH_PODIUMS = "previous_wch_podiums_last_10_editions"
 SECTION_COUNTRY_OWG_DISC = "country_owg_medals_discipline"
@@ -373,6 +376,9 @@ STARTLIST_SECTION_ORDER = [
     SECTION_RACE_MILESTONES,
     SECTION_WIN_MILESTONES,
     SECTION_PREVIOUS_PODIUMS,
+    SECTION_DECORATED_VENUE,
+    SECTION_DECORATED_EVENT_TYPE,
+    SECTION_DECORATED_CAREER,
     SECTION_PREVIOUS_OWG_PODIUMS,
     SECTION_PREVIOUS_WCH_PODIUMS,
     SECTION_COUNTRY_OWG_DISC,
@@ -397,6 +403,9 @@ STARTLIST_SECTION_TITLES = {
     SECTION_RACE_MILESTONES: "Race milestones",
     SECTION_WIN_MILESTONES: "Win milestones",
     SECTION_PREVIOUS_PODIUMS: "Previous podiums",
+    SECTION_DECORATED_VENUE: "Most Decorated Athletes at <venue>",
+    SECTION_DECORATED_EVENT_TYPE: "Most Decorated Athletes at <event>",
+    SECTION_DECORATED_CAREER: "Most Decorated Athletes in career",
     SECTION_PREVIOUS_OWG_PODIUMS: "Previous Olympic Games podiums (available editions)",
     SECTION_PREVIOUS_WCH_PODIUMS: "Previous World Championship podiums (available editions)",
     SECTION_COUNTRY_OWG_DISC: "Country OWG medal table (discipline) (all editions)",
@@ -468,6 +477,15 @@ STARTLIST_SECTION_MATRIX = {
         (1, 1, 1, 1, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1)
     ),
     SECTION_PREVIOUS_PODIUMS: _matrix_row(
+        (1, 1, 1, 1, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1)
+    ),
+    SECTION_DECORATED_VENUE: _matrix_row(
+        (1, 1, 1, 1, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1)
+    ),
+    SECTION_DECORATED_EVENT_TYPE: _matrix_row(
+        (1, 1, 1, 1, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1)
+    ),
+    SECTION_DECORATED_CAREER: _matrix_row(
         (1, 1, 1, 1, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1), (1, 1, 1, 1, 1, 1, 1, 1)
     ),
     SECTION_PREVIOUS_OWG_PODIUMS: _matrix_row(
@@ -2814,7 +2832,7 @@ def _render_standings_section(
 
     def _row_dimmer(missing_rows: set[int]) -> Callable[[str, int], str]:
         def row_dimmer(cell_str: str, row_idx: int) -> str:
-            return Color.dim(cell_str) if row_idx in missing_rows else cell_str
+            return Color.muted(cell_str) if row_idx in missing_rows else cell_str
 
         return row_dimmer
 
@@ -5259,7 +5277,7 @@ def _standings_points_cell_formatter(
             return aligned_text
         if not Color.enabled() or not gap_slot:
             return aligned_text
-        return f"{points_part}{Color.rgb_dim(gap_slot, Color.MUTED_RED)}"
+        return f"{points_part}{Color.muted_red(gap_slot)}"
 
     return formatter
 
@@ -5530,7 +5548,7 @@ def _render_individual_podium_table(
         nat = str(athlete.get("nat") or "")
         display = f"{name} ({nat})" if include_nat and nat and nat not in name else name
         if family and family in highlight_names:
-            return Color.highlight(display)
+            return Color.highlight_plain(display)
         return display
 
     table_rows: list[list[str]] = []
@@ -5593,7 +5611,7 @@ def _render_relay_podium_table(
             if name and name in highlight_names:
                 names.append(Color.highlight_plain(display_name))
             else:
-                names.append(Color.dim(display_name) if display_name else "-")
+                names.append(Color.muted(display_name) if display_name else "-")
         return "/".join(n for n in names if n) or "-"
 
     table_rows: list[list[str]] = []
@@ -5769,7 +5787,9 @@ def _render_athlete_medal_table_from_podiums(
                 str(counts["races"]),
             ]
         )
-        row_styles.append("highlight" if counts["family"] in highlight_names else "dim")
+        row_styles.append(
+            "highlight" if counts["family"] in highlight_names else "muted"
+        )
     if not table_rows:
         if title_override:
             _print_spaced_section_title(f"{title_override}: none", args)
@@ -5995,7 +6015,7 @@ def _render_athlete_all_medal_table(
                 str(stats.get("races_relay", 0)),
             ]
         )
-        row_styles.append("highlight" if key in highlight_ids else "dim")
+        row_styles.append("highlight" if key in highlight_ids else "muted")
     render_table(
         [
             "#",
@@ -6030,6 +6050,7 @@ def _render_athlete_all_medal_table(
 def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
     """Render brief-startlist sections via matrix-gated unified flow."""
     payload = ctx["payload"]
+    comp = ctx.get("comp") or (payload.get("Competition") or {})
     race_id = ctx["race_id"]
     entries = ctx["entries"]
     race_disc = ctx["race_disc"]
@@ -6053,6 +6074,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
     is_provisional_startlist = bool(
         ctx.get("is_provisional_startlist", _is_provisional_startlist_payload(payload))
     )
+    venue_name = str(ctx.get("venue_name") or "").strip()
     startlist_countries = _collect_startlist_countries(ctx)
     startlist_athletes = _get_startlist_family_names(payload)
     mark_leaders = bool(getattr(args, "leader_markers", False)) and pretty_output
@@ -6116,6 +6138,23 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
 
     def leader_name_cell(cell_str: str, row_idx: int) -> str:
         return _format_leader_markers(cell_str, row_idx)
+
+    decorated_reference_dt = snapshot_cutoff_dt
+    if decorated_reference_dt is None:
+        for raw in (
+            comp.get("StartTime"),
+            comp.get("StartDate"),
+            comp.get("Date"),
+            comp.get("FirstStart"),
+        ):
+            if not raw:
+                continue
+            decorated_reference_dt = parse_start_datetime(str(raw))
+            if decorated_reference_dt is not None:
+                break
+    decorated_reference_date = (
+        decorated_reference_dt.date() if decorated_reference_dt is not None else None
+    )
 
     # Section 1
     if enabled(SECTION_MISSING_TOP25):
@@ -6825,7 +6864,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
             )
             print()
 
-    # Sections 13-15 podium history
+    # Podium history + decorated-athlete history
     cutoff = snapshot_cutoff_dt if is_snapshot else None
     previous_rows = (
         _get_previous_relay_podiums(race_id, season_id, race_disc, cat_id, cutoff)
@@ -6868,6 +6907,108 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                 highlight_names=startlist_athletes,
                 last_name_only=True,
                 title_override=previous_podiums_title,
+            )
+
+    if any(
+        enabled(section_id)
+        for section_id in (
+            SECTION_DECORATED_VENUE,
+            SECTION_DECORATED_EVENT_TYPE,
+            SECTION_DECORATED_CAREER,
+        )
+    ):
+        from .brief import (
+            _build_event_type_decorated_athlete_rows,
+            _build_major_events_decorated_athlete_rows,
+            _build_venue_decorated_athlete_rows,
+            _participant_name_highlight_keys,
+            _render_decorated_athletes_split_tables,
+        )
+
+        decorated_highlight_keys: set[str] = set(startlist_ids)
+        decorated_gender_filter = {"SW": "F", "SM": "M"}.get(cat_id)
+        for row in payload.get("Results", []) or []:
+            if row.get("IsTeam"):
+                continue
+            ibu_id = _row_ibu_id(row)
+            if ibu_id:
+                decorated_highlight_keys.add(ibu_id)
+            name = str(
+                row.get("Name") or row.get("ShortName") or row.get("FamilyName") or ""
+            ).strip()
+            nat = str(row.get("Nat") or "").strip().upper()
+            if name and nat:
+                decorated_highlight_keys.add(f"{name}|{nat}")
+            decorated_highlight_keys.update(_participant_name_highlight_keys(row))
+        for entry in entries:
+            ibu_id = str(entry.get("ibu_id") or "").strip()
+            if ibu_id:
+                decorated_highlight_keys.add(ibu_id)
+            name = str(entry.get("name") or entry.get("full_name") or "").strip()
+            nat = str(entry.get("nat") or "").strip().upper()
+            if name and nat:
+                decorated_highlight_keys.add(f"{name}|{nat}")
+            if name:
+                decorated_highlight_keys.update(
+                    _participant_name_highlight_keys({"Name": name})
+                )
+
+        if enabled(SECTION_DECORATED_VENUE):
+            if venue_name:
+                decorated_rows, decorated_styles = _build_venue_decorated_athlete_rows(
+                    venue_name,
+                    reference_date=decorated_reference_date,
+                    highlight_keys=decorated_highlight_keys,
+                    limit=0,
+                    exclude_race_ids={race_id},
+                )
+                _render_decorated_athletes_split_tables(
+                    f"Most Decorated Athletes at {venue_name}",
+                    decorated_rows,
+                    decorated_styles,
+                    args,
+                    per_gender_limit=15,
+                    gender_filter=decorated_gender_filter,
+                )
+            else:
+                _print_section_none(SECTION_DECORATED_VENUE, args)
+
+        if enabled(SECTION_DECORATED_EVENT_TYPE):
+            event_type_label = EVENT_TYPE_LABELS.get(
+                event_type, EVENT_TYPE_LABELS.get(EVENT_TYPE_WC, "World Cup")
+            )
+            decorated_rows, decorated_styles = _build_event_type_decorated_athlete_rows(
+                event_type,
+                reference_date=decorated_reference_date,
+                highlight_keys=decorated_highlight_keys,
+                limit=0,
+                exclude_race_ids={race_id},
+            )
+            _render_decorated_athletes_split_tables(
+                f"Most Decorated Athletes at {event_type_label}",
+                decorated_rows,
+                decorated_styles,
+                args,
+                per_gender_limit=15,
+                gender_filter=decorated_gender_filter,
+            )
+
+        if enabled(SECTION_DECORATED_CAREER):
+            decorated_rows, decorated_styles = (
+                _build_major_events_decorated_athlete_rows(
+                    reference_date=decorated_reference_date,
+                    highlight_keys=decorated_highlight_keys,
+                    limit=0,
+                    exclude_race_ids={race_id},
+                )
+            )
+            _render_decorated_athletes_split_tables(
+                "Most Decorated Athletes in career",
+                decorated_rows,
+                decorated_styles,
+                args,
+                per_gender_limit=15,
+                gender_filter=decorated_gender_filter,
             )
 
     owg_rows: list[dict] = []
@@ -6919,7 +7060,7 @@ def render_startlist_analysis(ctx: dict, args: argparse.Namespace) -> None:
                 highlight_names=startlist_athletes,
             )
 
-    # Sections 16-23 medal tables
+    # Major-event medal tables
     if enabled(SECTION_COUNTRY_OWG_DISC):
         _render_country_medal_table_from_podiums(
             SECTION_COUNTRY_OWG_DISC,

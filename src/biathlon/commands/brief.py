@@ -914,6 +914,74 @@ def _parse_points_value(value: object) -> float:
         return 0.0
 
 
+def _row_points_text(row: dict) -> str:
+    raw = row.get("Score")
+    if raw in (None, ""):
+        raw = row.get("Points")
+    return str(raw if raw not in (None, "") else "0").strip() or "0"
+
+
+def _standings_points_text(
+    points_text: str,
+    row_points: float,
+    leader_points: float | None,
+    *,
+    gap_formatter: Callable[[float], str] = _format_score_value,
+) -> str:
+    if leader_points is None or abs(leader_points - row_points) <= 1e-9:
+        return points_text
+    behind = max(0.0, leader_points - row_points)
+    return f"{points_text} (-{gap_formatter(behind)})"
+
+
+def _standings_points_cell_formatter(
+    point_cells: list[str],
+    *,
+    pretty: bool,
+    point_formatter: Callable[[str, int], str] | None = None,
+) -> Callable[[str, int], str]:
+    point_parts: list[str] = []
+    gap_parts: list[str] = []
+    for cell in point_cells:
+        match = re.match(r"^(.*?)(?:\s+(\(-[^)]+\)))?$", str(cell))
+        if not match:
+            point_parts.append(str(cell))
+            continue
+        point_text, gap_text = match.groups()
+        point_parts.append(point_text)
+        if gap_text:
+            gap_parts.append(gap_text)
+
+    points_width = max((len(text) for text in point_parts), default=0)
+    gap_width = max((len(text) for text in gap_parts), default=0)
+
+    def _split_cell(cell_str: str) -> tuple[str, str]:
+        match = re.match(r"^(.*?)(?:\s+(\(-[^)]+\)))?$", cell_str)
+        if not match:
+            return cell_str, ""
+        point_text, gap_text = match.groups()
+        return point_text, gap_text or ""
+
+    def formatter(cell_str: str, row_idx: int) -> str:
+        if not pretty:
+            return cell_str
+        point_text, gap_text = _split_cell(cell_str)
+        points_part = point_text.rjust(points_width)
+        if point_formatter is not None:
+            points_part = point_formatter(points_part, row_idx)
+        if gap_width > 0:
+            gap_slot = (
+                f" {gap_text.ljust(gap_width)}" if gap_text else " " * (gap_width + 1)
+            )
+        else:
+            gap_slot = ""
+        if not Color.enabled() or not gap_slot:
+            return f"{points_part}{gap_slot}"
+        return f"{points_part}{Color.muted_red(gap_slot)}"
+
+    return formatter
+
+
 def _rows_from_country_points(
     points_by_nat: dict[str, float],
     names_by_nat: dict[str, str] | None,
@@ -3026,6 +3094,7 @@ def _render_decorated_athletes_split_tables(
     row_styles: list[str],
     args: argparse.Namespace,
     per_gender_limit: int | None = None,
+    gender_filter: str | None = None,
 ) -> None:
     _print_preevent_heading(2, title, args)
     if not rows:
@@ -3054,7 +3123,12 @@ def _render_decorated_athletes_split_tables(
         "Total",
         "Races",
     ]
-    for gender_label, gender_code in (("Women", "F"), ("Men", "M")):
+    gender_pairs = [
+        (label, code)
+        for label, code in (("Women", "F"), ("Men", "M"))
+        if gender_filter is None or gender_filter == code
+    ]
+    for gender_label, gender_code in gender_pairs:
         _print_preevent_heading(3, gender_label, args)
         gender_rows = rows_by_gender.get(gender_code, [])
         gender_styles = styles_by_gender.get(gender_code, [])
@@ -3074,7 +3148,12 @@ def _render_decorated_athletes_split_tables(
             renumbered_rows,
             output_format=get_output_format(args),
             column_separators={3, 8, 13},
-            group_headers=[(3, 8, "All"), (8, 13, "Individual"), (13, 18, "Team")],
+            group_headers=[
+                (0, 3, "Info"),
+                (3, 8, "All"),
+                (8, 13, "Individual"),
+                (13, 18, "Team"),
+            ],
             row_styles=gender_styles,
         )
         _print_blank_lines(2)
@@ -3340,12 +3419,18 @@ def _render_ranked_table(
         _print_blank_lines(2)
         return
 
+    leader_points = _parse_points_value(_row_points_text(rows[0])) if rows else None
     table_rows = []
     for idx, row in enumerate(rows):
         rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(".")
         name = str(row.get("Name") or row.get("ShortName") or "")
         nat = str(row.get("Nat") or "")
-        points = str(row.get("Score") or row.get("Points") or "0")
+        points_text = _row_points_text(row)
+        points = _standings_points_text(
+            points_text,
+            _parse_points_value(points_text),
+            leader_points,
+        )
         table_rows.append([rank, name, nat, points])
 
     render_table(
@@ -3358,12 +3443,21 @@ def _render_ranked_table(
     _print_blank_lines(2)
 
 
-def _relay_display_cells(row: dict | None, idx: int) -> list[str]:
+def _relay_display_cells(
+    row: dict | None,
+    idx: int,
+    leader_points: float | None,
+) -> list[str]:
     if not row:
         return ["-", "-", "-"]
     rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(".")
     name = _normalize_team_name(row)
-    points = str(row.get("Score") or row.get("Points") or "0")
+    points_text = _row_points_text(row)
+    points = _standings_points_text(
+        points_text,
+        _parse_points_value(points_text),
+        leader_points,
+    )
     return [rank, name, points]
 
 
@@ -3395,13 +3489,21 @@ def _render_relay_tables(
                 print("none")
                 _print_blank_lines(2)
                 continue
+            leader_points = (
+                _parse_points_value(_row_points_text(rows[0])) if rows else None
+            )
             table_rows = []
             for idx, row in enumerate(rows):
                 rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(
                     "."
                 )
                 name = _normalize_team_name(row)
-                points = str(row.get("Score") or row.get("Points") or "0")
+                points_text = _row_points_text(row)
+                points = _standings_points_text(
+                    points_text,
+                    _parse_points_value(points_text),
+                    leader_points,
+                )
                 table_rows.append([rank, name, points])
             render_table(
                 ["Rank", "Team", "Points"],
@@ -3414,19 +3516,44 @@ def _render_relay_tables(
         return
 
     max_rows = max(len(women_rows), len(men_rows), len(mixed_rows), len(all_rows))
+    women_leader_points = (
+        _parse_points_value(_row_points_text(women_rows[0])) if women_rows else None
+    )
+    men_leader_points = (
+        _parse_points_value(_row_points_text(men_rows[0])) if men_rows else None
+    )
+    mixed_leader_points = (
+        _parse_points_value(_row_points_text(mixed_rows[0])) if mixed_rows else None
+    )
+    all_leader_points = (
+        _parse_points_value(_row_points_text(all_rows[0])) if all_rows else None
+    )
     combined_rows: list[list[str]] = []
     for idx in range(max_rows):
         combined_rows.append(
             _relay_display_cells(
-                women_rows[idx] if idx < len(women_rows) else None, idx
+                women_rows[idx] if idx < len(women_rows) else None,
+                idx,
+                women_leader_points,
             )
-            + _relay_display_cells(men_rows[idx] if idx < len(men_rows) else None, idx)
             + _relay_display_cells(
-                mixed_rows[idx] if idx < len(mixed_rows) else None, idx
+                men_rows[idx] if idx < len(men_rows) else None,
+                idx,
+                men_leader_points,
             )
-            + _relay_display_cells(all_rows[idx] if idx < len(all_rows) else None, idx)
+            + _relay_display_cells(
+                mixed_rows[idx] if idx < len(mixed_rows) else None,
+                idx,
+                mixed_leader_points,
+            )
+            + _relay_display_cells(
+                all_rows[idx] if idx < len(all_rows) else None,
+                idx,
+                all_leader_points,
+            )
         )
 
+    point_columns = {2, 5, 8, 11}
     render_table(
         [
             "Rank",
@@ -3459,6 +3586,15 @@ def _render_relay_tables(
             "right",
         ],
         column_separators={3, 6, 9},
+        cell_formatters=[
+            _standings_points_cell_formatter(
+                [str(row[col_idx]) for row in combined_rows],
+                pretty=True,
+            )
+            if col_idx in point_columns
+            else None
+            for col_idx in range(12)
+        ],
         group_headers=[
             (0, 3, "Women Relay"),
             (3, 6, "Men Relay"),
@@ -3559,12 +3695,22 @@ def _strip_decimal_zero_scores(rows: list[dict]) -> None:
         row["Score"] = _format_score_value(number)
 
 
-def _nation_display_cells(row: dict | None, idx: int) -> list[str]:
+def _nation_display_cells(
+    row: dict | None,
+    idx: int,
+    leader_points: float | None,
+) -> list[str]:
     if not row:
         return ["-", "-", "-"]
     rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(".")
     country = _normalize_team_name(row)
-    points = str(row.get("Score") or row.get("Points") or "0")
+    points_text = _row_points_text(row)
+    points = _standings_points_text(
+        points_text,
+        _parse_points_value(points_text),
+        leader_points,
+        gap_formatter=lambda value: _format_nations_points(value),
+    )
     return [rank, country, points]
 
 
@@ -3617,16 +3763,36 @@ def _render_nations_tables(
         return
 
     max_rows = max(len(women_rows), len(men_rows), len(all_rows))
+    women_leader_points = (
+        _parse_points_value(_row_points_text(women_rows[0])) if women_rows else None
+    )
+    men_leader_points = (
+        _parse_points_value(_row_points_text(men_rows[0])) if men_rows else None
+    )
+    all_leader_points = (
+        _parse_points_value(_row_points_text(all_rows[0])) if all_rows else None
+    )
     combined_rows: list[list[str]] = []
     for idx in range(max_rows):
         combined_rows.append(
             _nation_display_cells(
-                women_rows[idx] if idx < len(women_rows) else None, idx
+                women_rows[idx] if idx < len(women_rows) else None,
+                idx,
+                women_leader_points,
             )
-            + _nation_display_cells(men_rows[idx] if idx < len(men_rows) else None, idx)
-            + _nation_display_cells(all_rows[idx] if idx < len(all_rows) else None, idx)
+            + _nation_display_cells(
+                men_rows[idx] if idx < len(men_rows) else None,
+                idx,
+                men_leader_points,
+            )
+            + _nation_display_cells(
+                all_rows[idx] if idx < len(all_rows) else None,
+                idx,
+                all_leader_points,
+            )
         )
 
+    point_columns = {2, 5, 8}
     render_table(
         [
             "Rank",
@@ -3653,6 +3819,15 @@ def _render_nations_tables(
             "right",
         ],
         column_separators={3, 6},
+        cell_formatters=[
+            _standings_points_cell_formatter(
+                [str(row[col_idx]) for row in combined_rows],
+                pretty=True,
+            )
+            if col_idx in point_columns
+            else None
+            for col_idx in range(9)
+        ],
         group_headers=[
             (0, 3, "Women"),
             (3, 6, "Men"),
@@ -3680,25 +3855,30 @@ def _build_snapshot_athlete_standings_lines(
         disc: {} for disc in ("SP", "PU", "IN", "MS")
     }
     discipline_leader_by_disc: dict[str, str] = {}
+    discipline_leader_points_by_disc: dict[str, float] = {}
     for disc in ("SP", "PU", "IN", "MS"):
         rows_for_disc = discipline_rows.get(disc, [])
         if rows_for_disc:
             leader_id = _row_ibu_id(rows_for_disc[0])
             if leader_id:
                 discipline_leader_by_disc[disc] = leader_id
+            discipline_leader_points_by_disc[disc] = _parse_points_value(
+                _row_points_text(rows_for_disc[0])
+            )
         for row in rows_for_disc:
             ibu_id = _row_ibu_id(row)
             if not ibu_id:
                 continue
-            value = str(row.get("Score") or row.get("Points") or "0").strip()
+            value = _row_points_text(row)
             disc_points_by_id[disc][ibu_id] = value
 
     total_leader_id = _row_ibu_id(total_rows[0]) if total_rows else ""
+    total_leader_points = (
+        _parse_points_value(_row_points_text(total_rows[0])) if total_rows else None
+    )
 
     athlete_ids = [_row_ibu_id(row) for row in display_rows if _row_ibu_id(row)]
     age_display_by_id: dict[str, str] = {}
-    u23_snapshot_ids: set[str] = set()
-    best_u23_ids: set[str] = set()
     if athlete_ids:
         bios = _prefetch_bios(athlete_ids)
         for ibu_id in dict.fromkeys(athlete_ids):
@@ -3713,49 +3893,9 @@ def _build_snapshot_athlete_standings_lines(
             age_text = _extract_age_text(bio)
             age_display_by_id[ibu_id] = age_text or "-"
 
-    # Detect U23 athletes: prefer Groups field (CupResults), fall back to IBUId birth year.
-    for row in total_rows:
-        ibu_id = _row_ibu_id(row)
-        if not ibu_id:
-            continue
-        if _is_best_u23_row(row):
-            best_u23_ids.add(ibu_id)
-        if str(row.get("Groups") or "").strip().upper() == "U23":
-            u23_snapshot_ids.add(ibu_id)
-        elif u23_cutoff_year is not None:
-            birth_year = _birth_year_from_ibu_id(ibu_id)
-            if birth_year is not None and birth_year >= u23_cutoff_year:
-                u23_snapshot_ids.add(ibu_id)
-
-    for disc in ("SP", "PU", "IN", "MS"):
-        for row in discipline_rows.get(disc, []):
-            ibu_id = _row_ibu_id(row)
-            if ibu_id and _is_best_u23_row(row):
-                best_u23_ids.add(ibu_id)
-
-    if not best_u23_ids and u23_snapshot_ids:
-        best_u23_score: float | None = None
-        for row in total_rows:
-            ibu_id = _row_ibu_id(row)
-            if ibu_id not in u23_snapshot_ids:
-                continue
-            score = _row_points_value(row)
-            if best_u23_score is None or score > best_u23_score + 1e-9:
-                best_u23_score = score
-                best_u23_ids = {ibu_id}
-            elif best_u23_score is not None and abs(score - best_u23_score) <= 1e-9:
-                best_u23_ids.add(ibu_id)
-
-    def _score_or_dash(value: str) -> str:
-        text = str(value or "").strip()
-        if not text:
-            return "-"
-        try:
-            if float(text) == 0.0:
-                return "-"
-        except ValueError:
-            pass
-        return text
+    best_u23_ids, u23_snapshot_ids = _resolve_snapshot_u23_ids(
+        total_rows, u23_cutoff_year
+    )
 
     def _is_discipline_leader(ibu_id: str) -> bool:
         if not ibu_id:
@@ -3815,13 +3955,37 @@ def _build_snapshot_athlete_standings_lines(
             return name + " " + " ".join(markers)
         return name
 
+    def _format_points_with_gap(
+        value: str,
+        leader_points: float | None,
+    ) -> str:
+        text = str(value or "").strip()
+        if not text:
+            return "-"
+        try:
+            points_value = float(text)
+        except ValueError:
+            return text
+        if points_value == 0.0:
+            return "-"
+        return _standings_points_text(
+            _format_score_value(points_value),
+            points_value,
+            leader_points,
+        )
+
     row_styles: list[str] = []
     table_rows: list[list[str]] = []
     for idx, row in enumerate(display_rows):
         rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(".")
         ibu_id = _row_ibu_id(row)
         nat = str(row.get("Nat") or "")
-        total = str(row.get("Score") or row.get("Points") or "0")
+        total_raw = _row_points_text(row)
+        total = _standings_points_text(
+            total_raw,
+            _parse_points_value(total_raw),
+            total_leader_points,
+        )
         age_display = age_display_by_id.get(ibu_id, "-")
         row_styles.append("gold" if ibu_id == total_leader_id else "")
         table_rows.append(
@@ -3831,10 +3995,22 @@ def _build_snapshot_athlete_standings_lines(
                 nat,
                 age_display,
                 total,
-                _score_or_dash(disc_points_by_id["SP"].get(ibu_id, "0")),
-                _score_or_dash(disc_points_by_id["PU"].get(ibu_id, "0")),
-                _score_or_dash(disc_points_by_id["IN"].get(ibu_id, "0")),
-                _score_or_dash(disc_points_by_id["MS"].get(ibu_id, "0")),
+                _format_points_with_gap(
+                    disc_points_by_id["SP"].get(ibu_id, "0"),
+                    discipline_leader_points_by_disc.get("SP"),
+                ),
+                _format_points_with_gap(
+                    disc_points_by_id["PU"].get(ibu_id, "0"),
+                    discipline_leader_points_by_disc.get("PU"),
+                ),
+                _format_points_with_gap(
+                    disc_points_by_id["IN"].get(ibu_id, "0"),
+                    discipline_leader_points_by_disc.get("IN"),
+                ),
+                _format_points_with_gap(
+                    disc_points_by_id["MS"].get(ibu_id, "0"),
+                    discipline_leader_points_by_disc.get("MS"),
+                ),
             ]
         )
 
@@ -3875,11 +4051,36 @@ def _build_snapshot_athlete_standings_lines(
                     _name_formatter_for(display_rows),
                     _secondary_formatter_for(display_rows),
                     _secondary_formatter_for(display_rows),
-                    None,
-                    _make_disc_value_formatter("SP"),
-                    _make_disc_value_formatter("PU"),
-                    _make_disc_value_formatter("IN"),
-                    _make_disc_value_formatter("MS"),
+                    _standings_points_cell_formatter(
+                        [row[4] for row in table_rows],
+                        pretty=pretty,
+                        point_formatter=lambda cell, row_idx: (
+                            Color.gold(cell)
+                            if _row_ibu_id(display_rows[row_idx]) == total_leader_id
+                            and Color.enabled()
+                            else cell
+                        ),
+                    ),
+                    _standings_points_cell_formatter(
+                        [row[5] for row in table_rows],
+                        pretty=pretty,
+                        point_formatter=_make_disc_value_formatter("SP"),
+                    ),
+                    _standings_points_cell_formatter(
+                        [row[6] for row in table_rows],
+                        pretty=pretty,
+                        point_formatter=_make_disc_value_formatter("PU"),
+                    ),
+                    _standings_points_cell_formatter(
+                        [row[7] for row in table_rows],
+                        pretty=pretty,
+                        point_formatter=_make_disc_value_formatter("IN"),
+                    ),
+                    _standings_points_cell_formatter(
+                        [row[8] for row in table_rows],
+                        pretty=pretty,
+                        point_formatter=_make_disc_value_formatter("MS"),
+                    ),
                 ]
                 if pretty
                 else None
@@ -3897,7 +4098,12 @@ def _build_snapshot_athlete_standings_lines(
             for idx, row in enumerate(u23_rows_display):
                 wc_rank = str(_row_rank_value(row, idx + 1))
                 nat = str(row.get("Nat") or "")
-                total = str(row.get("Score") or row.get("Points") or "0")
+                total_raw = _row_points_text(row)
+                total = _standings_points_text(
+                    total_raw,
+                    _parse_points_value(total_raw),
+                    _parse_points_value(_row_points_text(u23_rows_display[0])),
+                )
                 u23_table_rows.append(
                     [str(idx + 1), wc_rank, _name_with_markers(row), nat, total]
                 )
@@ -3921,7 +4127,17 @@ def _build_snapshot_athlete_standings_lines(
                             _secondary_formatter_for(u23_rows_display),
                             _name_formatter_for(u23_rows_display),
                             _secondary_formatter_for(u23_rows_display),
-                            None,
+                            _standings_points_cell_formatter(
+                                [row[4] for row in u23_table_rows],
+                                pretty=pretty,
+                                point_formatter=lambda cell, row_idx: (
+                                    Color.gold(cell)
+                                    if _row_ibu_id(u23_rows_display[row_idx])
+                                    == total_leader_id
+                                    and Color.enabled()
+                                    else cell
+                                ),
+                            ),
                         ]
                         if pretty
                         else None
@@ -4008,6 +4224,418 @@ def _render_snapshot_athlete_standings_tables(
     if left_u23 or right_u23:
         _print_preevent_heading(3, "U23", args)
         _print_side_by_side_table_pair(left_title, left_u23, right_title, right_u23)
+
+
+def _resolve_snapshot_u23_ids(
+    total_rows: list[dict],
+    u23_cutoff_year: int | None,
+) -> tuple[set[str], set[str]]:
+    best_u23_ids: set[str] = set()
+    u23_snapshot_ids: set[str] = set()
+
+    for row in total_rows:
+        ibu_id = _row_ibu_id(row)
+        if not ibu_id:
+            continue
+        if _is_best_u23_row(row):
+            best_u23_ids.add(ibu_id)
+        if str(row.get("Groups") or "").strip().upper() == "U23":
+            u23_snapshot_ids.add(ibu_id)
+            continue
+        if u23_cutoff_year is None:
+            continue
+        birth_year = _birth_year_from_ibu_id(ibu_id)
+        if birth_year is not None and birth_year >= u23_cutoff_year:
+            u23_snapshot_ids.add(ibu_id)
+
+    if best_u23_ids or not u23_snapshot_ids:
+        return best_u23_ids, u23_snapshot_ids
+
+    best_u23_score: float | None = None
+    for row in total_rows:
+        ibu_id = _row_ibu_id(row)
+        if ibu_id not in u23_snapshot_ids:
+            continue
+        score = _row_points_value(row)
+        if best_u23_score is None or score > best_u23_score + 1e-9:
+            best_u23_score = score
+            best_u23_ids = {ibu_id}
+        elif best_u23_score is not None and abs(score - best_u23_score) <= 1e-9:
+            best_u23_ids.add(ibu_id)
+    return best_u23_ids, u23_snapshot_ids
+
+
+def _resolve_scope_u23_leader_ids(
+    rows: list[dict],
+    u23_cutoff_year: int | None,
+) -> set[str]:
+    leader_ids: set[str] = set()
+    u23_ids: set[str] = set()
+
+    for row in rows:
+        ibu_id = _row_ibu_id(row)
+        if not ibu_id:
+            continue
+        if _is_best_u23_row(row):
+            leader_ids.add(ibu_id)
+        if str(row.get("Groups") or "").strip().upper() == "U23":
+            u23_ids.add(ibu_id)
+            continue
+        if u23_cutoff_year is None:
+            continue
+        birth_year = _birth_year_from_ibu_id(ibu_id)
+        if birth_year is not None and birth_year >= u23_cutoff_year:
+            u23_ids.add(ibu_id)
+
+    if leader_ids or not u23_ids:
+        return leader_ids
+
+    best_u23_score: float | None = None
+    for row in rows:
+        ibu_id = _row_ibu_id(row)
+        if ibu_id not in u23_ids:
+            continue
+        score = _row_points_value(row)
+        if best_u23_score is None or score > best_u23_score + 1e-9:
+            best_u23_score = score
+            leader_ids = {ibu_id}
+        elif best_u23_score is not None and abs(score - best_u23_score) <= 1e-9:
+            leader_ids.add(ibu_id)
+    return leader_ids
+
+
+def _render_snapshot_athlete_standings_sections(
+    athlete_rows: dict[str, dict[str, list[dict]]],
+    args: argparse.Namespace,
+    reference_date: datetime.date | None = None,
+    u23_cutoff_year: int | None = None,
+) -> None:
+    pretty = is_pretty_output(args)
+    output_format = get_output_format(args)
+    disc_order = ["TS", "SP", "PU", "IN", "MS"]
+    section_titles = {
+        "TS": "World Cup Total Score",
+        "SP": "World Cup Sprint Score",
+        "PU": "World Cup Pursuit Score",
+        "IN": "World Cup Individual Score",
+        "MS": "World Cup Mass Start Score",
+    }
+    cat_labels = {"SW": "Women", "SM": "Men"}
+
+    total_leader_by_cat: dict[str, str] = {}
+    leader_points_by_cat_scope: dict[str, dict[str, float]] = {"SW": {}, "SM": {}}
+    discipline_leaders_by_cat: dict[str, dict[str, str]] = {"SW": {}, "SM": {}}
+    u23_scope_leaders_by_cat: dict[str, dict[str, set[str]]] = {"SW": {}, "SM": {}}
+    best_u23_ids_by_cat: dict[str, set[str]] = {"SW": set(), "SM": set()}
+    u23_all_ids_by_cat: dict[str, set[str]] = {"SW": set(), "SM": set()}
+    age_display_by_id: dict[str, str] = {}
+
+    athlete_ids_for_age: list[str] = []
+    for cat_id in ("SW", "SM"):
+        cat_rows = athlete_rows.get(cat_id, {})
+        for scope in disc_order:
+            for row in cat_rows.get(scope, [])[:10]:
+                ibu_id = _row_ibu_id(row)
+                if ibu_id:
+                    athlete_ids_for_age.append(ibu_id)
+    if athlete_ids_for_age:
+        bios = _prefetch_bios(list(dict.fromkeys(athlete_ids_for_age)))
+        for ibu_id in dict.fromkeys(athlete_ids_for_age):
+            bio = bios.get(ibu_id, {})
+            if reference_date is not None:
+                birth_date = _extract_birth_date(bio)
+                if birth_date is not None:
+                    age_display_by_id[ibu_id] = str(
+                        _age_on_date(birth_date, reference_date)
+                    )
+                    continue
+            age_text = _extract_age_text(bio)
+            age_display_by_id[ibu_id] = age_text or "-"
+
+    for cat_id in ("SW", "SM"):
+        cat_rows = athlete_rows.get(cat_id, {})
+        total_rows = cat_rows.get("TS", [])
+        total_leader_by_cat[cat_id] = _row_ibu_id(total_rows[0]) if total_rows else ""
+        if total_rows:
+            leader_points_by_cat_scope[cat_id]["TS"] = _parse_points_value(
+                _row_points_text(total_rows[0])
+            )
+        for disc in ("SP", "PU", "IN", "MS"):
+            rows_for_disc = cat_rows.get(disc, [])
+            if not rows_for_disc:
+                continue
+            leader_id = _row_ibu_id(rows_for_disc[0])
+            if leader_id:
+                discipline_leaders_by_cat[cat_id][disc] = leader_id
+            leader_points_by_cat_scope[cat_id][disc] = _parse_points_value(
+                _row_points_text(rows_for_disc[0])
+            )
+            u23_scope_leaders_by_cat[cat_id][disc] = _resolve_scope_u23_leader_ids(
+                rows_for_disc, u23_cutoff_year
+            )
+        (
+            best_u23_ids_by_cat[cat_id],
+            u23_all_ids_by_cat[cat_id],
+        ) = _resolve_snapshot_u23_ids(total_rows, u23_cutoff_year)
+
+    def _name_with_markers(row: dict, cat_id: str) -> str:
+        name = str(row.get("Name") or row.get("ShortName") or "")
+        ibu_id = _row_ibu_id(row)
+        if not pretty or not ibu_id:
+            return name
+        markers: list[str] = []
+        if ibu_id == total_leader_by_cat.get(cat_id, ""):
+            markers.append(GENERAL_LEADER_MARKER)
+        for disc in ("SP", "PU", "IN", "MS"):
+            if discipline_leaders_by_cat.get(cat_id, {}).get(disc) == ibu_id:
+                markers.append(DISCIPLINE_LEADER_MARKER)
+        if ibu_id in best_u23_ids_by_cat.get(cat_id, set()):
+            markers.append(U23_LEADER_MARKER)
+        if markers:
+            return (name + " " + " ".join(markers)).strip()
+        return name
+
+    def _capture_table(render_fn: Callable[[], None]) -> list[str]:
+        buf = _TtyPreservingBuffer(sys.stdout)
+        with contextlib.redirect_stdout(buf):
+            render_fn()
+        return buf.getvalue().rstrip("\n").split("\n")
+
+    def _apply_scope_leader_color(
+        cell_str: str,
+        row: dict,
+        cat_id: str,
+        scope_key: str,
+        *,
+        bold_secondary: bool,
+    ) -> str:
+        if not pretty or not Color.enabled():
+            return cell_str
+        ibu_id = _row_ibu_id(row)
+        if not ibu_id:
+            return cell_str
+        if ibu_id == total_leader_by_cat.get(cat_id, ""):
+            return Color.gold(cell_str)
+        if (
+            scope_key != "TS"
+            and discipline_leaders_by_cat.get(cat_id, {}).get(scope_key) == ibu_id
+        ):
+            return Color.rgb(cell_str, Color.LIGHT_GOLD, bold=bold_secondary)
+        return cell_str
+
+    def _secondary_formatter_for(
+        rows: list[dict], cat_id: str, scope_key: str
+    ) -> Callable[[str, int], str]:
+        def formatter(cell_str: str, row_idx: int) -> str:
+            return _apply_scope_leader_color(
+                cell_str,
+                rows[row_idx],
+                cat_id,
+                scope_key,
+                bold_secondary=False,
+            )
+
+        return formatter
+
+    def _name_formatter_for(
+        rows: list[dict], cat_id: str, scope_key: str
+    ) -> Callable[[str, int], str]:
+        def _is_scope_u23_leader(row: dict) -> bool:
+            if scope_key == "TS":
+                return False
+            ibu_id = _row_ibu_id(row)
+            if not ibu_id:
+                return False
+            return ibu_id in u23_scope_leaders_by_cat.get(cat_id, {}).get(
+                scope_key, set()
+            )
+
+        def _format_name_base(cell_str: str, row_idx: int) -> str:
+            row = rows[row_idx]
+            formatted = _apply_scope_leader_color(
+                cell_str,
+                row,
+                cat_id,
+                scope_key,
+                bold_secondary=True,
+            )
+            if (
+                formatted == cell_str
+                and pretty
+                and Color.enabled()
+                and _is_scope_u23_leader(row)
+            ):
+                return f"{Color.BOLD}{cell_str}{Color.RESET}"
+            return formatted
+
+        def formatter(cell_str: str, row_idx: int) -> str:
+            return _format_leader_markers(cell_str, row_idx, _format_name_base)
+
+        return formatter
+
+    def _build_main_table_lines(cat_id: str, scope_key: str) -> list[str]:
+        rows = athlete_rows.get(cat_id, {}).get(scope_key, [])[:10]
+        if not rows:
+            return []
+        table_rows: list[list[str]] = []
+        row_styles = [
+            "gold" if scope_key == "TS" and idx == 0 else "" for idx in range(len(rows))
+        ]
+        for idx, row in enumerate(rows):
+            rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(".")
+            ibu_id = _row_ibu_id(row)
+            points_text = _row_points_text(row)
+            table_rows.append(
+                [
+                    rank,
+                    _name_with_markers(row, cat_id),
+                    str(row.get("Nat") or ""),
+                    age_display_by_id.get(ibu_id, "-"),
+                    _standings_points_text(
+                        points_text,
+                        _parse_points_value(points_text),
+                        leader_points_by_cat_scope.get(cat_id, {}).get(scope_key),
+                    ),
+                ]
+            )
+        return _capture_table(
+            lambda: render_table(
+                ["Rank", "Athlete", "Nat", "Age", "Points"],
+                table_rows,
+                output_format=output_format,
+                alignments=["right", "left", "left", "right", "right"],
+                row_styles=row_styles if pretty else None,
+                cell_formatters=(
+                    [
+                        _secondary_formatter_for(rows, cat_id, scope_key),
+                        _name_formatter_for(rows, cat_id, scope_key),
+                        _secondary_formatter_for(rows, cat_id, scope_key),
+                        _secondary_formatter_for(rows, cat_id, scope_key),
+                        _standings_points_cell_formatter(
+                            [row[4] for row in table_rows],
+                            pretty=pretty,
+                            point_formatter=_secondary_formatter_for(
+                                rows, cat_id, scope_key
+                            ),
+                        ),
+                    ]
+                    if pretty
+                    else None
+                ),
+                column_separators={4},
+            )
+        )
+
+    def _build_u23_table_lines(cat_id: str, scope_key: str) -> list[str]:
+        rows = [
+            row
+            for row in athlete_rows.get(cat_id, {}).get(scope_key, [])
+            if _row_ibu_id(row) in u23_all_ids_by_cat.get(cat_id, set())
+        ][:10]
+        if not rows:
+            return []
+        table_rows: list[list[str]] = []
+        u23_leader_points = (
+            _parse_points_value(_row_points_text(rows[0])) if rows else None
+        )
+        for idx, row in enumerate(rows):
+            wc_rank = str(row.get("Rank") or row.get("Standing") or idx + 1).rstrip(".")
+            points_text = _row_points_text(row)
+            table_rows.append(
+                [
+                    str(idx + 1),
+                    wc_rank,
+                    _name_with_markers(row, cat_id),
+                    str(row.get("Nat") or ""),
+                    _standings_points_text(
+                        points_text,
+                        _parse_points_value(points_text),
+                        u23_leader_points,
+                    ),
+                ]
+            )
+        return _capture_table(
+            lambda: render_table(
+                ["Rank", "WC", "Athlete", "Nat", "Points"],
+                table_rows,
+                output_format=output_format,
+                alignments=["right", "right", "left", "left", "right"],
+                row_styles=(["gold"] + [""] * (len(rows) - 1)) if pretty else None,
+                cell_formatters=(
+                    [
+                        _secondary_formatter_for(rows, cat_id, scope_key),
+                        _secondary_formatter_for(rows, cat_id, scope_key),
+                        _name_formatter_for(rows, cat_id, scope_key),
+                        _secondary_formatter_for(rows, cat_id, scope_key),
+                        _standings_points_cell_formatter(
+                            [row[4] for row in table_rows],
+                            pretty=pretty,
+                            point_formatter=_secondary_formatter_for(
+                                rows, cat_id, scope_key
+                            ),
+                        ),
+                    ]
+                    if pretty
+                    else None
+                ),
+                column_separators={2, 4},
+            )
+        )
+
+    if not any(
+        athlete_rows.get(cat_id, {}).get(scope, [])
+        for scope in disc_order
+        for cat_id in ("SW", "SM")
+    ):
+        print("none")
+        _print_blank_lines(2)
+        return
+
+    for scope_key in disc_order:
+        _print_preevent_heading(3, section_titles[scope_key], args)
+        women_main = _build_main_table_lines("SW", scope_key)
+        men_main = _build_main_table_lines("SM", scope_key)
+        if pretty:
+            if not women_main and not men_main:
+                print("none")
+                _print_blank_lines(2)
+                continue
+            women_u23 = _build_u23_table_lines("SW", scope_key)
+            men_u23 = _build_u23_table_lines("SM", scope_key)
+            table_specs: list[tuple[str, list[str]]] = [
+                ("Women", women_main),
+                ("Men", men_main),
+            ]
+            if women_u23 or men_u23:
+                table_specs.extend(
+                    [
+                        ("U23 Women", women_u23),
+                        ("U23 Men", men_u23),
+                    ]
+                )
+            _print_multi_table_block(table_specs)
+            continue
+
+        for cat_id in ("SW", "SM"):
+            _print_preevent_heading(4, cat_labels[cat_id], args)
+            lines = _build_main_table_lines(cat_id, scope_key)
+            if not lines:
+                print("none")
+            else:
+                print("\n".join(lines))
+            _print_blank_lines(2)
+
+        women_u23 = _build_u23_table_lines("SW", scope_key)
+        men_u23 = _build_u23_table_lines("SM", scope_key)
+        if women_u23 or men_u23:
+            _print_preevent_heading(4, "U23", args)
+            for cat_id, lines in (("SW", women_u23), ("SM", men_u23)):
+                _print_preevent_heading(5, cat_labels[cat_id], args)
+                if not lines:
+                    print("none")
+                else:
+                    print("\n".join(lines))
+                _print_blank_lines(2)
 
 
 def _render_preevent_agenda(
@@ -4278,11 +4906,9 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
             2, PREEVENT_SECTION_TITLES[PREEVENT_SECTION_ATHLETE_STANDINGS], args
         )
         athlete_rows = cast(dict[str, dict[str, list[dict]]], standings["athlete"])
-        athlete_tables = [
-            ("Women", athlete_rows["SW"]),
-            ("Men", athlete_rows["SM"]),
-        ]
-        if not any(rows_by_disc.get("TS") for _title, rows_by_disc in athlete_tables):
+        if not any(
+            athlete_rows.get(cat_id, {}).get("TS", []) for cat_id in ("SW", "SM")
+        ):
             print("none")
             _print_blank_lines(2)
         else:
@@ -4290,8 +4916,8 @@ def handle_brief_preevent(args: argparse.Namespace) -> int:
             u23_snap_cutoff = (
                 (season_end_yr - 23) if season_end_yr is not None else None
             )
-            _render_snapshot_athlete_standings_tables(
-                athlete_tables,
+            _render_snapshot_athlete_standings_sections(
+                athlete_rows,
                 args,
                 reference_date=cutoff_dt.date(),
                 u23_cutoff_year=u23_snap_cutoff,
@@ -4774,8 +5400,8 @@ def handle_brief_postseason(args: argparse.Namespace) -> int:
 def handle_brief_startlist(args: argparse.Namespace) -> int:
     """Display startlist analysis (before a race).
 
-    Shows sections 1-13 from the startlist analysis (World Cup races).
-    Olympic races show Olympic history sections instead.
+    Shows the brief startlist section set, including standings, history,
+    decorated-athlete tables, and major-event medal sections where applicable.
     """
     snapshot_mode = False
     snapshot_cutoff_dt: datetime.datetime | None = None
@@ -5632,19 +6258,29 @@ def _print_side_by_side_table_pair(
     right_label: str,
     right_lines: list[str],
 ) -> None:
-    table_sep = "  │  "
-    left_lines_out = left_lines if left_lines else ["none"]
-    right_lines_out = right_lines if right_lines else ["none"]
-    left_width = max((_display_width(line) for line in left_lines_out), default=0)
-    right_width = max((_display_width(line) for line in right_lines_out), default=0)
-    left_header = Color.dim(left_label.upper().center(left_width))
-    right_header = Color.dim(right_label.upper().center(right_width))
-    print(left_header + table_sep + right_header)
-    print(
-        "\n".join(
-            _merge_tables_side_by_side(left_lines_out, right_lines_out, sep=table_sep)
-        )
+    _print_multi_table_block(
+        [
+            (left_label, left_lines),
+            (right_label, right_lines),
+        ]
     )
+
+
+def _print_multi_table_block(table_specs: list[tuple[str, list[str]]]) -> None:
+    table_sep = "  │  "
+    tables_out = [lines if lines else ["none"] for _label, lines in table_specs]
+    widths = [
+        max((_display_width(line) for line in lines), default=0) for lines in tables_out
+    ]
+    header = table_sep.join(
+        Color.dim(label.upper().center(width))
+        for (label, _lines), width in zip(table_specs, widths)
+    )
+    print(header)
+    merged = tables_out[0]
+    for next_lines in tables_out[1:]:
+        merged = _merge_tables_side_by_side(merged, next_lines, sep=table_sep)
+    print("\n".join(merged))
     _print_blank_lines(2)
 
 
@@ -6230,7 +6866,12 @@ def _render_postevent_decorated_delta_split_tables(
             rows,
             output_format=output_format,
             column_separators={3, 8, 13},
-            group_headers=[(3, 8, "All"), (8, 13, "Individual"), (13, 18, "Team")],
+            group_headers=[
+                (0, 3, "Info"),
+                (3, 8, "All"),
+                (8, 13, "Individual"),
+                (13, 18, "Team"),
+            ],
             row_styles=row_styles if is_pretty_output(args) else None,
         )
         _print_blank_lines(2)

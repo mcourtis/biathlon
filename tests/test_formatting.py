@@ -5,6 +5,7 @@ import re
 
 
 from biathlon.formatting import (
+    Color,
     format_seconds,
     format_pct,
     rank_style,
@@ -96,6 +97,24 @@ class TestIsPrettyOutput:
         assert is_pretty_output(args) is False
         assert is_markdown_output(args) is True
         assert get_output_format(args) == "markdown"
+
+
+class TestColor:
+    def test_muted_uses_rgb_without_dim(self, monkeypatch):
+        monkeypatch.setattr(Color, "enabled", classmethod(lambda cls: True))
+
+        out = Color.muted("Muted")
+
+        assert out == "\x1b[38;2;150;150;150mMuted\x1b[0m"
+        assert "\x1b[2m" not in out
+
+    def test_muted_red_uses_rgb_without_dim(self, monkeypatch):
+        monkeypatch.setattr(Color, "enabled", classmethod(lambda cls: True))
+
+        out = Color.muted_red("(-35)")
+
+        assert out == "\x1b[38;2;196;118;118m(-35)\x1b[0m"
+        assert "\x1b[2m" not in out
 
 
 class TestRenderTableMarkdown:

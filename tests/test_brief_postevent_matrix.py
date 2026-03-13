@@ -280,6 +280,66 @@ def test_handle_brief_postevent_renders_decorated_major_events_section(monkeypat
     assert rendered_titles == ["Most Decorated Athletes at World Cup / WCH / OWG"]
 
 
+def test_render_postevent_decorated_tables_add_info_group_header(monkeypatch):
+    captured: dict[str, object] = {}
+
+    def fake_build_rows(
+        after_rows,
+        before_rows,
+        gender_code,
+        limit=10,
+        colorize_flags=False,
+        after_row_styles=None,
+    ):
+        assert gender_code == "F"
+        return [
+            [
+                "1",
+                "Woman A",
+                "SWE",
+                "1",
+                "0",
+                "0",
+                "1",
+                "1",
+                "1",
+                "0",
+                "0",
+                "1",
+                "1",
+                "0",
+                "0",
+                "0",
+                "0",
+                "0",
+            ]
+        ], [""]
+
+    def fake_render_table(headers, rows, **kwargs):
+        captured["headers"] = headers
+        captured["kwargs"] = kwargs
+
+    monkeypatch.setattr(brief, "_build_postevent_decorated_delta_rows", fake_build_rows)
+    monkeypatch.setattr(brief, "render_table", fake_render_table)
+
+    brief._render_postevent_decorated_delta_split_tables(
+        "Most Decorated Athletes at World Cup / WCH / OWG",
+        before_rows=[],
+        after_rows=[],
+        after_row_styles=[],
+        args=argparse.Namespace(format="tsv"),
+        gender_filter="F",
+    )
+
+    assert captured["headers"][:3] == ["#", "Athlete", "Nat"]
+    assert captured["kwargs"]["group_headers"] == [
+        (0, 3, "Info"),
+        (3, 8, "All"),
+        (8, 13, "Individual"),
+        (13, 18, "Team"),
+    ]
+
+
 def test_build_postevent_athlete_delta_rows_reports_rank_and_points_changes():
     before_rows = [
         {"Rank": "1", "IBUId": "A", "Name": "Alpha", "Nat": "NOR", "Score": "100"},
