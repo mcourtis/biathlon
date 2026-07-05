@@ -733,6 +733,8 @@ def get_output_format(args) -> OutputFormat:
         return "tsv"
     if value == "markdown":
         return "markdown"
+    if getattr(args, "tsv", False):
+        return "tsv"
     return "pretty"
 
 
