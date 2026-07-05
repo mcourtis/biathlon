@@ -7,8 +7,11 @@ import textwrap
 import sys
 from collections.abc import Iterable
 from importlib.metadata import version, PackageNotFoundError
+import io
+import contextlib
 
 from .api import BiathlonError
+from .markdown import to_markdown_table
 from .commands import (
     handle_achievements,
     handle_athlete_id,
@@ -106,14 +109,46 @@ def traverse_to_parser(
 
 
 def add_output_format_arg(subparser: argparse.ArgumentParser) -> None:
-    """Add --format flag to a subparser."""
+    """Add output-related flags to a subparser."""
+    subparser.add_argument(
+        "--tsv",
+        action="store_true",
+        help="Output TSV instead of aligned table (legacy)",
+    )
     subparser.add_argument(
         "--format",
-        choices=["tsv", "markdown"],
-        default="",
-        metavar="FORMAT",
-        help="Output format (tsv, markdown). Default: aligned table",
+        "-f",
+        choices=["table", "tsv", "markdown"],
+        default="table",
+        help="Output format: table (default), tsv, or markdown",
     )
+    subparser.add_argument(
+        "--output",
+        "-o",
+        default="",
+        help="Write output to file (default: stdout)",
+    )
+    subparser.add_argument(
+        "--columns",
+        "-C",
+        default="",
+        help="Comma-separated list of column names to include (in this order) when using --format markdown",
+    )
+
+
+def _tsv_to_markdown(tsv_text: str, columns: list[str] | None = None) -> str:
+    """Convert TSV text (headers in first line) into a Markdown table."""
+    lines = [ln for ln in tsv_text.splitlines() if ln.strip()]
+    if not lines:
+        return ""
+    headers = [h.strip() for h in lines[0].split("\t")]
+    rows = [[cell.strip() for cell in ln.split("\t")] for ln in lines[1:]]
+    if columns:
+        requested = [c.strip() for c in columns if c.strip()]
+        indices = [headers.index(name) for name in requested if name in headers]
+        headers = [headers[i] for i in indices]
+        rows = [[r[i] for i in indices] for r in rows]
+    return to_markdown_table(headers, rows)
 
 
 def add_cumulate_args(
@@ -925,6 +960,30 @@ def main(argv: Iterable[str] | None = None) -> int:
         return 2
 
     try:
+        if getattr(args, "format", "table") == "markdown":
+            args.tsv = True
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                ret = args.func(args)
+            tsv_text = buf.getvalue()
+            cols = (
+                [c.strip() for c in args.columns.split(",")]
+                if getattr(args, "columns", "")
+                else None
+            )
+            md = _tsv_to_markdown(tsv_text, columns=cols)
+            if getattr(args, "output", ""):
+                with open(args.output, "w", encoding="utf-8") as f:
+                    f.write(md + "\n")
+            else:
+                print(md)
+            return ret
+
+        if getattr(args, "output", ""):
+            with open(args.output, "w", encoding="utf-8") as f:
+                with contextlib.redirect_stdout(f):
+                    return args.func(args)
+
         return args.func(args)
     except KeyboardInterrupt:
         print()  # Print newline to clean up partial output
